@@ -241,7 +241,7 @@ TEST(DirectoryPickerTest, BuildsScrollableFoldersAndControllerOrKeyboardNameEntr
 }
 
 /**
- * @brief Storage owns screenshot destinations independently of the expanded settings list.
+ * @brief Storage owns screenshot destinations while Display retains stream options, including codec selection.
  */
 TEST(DirectoryPickerTest, KeepsStorageSeparateFromTheExistingDisplayCategory) {
   auto state = open_picker("F:\\Screenshots");
@@ -260,6 +260,7 @@ TEST(DirectoryPickerTest, KeepsStorageSeparateFromTheExistingDisplayCategory) {
   app::handle_command(state, input::UiCommand::activate);
   EXPECT_EQ(state.settings.selectedCategory, app::SettingsCategory::display);
   EXPECT_EQ(state.detailMenu.selected_item()->id, "cycle-stream-video-mode");
+  EXPECT_TRUE(state.detailMenu.select_item_by_id("cycle-video-codec"));
   EXPECT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-presentation"));
   EXPECT_FALSE(state.detailMenu.select_item_by_id("screenshot-directory"));
   EXPECT_EQ(state.settings.controls.screenshotDirectory, "F:\\Screenshots");

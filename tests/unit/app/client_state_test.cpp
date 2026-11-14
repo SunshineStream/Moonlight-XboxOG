@@ -218,6 +218,7 @@ namespace {
     EXPECT_EQ(state.settings.loggingLevel, logging::LogLevel::none);
     EXPECT_EQ(state.settings.streamFramerate, 60);
     EXPECT_EQ(state.settings.streamBitrateKbps, 3000);
+    EXPECT_EQ(state.settings.videoCodec, app::VideoCodecSelection::preferMpeg2);
     EXPECT_TRUE(state.settings.presentation.gpuPresentation);
   }
 
@@ -1516,13 +1517,44 @@ namespace {
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Performance Stats: On");
   }
 
-  /** @brief Switch from the GPU default to software and back while preserving bitrate and statistics. */
+  /**
+   * @brief Codec selection cycles through standard Auto and fixed codecs, then returns to the MPEG-2 preference.
+   */
+  TEST(ClientStateTest, DisplaySettingsCanForceVideoCodec) {
+    app::ClientState state = app::create_initial_state();
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-video-codec"));
+    const std::array<app::VideoCodecSelection, 5> choices {
+      app::VideoCodecSelection::autoDetect,
+      app::VideoCodecSelection::h264,
+      app::VideoCodecSelection::mpeg2,
+      app::VideoCodecSelection::h263p,
+      app::VideoCodecSelection::preferMpeg2,
+    };
+    const std::array<const char *, 5> labels {"Auto", "H.264", "MPEG-2/H.262", "H.263+", "Auto (Prefer MPEG-2)"};
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Codec: Auto (Prefer MPEG-2)");
+    for (std::size_t index = 0; index < choices.size(); ++index) {
+      const app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
+      EXPECT_EQ(update.navigation.activatedItemId, "cycle-video-codec");
+      EXPECT_TRUE(update.persistence.settingsChanged);
+      EXPECT_EQ(state.settings.videoCodec, choices[index]);
+      EXPECT_EQ(state.shell.statusMessage, std::string("Video codec set to ") + labels[index]);
+      ASSERT_NE(state.detailMenu.selected_item(), nullptr);
+      EXPECT_EQ(state.detailMenu.selected_item()->label, std::string("Video Codec: ") + labels[index]);
+    }
+    state.settings.videoCodec = static_cast<app::VideoCodecSelection>(-1);
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.settings.videoCodec, app::VideoCodecSelection::preferMpeg2);
+  }
+
+  /** @brief Switch from the GPU default to software and back while preserving bitrate, codec, and statistics. */
   TEST(ClientStateTest, DisplaySettingsCanSelectSoftwarePresentation) {
     auto state = app::create_initial_state();
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-presentation"));
     ASSERT_TRUE(state.settings.presentation.gpuPresentation);
     state.settings.streamBitrateKbps = 4500;
+    state.settings.videoCodec = app::VideoCodecSelection::mpeg2;
     state.settings.presentation.showPerformanceStats = true;
 
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
@@ -1531,6 +1563,7 @@ namespace {
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: Software");
     EXPECT_EQ(state.settings.streamBitrateKbps, 4500);
+    EXPECT_EQ(state.settings.videoCodec, app::VideoCodecSelection::mpeg2);
     EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
 
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);

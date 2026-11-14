@@ -51,6 +51,7 @@ namespace {
     state.settings.preferredVideoModeSet = settings.preferredVideoModeSet;
     state.settings.streamFramerate = settings.streamFramerate;
     state.settings.streamBitrateKbps = settings.streamBitrateKbps;
+    state.settings.videoCodec = settings.videoCodec;
     state.settings.presentation.gpuPresentation = settings.gpuPresentation;
     state.settings.presentation.gpuBufferCount = settings.gpuBufferCount;
     state.settings.audio.playOnPc = settings.playAudioOnPc;

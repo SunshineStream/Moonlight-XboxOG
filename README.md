@@ -72,6 +72,20 @@ Only the required SVGs and their license are packaged on the ISO.
 No network connection or JavaScript runtime is needed to display the icons on the console.
 
 
+## Video codec selection
+
+**Settings → Display → Video Codec** defaults to **Auto (Prefer MPEG-2)**. Moonlight tries MPEG-2
+when the host advertises it and uses standard automatic negotiation if it is unavailable or the
+MPEG-2 handshake fails. Choose **Auto** for standard negotiation, which prefers H.264, then MPEG-2,
+then H.263+. You can also select H.264, MPEG-2, or H.263+ directly.
+An explicit choice requests only that codec and fails negotiation when it is unavailable.
+Sunshine must enable `mpeg2_mode = 2` or `h263p_mode = 2` to advertise the corresponding legacy codec.
+These Sunshine protocol extensions are available to any client implementing their negotiation and decoding.
+
+The preference is saved as `streaming.video_codec` in the settings file. The default value is
+`"prefer_mpeg2"`. Moonlight also reads the older `streaming.video_decoder` key for compatibility.
+`video_codec` takes precedence when both exist.
+
 ## Video presentation
 
 **Settings → Display → Video Presentation** defaults to **GPU**, which uses NV2A color conversion and
