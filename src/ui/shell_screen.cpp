@@ -2528,7 +2528,7 @@ namespace {
   }
 
   /**
-   * @brief Snapshot persisted shell and stream preferences, including GPU buffering.
+   * @brief Snapshot persisted shell and stream preferences, including codec and GPU buffering.
    * @param state Current client state.
    * @return Settings snapshot ready for TOML serialization.
    */
@@ -2541,6 +2541,7 @@ namespace {
       state.settings.preferredVideoModeSet,
       state.settings.streamFramerate,
       state.settings.streamBitrateKbps,
+      state.settings.videoCodec,
       state.settings.audio.playOnPc,
       state.settings.presentation.showPerformanceStats,
       state.settings.audio.playOnXbox,

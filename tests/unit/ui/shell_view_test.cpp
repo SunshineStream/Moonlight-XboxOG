@@ -396,6 +396,34 @@ namespace {
     EXPECT_EQ(viewModel.content.selectedMenuRowDescription, "Delete only this saved file from disk while leaving the rest of the Moonlight data intact.");
   }
 
+  /**
+   * @brief Display settings show a fixed codec choice and explain the available negotiation modes.
+   */
+  TEST(ShellViewTest, ShowsSelectedCodecInDisplaySettings) {
+    auto state = app::create_initial_state();
+    state.settings.videoCodec = app::VideoCodecSelection::mpeg2;
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::activate);
+    ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::display);
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-video-codec"));
+
+    const auto view = ui::build_shell_view_model(state, {});
+    EXPECT_EQ(view.content.selectedMenuRowLabel, "Video Codec: MPEG-2/H.262");
+    EXPECT_EQ(view.content.selectedMenuRowDescription, "Prefer MPEG-2 for faster decoding, use standard automatic negotiation, or request a specific codec.");
+    bool found = false;
+    for (const auto &row : view.content.detailMenuRows) {
+      if (row.id == "cycle-video-codec") {
+        EXPECT_EQ(row.label, "Video Codec: MPEG-2/H.262");
+        EXPECT_TRUE(row.selected);
+        found = true;
+      }
+    }
+    EXPECT_TRUE(found);
+  }
+
   TEST(ShellViewTest, ShowsSettingDescriptionsForFocusedOptions) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::move_left);

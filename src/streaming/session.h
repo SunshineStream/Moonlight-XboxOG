@@ -51,7 +51,7 @@ namespace streaming {
    *
    * @param window Shared SDL window reused from the shell.
    * @param videoMode Active Xbox video mode.
-   * @param settings Active stream preferences; receives OSK placement changes for persistence on return to the shell.
+   * @param settings Active stream preferences, including the codec. Receives keyboard placement changes for the shell to save.
    * @param target Selected stream and credentials.
    * @param preferredController Controller retained by the shell throughout the session, or nullptr to use the first available device.
    * @param releaseShell Called once to release the shell renderer after staging the startup screen.

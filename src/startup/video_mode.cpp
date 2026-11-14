@@ -39,9 +39,18 @@ namespace startup {
       return left.width == right.width && left.height == right.height;
     }
 
+    /**
+     * @brief Return the pixel area used to compare stream resolutions.
+     * @param videoMode Stream mode to measure.
+     * @return Resolution area in pixels.
+     */
+    int stream_video_mode_area(const VIDEO_MODE &videoMode) {
+      return videoMode.width * videoMode.height;
+    }
+
     bool is_smaller_video_mode(const VIDEO_MODE &left, const VIDEO_MODE &right) {
-      const int leftArea = left.width * left.height;
-      if (const int rightArea = right.width * right.height; leftArea != rightArea) {
+      const int leftArea = stream_video_mode_area(left);
+      if (const int rightArea = stream_video_mode_area(right); leftArea != rightArea) {
         return leftArea < rightArea;
       }
       return left.width < right.width;
