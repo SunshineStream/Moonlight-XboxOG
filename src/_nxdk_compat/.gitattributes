@@ -1,2 +1,3 @@
+# Keep all nxdk compatibility patches portable across Git checkout settings.
 # Empty context lines in unified diffs have a required space prefix.
 *.patch text eol=lf whitespace=-blank-at-eol

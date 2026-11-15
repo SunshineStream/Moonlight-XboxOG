@@ -1,0 +1,29 @@
+Adapt FFmpeg's thread wrapper to the Xbox runtime in a build-directory copy:
+
+- nxdk condition variables own kernel events and require explicit destruction.
+- Desktop Windows thread naming APIs are unavailable on Xbox.
+
+diff --git a/compat/w32pthreads.h b/compat/w32pthreads.h
+--- a/compat/w32pthreads.h
++++ b/compat/w32pthreads.h
+@@ -165,9 +165,10 @@
+     return 0;
+ }
+ 
+-/* native condition variables do not destroy */
++/* nxdk condition variables own kernel events. */
+ static inline int pthread_cond_destroy(pthread_cond_t *cond)
+ {
++    UninitializeConditionVariable(cond);
+     return 0;
+ }
+ 
+@@ -212,7 +213,7 @@
+ 
+ static inline int win32_thread_setname(const char *name)
+ {
+-#if !HAVE_UWP
++#if !HAVE_UWP && !defined(NXDK)
+     typedef HRESULT (WINAPI *SetThreadDescriptionFn)(HANDLE, PCWSTR);
+ 
+     // Although SetThreadDescription lives in kernel32.dll, on Windows Server 2016,

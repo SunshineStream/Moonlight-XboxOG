@@ -1,6 +1,6 @@
 /**
  * @file src/_nxdk_compat/ffmpeg_compat.h
- * @brief Adapt optional FFmpeg file helpers without pretending Xbox has POSIX files.
+ * @brief Adapt optional FFmpeg platform helpers for nxdk.
  *
  * Moonlight supplies compressed data in memory. Normal stdio remains available;
  * descriptors, mapped files and temporary files are outside this decoder build.
@@ -12,6 +12,28 @@
 #include <malloc.h>
 #include <stdio.h>
 #include <sys/types.h>
+
+#ifdef NXDK
+  #ifdef __cplusplus
+extern "C" {
+  #endif
+
+  /**
+   * @brief Declare the POSIX Bessel function referenced by FFmpeg's unused jinc kernel.
+   *
+   * nxdk provides no implementation. The unused static kernel is eliminated, so
+   * this declaration permits parsing without adding a linker reference. An actual
+   * caller will require a Bessel implementation before the Xbox executable can link.
+   *
+   * @param x Function argument.
+   * @return First-kind Bessel function of order one at x.
+   */
+  double j1(double x);
+
+  #ifdef __cplusplus
+}
+  #endif
+#endif
 
 /** @brief Supply the compiler memory fence required by FFmpeg's Win32 thread probe. */
 #define MemoryBarrier() __atomic_thread_fence(__ATOMIC_SEQ_CST)

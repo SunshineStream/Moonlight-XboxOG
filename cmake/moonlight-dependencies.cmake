@@ -1,5 +1,7 @@
 include_guard(GLOBAL)
 
+include("${CMAKE_CURRENT_LIST_DIR}/patch.cmake")
+
 # Disable nxdk's unimplemented math entry points; aligned allocation uses private adapters.
 function(_moonlight_patch_ffmpeg_config_header ffmpeg_config_header)
     if(NOT EXISTS "${ffmpeg_config_header}")
@@ -26,31 +28,6 @@ function(_moonlight_patch_ffmpeg_config_header ffmpeg_config_header)
     endforeach()
 
     file(WRITE "${ffmpeg_config_header}" "${ffmpeg_config_text}")
-endfunction()
-
-# Adapt the upstream thread wrapper only in the build directory. The source
-# include path follows the build path, so FFmpeg finds this private header first.
-# nxdk condition variables own kernel events that require explicit destruction;
-# desktop Windows thread-naming APIs are unavailable on the Xbox runtime.
-function(_moonlight_prepare_ffmpeg_thread_header ffmpeg_source_dir ffmpeg_build_dir)
-    set(thread_header "${ffmpeg_source_dir}/compat/w32pthreads.h")
-    file(READ "${thread_header}" thread_text)
-    string(REPLACE "\r\n" "\n" thread_text "${thread_text}")
-    set(destroy_original "static inline int pthread_cond_destroy(pthread_cond_t *cond)\n{\n")
-    string(FIND "${thread_text}" "${destroy_original}" destroy_position)
-    string(FIND "${thread_text}" "#if !HAVE_UWP\n" naming_position)
-    if(destroy_position EQUAL -1 OR naming_position EQUAL -1)
-        message(FATAL_ERROR "FFmpeg's Windows thread wrapper changed; review the nxdk adaptations")
-    endif()
-    string(REPLACE "${destroy_original}"
-            "${destroy_original}    UninitializeConditionVariable(cond);\n"
-            thread_text "${thread_text}")
-    string(REPLACE "/* native condition variables do not destroy */"
-            "/* nxdk condition variables own kernel events. */" thread_text "${thread_text}")
-    string(REPLACE "#if !HAVE_UWP\n" "#if !HAVE_UWP && !defined(NXDK)\n"
-            thread_text "${thread_text}")
-    file(MAKE_DIRECTORY "${ffmpeg_build_dir}/compat")
-    file(WRITE "${ffmpeg_build_dir}/compat/w32pthreads.h" "${thread_text}")
 endfunction()
 
 # Validate FFmpeg source and support files before attempting a configure.
@@ -102,6 +79,10 @@ function(_moonlight_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
         list(APPEND compat_hashes "${input}=${input_hash}")
     endforeach()
     file(SHA256 "${CMAKE_SOURCE_DIR}/cmake/moonlight-dependencies.cmake" ffmpeg_dependency_manifest_hash)
+    file(SHA256 "${CMAKE_SOURCE_DIR}/cmake/patch.cmake" ffmpeg_patch_helper_hash)
+    set(ffmpeg_patch "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch")
+    file(SHA256 "${ffmpeg_patch}" ffmpeg_patch_hash)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ffmpeg_patch}")
 
     set(signature_inputs
             "FFMPEG_REVISION=${ffmpeg_revision}"
@@ -114,6 +95,8 @@ function(_moonlight_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
             "FFMPEG_CC_WRAPPER_SHA256=${ffmpeg_cc_wrapper_hash}"
             "FFMPEG_CXX_WRAPPER_SHA256=${ffmpeg_cxx_wrapper_hash}"
             "FFMPEG_NASM_WRAPPER_SHA256=${ffmpeg_nasm_wrapper_hash}"
+            "FFMPEG_PATCH_SHA256=${ffmpeg_patch_hash}"
+            "FFMPEG_PATCH_HELPER_SHA256=${ffmpeg_patch_helper_hash}"
             "FFMPEG_DEPENDENCY_MANIFEST_SHA256=${ffmpeg_dependency_manifest_hash}")
     list(JOIN signature_inputs "\n" signature_text)
     string(SHA256 signature "${signature_text}")
@@ -276,7 +259,9 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
 
     file(REMOVE_RECURSE "${ffmpeg_build_dir}" "${ffmpeg_install_dir}")
     file(MAKE_DIRECTORY "${ffmpeg_build_dir}")
-    _moonlight_prepare_ffmpeg_thread_header("${ffmpeg_source_dir}" "${ffmpeg_build_dir}")
+    moonlight_patch_sources("${ffmpeg_source_dir}" "${ffmpeg_build_dir}"
+            "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch"
+            compat/w32pthreads.h)
 
     _moonlight_get_ffmpeg_shell_paths(
             ffmpeg_shell_paths

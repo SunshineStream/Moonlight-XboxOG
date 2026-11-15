@@ -1,45 +1,16 @@
 # Build Moonlight's adapters against unmodified upstream nxdk sources.
 include_guard(GLOBAL)
 
-# Apply the network patch to disposable copies, then publish only changed files.
-function(_moonlight_patch_nxdk_network port patch_file)
-    find_package(Git REQUIRED)
-    set(work "${port}/patch-work")
-    set(port_files
-            lib/net/nforceif/include/arch/sys_arch.h
-            lib/net/nforceif/src/sys_arch.c
-            lib/net/nvnetdrv/nvnetdrv_lwip.c)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${patch_file}")
-    foreach(source IN LISTS port_files)
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${NXDK_DIR}/${source}")
-        configure_file("${NXDK_DIR}/${source}" "${work}/${source}" COPYONLY)
-    endforeach()
-
-    # An explicit work tree confines git apply to these copies, including when
-    # the build directory is inside the Moonlight checkout. Normalize CRLF on
-    # input and write LF so patching is independent of the user's Git settings.
-    execute_process(
-            COMMAND "${GIT_EXECUTABLE}" -c core.autocrlf=input "--work-tree=${work}"
-                apply --whitespace=error "${patch_file}"
-            WORKING_DIRECTORY "${work}"
-            RESULT_VARIABLE patch_result
-            OUTPUT_VARIABLE patch_output
-            ERROR_VARIABLE patch_error)
-    if(NOT patch_result EQUAL 0)
-        message(FATAL_ERROR
-                "Failed to apply Moonlight's nxdk network patch; review it against the selected SDK.\n"
-                "${patch_output}${patch_error}")
-    endif()
-    foreach(source IN LISTS port_files)
-        configure_file("${work}/${source}" "${port}/${source}" COPYONLY)
-    endforeach()
-endfunction()
+include("${CMAKE_CURRENT_LIST_DIR}/patch.cmake")
 
 # Build Moonlight's private network port and the runtime used by dependencies.
 function(moonlight_prepare_nxdk_compat)
     set(compat "${CMAKE_SOURCE_DIR}/src/_nxdk_compat")
     set(port "${CMAKE_CURRENT_BINARY_DIR}/nxdk-compat")
-    _moonlight_patch_nxdk_network("${port}" "${compat}/network/nxdk-network.patch")
+    moonlight_patch_sources("${NXDK_DIR}" "${port}" "${compat}/network/nxdk-network.patch"
+            lib/net/nforceif/include/arch/sys_arch.h
+            lib/net/nforceif/src/sys_arch.c
+            lib/net/nvnetdrv/nvnetdrv_lwip.c)
 
     # opt.h includes this before defining defaults. Keep nxdk's base settings.
     configure_file("${compat}/network/lwipopts.h.in" "${port}/lwipopts.h" @ONLY)
