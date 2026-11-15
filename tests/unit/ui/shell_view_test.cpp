@@ -2,32 +2,250 @@
  * @file tests/unit/ui/shell_view_test.cpp
  * @brief Verifies the shell view renderer and layout helpers.
  */
-// test header include
-#include "src/ui/shell_view.h"
-
-// standard includes
-#include <string>
-#include <vector>
-
-// lib inclues
-#include <lizardbyte/common/testing.h>
-
 // test includes
 #include "tests/support/network_test_constants.h"
 
+#include <lizardbyte/common/testing.h>
+
+// standard includes
+#include <array>
+#include <string>
+#include <vector>
+
+// local includes
+#include "src/ui/shell_view.h"
+
 namespace {
 
+  /**
+   * @brief Keep simultaneous events ordered and target controller dismissal at the newest card.
+   */
+  TEST(ShellViewTest, BuildsAnOrderedNotificationStackWithOneDismissalTarget) {
+    auto state = app::create_initial_state();
+    app::show_notification(state, app::NotificationKind::information, "Library", "Showing saved apps.", 7000U);
+    app::show_notification(state, app::NotificationKind::error, "Settings not saved", "Free some storage and try again.");
+    app::show_notification(state, app::NotificationKind::success, "PC saved", "Select the PC to pair.", 5000U);
+    app::show_notification(state, app::NotificationKind::error, "File not deleted", "Try again after restarting.");
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_TRUE(view.notification.visible);
+    ASSERT_EQ(view.notification.items.size(), 4U);
+    EXPECT_EQ(view.notification.items[0].iconAssetPath, "icons\\info.svg");
+    EXPECT_EQ(view.notification.items[1].iconAssetPath, "icons\\circle-x.svg");
+    EXPECT_EQ(view.notification.items[2].iconAssetPath, "icons\\circle-check.svg");
+    for (std::size_t index = 0; index < 3U; ++index) {
+      EXPECT_TRUE(view.notification.items[index].actions.empty());
+    }
+    ASSERT_EQ(view.notification.items.back().actions.size(), 1U);
+    EXPECT_EQ(view.notification.items.back().actions[0].label, "Dismiss latest");
+    EXPECT_EQ(view.notification.items.back().actions[0].iconAssetPath, "icons\\button-x.svg");
+  }
+
+  /**
+   * @brief Hide a covered stack without discarding outstanding events.
+   */
+  TEST(ShellViewTest, PreservesNotificationsBehindModalsKeypadsAndDiagnostics) {
+    auto state = app::create_initial_state();
+    app::show_notification(state, app::NotificationKind::error, "Storage", "Free some space and try again.");
+    state.modal.id = app::ModalId::support;
+    EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    state.modal.id = app::ModalId::none;
+    state.shell.overlayVisible = true;
+    EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    state.shell.overlayVisible = false;
+    state.shell.activeScreen = app::ScreenId::add_host;
+    state.addHostDraft.keypad.visible = true;
+    EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    state.addHostDraft.keypad.visible = false;
+    EXPECT_TRUE(ui::build_shell_view_model(state, {}).notification.visible);
+    EXPECT_EQ(state.shell.notifications.size(), 1U);
+  }
+
+  /**
+   * @brief Closing a connection-test result never produces a second notification for its diagnostics.
+   */
+  TEST(ShellViewTest, KeepsConnectionTestResultsOutOfTheNotificationQueueAfterDismissal) {
+    for (const bool success : {false, true}) {
+      for (const bool existingNotification : {false, true}) {
+        auto state = app::create_initial_state();
+        app::replace_hosts(state, {{"Office PC", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired}});
+        if (existingNotification) {
+          app::show_notification(state, app::NotificationKind::error, "Storage", "Free some space and try again.");
+        }
+        app::handle_command(state, input::UiCommand::move_down);
+        app::handle_command(state, input::UiCommand::open_context_menu);
+        app::handle_command(state, input::UiCommand::move_down);
+        app::handle_command(state, input::UiCommand::activate);
+        ASSERT_EQ(state.modal.id, app::ModalId::connection_test);
+        app::apply_connection_test_result(state, success, success ? "Received /serverinfo" : "Failed to query /serverinfo");
+        EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+        app::handle_command(state, input::UiCommand::back);
+        const auto view = ui::build_shell_view_model(state, {});
+        EXPECT_EQ(view.notification.visible, existingNotification);
+        EXPECT_EQ(state.shell.notifications.size(), existingNotification ? 1U : 0U);
+        if (existingNotification) {
+          ASSERT_EQ(view.notification.items.size(), 1U);
+          EXPECT_EQ(view.notification.items[0].title, "Storage");
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Setting rows provide their own feedback without adding confirmation cards.
+   */
+  TEST(ShellViewTest, KeepsRoutineSettingChangesInline) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::activate);
+    for (const auto *id : {"cycle-log-level", "cycle-xemu-console-log-level"}) {
+      ASSERT_TRUE(state.detailMenu.select_item_by_id(id));
+      app::handle_command(state, input::UiCommand::activate);
+      EXPECT_FALSE(state.shell.statusMessage.empty());
+      EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    }
+  }
+
+  /**
+   * @brief An empty library reports its fetch failure inline without duplicating it in a card.
+   */
+  TEST(ShellViewTest, ShowsEmptyLibraryFailuresInlineWithoutNotifications) {
+    auto state = app::create_initial_state();
+    const std::string address = test_support::kTestIpv4Addresses[test_support::kIpOffice];
+    app::replace_hosts(state, {{"Office PC", address, 0, app::PairingState::paired}});
+    ASSERT_TRUE(app::begin_selected_host_app_browse(state, false));
+    app::apply_app_list_result(state, address, app::DEFAULT_HOST_PORT, {}, 0U, false, "No server response");
+    const auto view = ui::build_shell_view_model(state, {});
+    EXPECT_FALSE(view.notification.visible);
+    ASSERT_EQ(view.content.bodyLines.size(), 1U);
+    EXPECT_EQ(view.content.bodyLines[0], "No server response");
+  }
+
+  /**
+   * @brief Host form actions have icons and entered text remains visible inside the keypad.
+   */
+  TEST(ShellViewTest, DecoratesHostOperationsAndShowsStagedInput) {
+    app::ClientState state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.menuRows.size(), 3U);
+    EXPECT_EQ(view.content.menuRows[0].iconAssetPath, "icons\\network.svg");
+    EXPECT_EQ(view.content.menuRows[1].iconAssetPath, "icons\\hash.svg");
+    state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpOffice];
+    app::handle_command(state, input::UiCommand::none);
+    view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.menuRows.size(), 6U);
+    EXPECT_EQ(view.content.menuRows[2].iconAssetPath, "icons\\activity.svg");
+    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\key-round.svg");
+    EXPECT_EQ(view.content.menuRows[4].iconAssetPath, "icons\\save.svg");
+    state.menu.select_item_by_id("edit-address");
+    app::handle_command(state, input::UiCommand::activate);
+    view = ui::build_shell_view_model(state, {});
+    EXPECT_EQ(view.keypad.value, test_support::kTestIpv4Addresses[test_support::kIpOffice]);
+    state.addHostDraft.activeField = app::AddHostField::port;
+    state.addHostDraft.keypad.stagedInput = "48000";
+    view = ui::build_shell_view_model(state, {});
+    EXPECT_EQ(view.keypad.value, "48000");
+  }
+
+  /**
+   * @brief Every settings category has a recognizable packaged Lucide icon.
+   */
+  TEST(ShellViewTest, DecoratesSettingsCategoriesWithIcons) {
+    app::ClientState state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::activate);
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.menuRows.size(), 4U);
+    EXPECT_EQ(view.content.menuRows[0].iconAssetPath, "icons\\scroll-text.svg");
+    EXPECT_EQ(view.content.menuRows[1].iconAssetPath, "icons\\monitor.svg");
+    EXPECT_EQ(view.content.menuRows[2].iconAssetPath, "icons\\gamepad-2.svg");
+    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\rotate-ccw.svg");
+  }
+
+  /**
+   * @brief Moon phases distinguish pairing and reachability without a green host symbol.
+   */
+  TEST(ShellViewTest, UsesMoonPhasesForHostState) {
+    app::ClientState state = app::create_initial_state();
+    app::replace_hosts(state, {
+                                {"Paired", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired, app::HostReachability::online},
+                                {"Unpaired", test_support::kTestIpv4Addresses[test_support::kIpHostGridA], 0, app::PairingState::not_paired, app::HostReachability::online},
+                                {"Offline", test_support::kTestIpv4Addresses[test_support::kIpLivingRoom], 0, app::PairingState::paired, app::HostReachability::offline},
+                              });
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.hostTiles.size(), 3U);
+    EXPECT_EQ(view.content.hostTiles[0].iconAssetPath, "hosts\\moon-full.svg");
+    EXPECT_EQ(view.content.hostTiles[1].iconAssetPath, "hosts\\moon-half.svg");
+    EXPECT_EQ(view.content.hostTiles[2].iconAssetPath, "hosts\\moon-crescent.svg");
+  }
+
+  /**
+   * @brief Diagnostic status never implicitly becomes a notification, including handled failures.
+   */
+  TEST(ShellViewTest, KeepsDiagnosticStatusOutOfNotifications) {
+    app::ClientState state = app::create_initial_state();
+    for (const char *message : {"Loaded 0 saved host(s)", "Loaded 2 saved host(s)", "Loaded 4 app(s)", "Could not load saved hosts", "Loaded host data contains invalid entries", "Failed to query /serverinfo", "Stream bitrate set to 5 Mbps"}) {
+      state.shell.statusMessage = message;
+      EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    }
+  }
+
+  /**
+   * @brief Count only visible library entries and handle empty, hidden and unpaired collections.
+   */
+  TEST(ShellViewTest, DescribesTheVisibleLibraryInThePageSubtitle) {
+    app::ClientState state = app::create_initial_state();
+    state.shell.activeScreen = app::ScreenId::apps;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Pair your PC to browse its library.");
+    state.hosts.activeLoaded = true;
+    state.hosts.active.pairingState = app::PairingState::paired;
+    state.hosts.active.appListState = app::HostAppListState::ready;
+    state.hosts.active.apps = {{"Desktop", 1}, {"Hidden game", 2}};
+    state.hosts.active.apps[1].hidden = true;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "1 app  /  Ready to stream");
+    state.apps.showHiddenApps = true;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "2 apps  /  Including hidden apps");
+    state.hosts.active.apps.clear();
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "0 apps  /  Including hidden apps");
+    state.hosts.active.pairingState = app::PairingState::not_paired;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Pair your PC to browse its library.");
+  }
+
+  /**
+   * @brief Give each task a short contextual subtitle, including the empty landing page.
+   */
+  TEST(ShellViewTest, GivesEveryTaskAContextualSubtitle) {
+    app::ClientState state = app::create_initial_state();
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Your games. Your PC. On your Xbox.");
+    state.shell.activeScreen = app::ScreenId::home;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Your games. Your PC. On your Xbox.");
+    state.shell.activeScreen = app::ScreenId::settings;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Make yourself at home.");
+    state.shell.activeScreen = app::ScreenId::add_host;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Connect to a PC on your network.");
+    state.shell.activeScreen = app::ScreenId::pair_host;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "A secure connection for your next session.");
+  }
+
+  /**
+   * @brief Shows an inviting heading and actionable first-run host screen.
+   */
   TEST(ShellViewTest, BuildsHostsScreenContentFromTheInitialState) {
     const app::ClientState state = app::create_initial_state();
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
     EXPECT_EQ(viewModel.frame.title, "Moonlight");
-    EXPECT_TRUE(viewModel.frame.pageTitle.empty());
+    EXPECT_EQ(viewModel.frame.pageTitle, "Your PCs");
     ASSERT_EQ(viewModel.content.toolbarButtons.size(), 3U);
+    EXPECT_EQ(viewModel.content.toolbarButtons[0].iconAssetPath, "icons\\settings.svg");
+    EXPECT_EQ(viewModel.content.toolbarButtons[1].iconAssetPath, "icons\\circle-question-mark.svg");
     EXPECT_TRUE(viewModel.content.toolbarButtons[2].selected);
     EXPECT_EQ(viewModel.content.toolbarButtons[2].label, "Add Host");
-    EXPECT_EQ(viewModel.content.toolbarButtons[2].iconAssetPath, "icons\\add-host.svg");
+    EXPECT_EQ(viewModel.content.toolbarButtons[2].iconAssetPath, "icons\\circle-plus.svg");
     ASSERT_FALSE(viewModel.content.bodyLines.empty());
     EXPECT_EQ(viewModel.content.bodyLines.front(), "No PCs have been added yet.");
     ASSERT_GE(viewModel.content.bodyLines.size(), 3U);
@@ -41,6 +259,9 @@ namespace {
     EXPECT_FALSE(viewModel.overlay.visible);
   }
 
+  /**
+   * @brief Preserves host status, focus and concise collection context.
+   */
   TEST(ShellViewTest, ShowsSavedHostsAsTiles) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
@@ -52,18 +273,17 @@ namespace {
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
-    EXPECT_TRUE(viewModel.frame.pageTitle.empty());
+    EXPECT_EQ(viewModel.frame.pageTitle, "Your PCs");
     EXPECT_EQ(viewModel.content.hostColumnCount, 3U);
     ASSERT_EQ(viewModel.content.hostTiles.size(), 2U);
     EXPECT_EQ(viewModel.content.hostTiles[0].displayName, "Living Room PC");
     EXPECT_EQ(viewModel.content.hostTiles[0].statusLabel, "Offline");
-    EXPECT_EQ(viewModel.content.hostTiles[0].iconAssetPath, "icons\\host-monitor-offline.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[0].iconAssetPath, "hosts\\moon-crescent.svg");
     EXPECT_EQ(viewModel.content.hostTiles[1].displayName, "Office PC");
     EXPECT_EQ(viewModel.content.hostTiles[1].statusLabel, "Online");
-    EXPECT_EQ(viewModel.content.hostTiles[1].iconAssetPath, "icons\\host-monitor-online.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[1].iconAssetPath, "hosts\\moon-full.svg");
     EXPECT_TRUE(viewModel.content.hostTiles[1].selected);
-    ASSERT_GE(viewModel.content.bodyLines.size(), 2U);
-    EXPECT_EQ(viewModel.content.bodyLines[1], "Press Y on a controller, or I on a keyboard, for host actions.");
+    EXPECT_EQ(viewModel.frame.subtitle, "Choose a PC to start playing.");
   }
 
   TEST(ShellViewTest, HidesHostMenuFooterActionWhenToolbarIsSelected) {
@@ -80,6 +300,9 @@ namespace {
     EXPECT_EQ(viewModel.frame.footerActions[1].label, "Exit");
   }
 
+  /**
+   * @brief Shows manual connection guidance alongside keypad validation.
+   */
   TEST(ShellViewTest, ShowsKeypadBasedHostEntryInstructionsAndValidation) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::activate);
@@ -94,7 +317,7 @@ namespace {
 
     EXPECT_EQ(viewModel.frame.pageTitle, "Add Host");
     ASSERT_GE(viewModel.content.bodyLines.size(), 5U);
-    EXPECT_EQ(viewModel.content.bodyLines[0], "Manual host entry with a keypad modal.");
+    EXPECT_EQ(viewModel.content.bodyLines[0], "Enter your PC's address to get connected.");
     EXPECT_EQ(viewModel.content.bodyLines[1], "Address: " + std::string(test_support::kTestIpv4Addresses[test_support::kIpHostGridA]));
     EXPECT_EQ(viewModel.content.bodyLines[2], "Port: 48000");
     EXPECT_EQ(viewModel.content.bodyLines[3], "Press A to edit either field with the keypad modal.");
@@ -192,6 +415,9 @@ namespace {
     EXPECT_FALSE(viewModel.content.rightPanelActive);
   }
 
+  /**
+   * @brief Input guidance and controller controls belong to the keypad dialog.
+   */
   TEST(ShellViewTest, BuildsTheAddHostKeypadModalAsANumberPad) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::activate);
@@ -202,14 +428,103 @@ namespace {
 
     EXPECT_TRUE(viewModel.keypad.visible);
     EXPECT_EQ(viewModel.keypad.title, "Address Keypad");
-    ASSERT_GE(viewModel.keypad.lines.size(), 3U);
-    EXPECT_EQ(viewModel.keypad.lines[0], "Editing field: Address");
-    ASSERT_EQ(viewModel.keypad.buttons.size(), 11U);
+    ASSERT_EQ(viewModel.keypad.lines.size(), 1U);
+    EXPECT_EQ(viewModel.keypad.lines[0], "Enter your PC's IPv4 address. Three digits advance automatically.");
+    EXPECT_TRUE(viewModel.keypad.segmentedAddress);
+    EXPECT_EQ(viewModel.keypad.activeOctet, 0U);
+    EXPECT_EQ(viewModel.keypad.addressOctets, (std::array<std::string, 4> {}));
+    EXPECT_TRUE(viewModel.keypad.value.empty());
+    EXPECT_TRUE(viewModel.frame.footerActions.empty());
+    ASSERT_EQ(viewModel.keypad.footerActions.size(), 5U);
+    EXPECT_EQ(viewModel.keypad.footerActions[0].label, "Enter Key");
+    EXPECT_EQ(viewModel.keypad.footerActions[1].label, "Delete");
+    EXPECT_EQ(viewModel.keypad.footerActions[2].label, "Cancel");
+    EXPECT_EQ(viewModel.keypad.footerActions[3].label, "Prev/Next");
+    EXPECT_EQ(viewModel.keypad.footerActions[3].iconAssetPath, "icons\\button-lb.svg");
+    EXPECT_EQ(viewModel.keypad.footerActions[3].secondaryIconAssetPath, "icons\\button-rb.svg");
+    EXPECT_EQ(viewModel.keypad.footerActions[4].label, "Accept");
+    ASSERT_EQ(viewModel.keypad.buttons.size(), 10U);
     EXPECT_EQ(viewModel.keypad.columnCount, 3U);
     EXPECT_EQ(viewModel.keypad.buttons[0].label, "1");
     EXPECT_TRUE(viewModel.keypad.buttons[0].selected);
-    EXPECT_EQ(viewModel.keypad.buttons[9].label, ".");
-    EXPECT_EQ(viewModel.keypad.buttons[10].label, "0");
+    EXPECT_EQ(viewModel.keypad.buttons[9].label, "0");
+  }
+
+  /**
+   * @brief Expose editable IPv4 sections, current focus and field validation to the dialog.
+   */
+  TEST(ShellViewTest, BuildsSegmentedAddressInputAndValidationFeedback) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpHostGridA];
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::next_page);
+    state.addHostDraft.validationMessage = "Each address section must be between 0 and 255.";
+    const auto view = ui::build_shell_view_model(state, {});
+    EXPECT_TRUE(view.keypad.segmentedAddress);
+    EXPECT_EQ(view.keypad.addressOctets, (std::array<std::string, 4> {"192", "168", "0", "10"}));
+    EXPECT_EQ(view.keypad.activeOctet, 1U);
+    ASSERT_EQ(view.keypad.lines.size(), 1U);
+    EXPECT_EQ(view.keypad.lines.front(), state.addHostDraft.validationMessage);
+  }
+
+  /**
+   * @brief Show connection progress and result diagnostics with distinct status icons.
+   */
+  TEST(ShellViewTest, ConnectionTestModalShowsProgressAndResults) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpHostGridA];
+    app::handle_command(state, input::UiCommand::none);
+    ASSERT_TRUE(state.menu.select_item_by_id("test-connection"));
+    app::handle_command(state, input::UiCommand::activate);
+    auto view = ui::build_shell_view_model(state, {});
+    ASSERT_TRUE(view.modal.visible);
+    EXPECT_TRUE(view.modal.busy);
+    EXPECT_EQ(view.modal.title, "Testing connection");
+    EXPECT_EQ(view.modal.iconAssetPath, "icons\\loader-circle.svg");
+    ASSERT_EQ(view.modal.lines.size(), 2U);
+    EXPECT_EQ(view.modal.lines[0], state.addHostDraft.addressInput + ":" + std::to_string(app::DEFAULT_HOST_PORT));
+    EXPECT_FALSE(view.modal.lines[1].empty());
+    EXPECT_FALSE(view.notification.visible);
+    for (const bool success : {true, false}) {
+      app::apply_connection_test_result(state, success, "Diagnostic result");
+      view = ui::build_shell_view_model(state, {});
+      EXPECT_TRUE(view.modal.visible);
+      EXPECT_FALSE(view.modal.busy);
+      EXPECT_EQ(view.modal.title, success ? "Connection successful" : "Connection failed");
+      EXPECT_EQ(view.modal.iconAssetPath, success ? "icons\\circle-check.svg" : "icons\\circle-x.svg");
+      EXPECT_EQ(view.modal.lines[1], "Diagnostic result");
+    }
+    app::handle_command(state, input::UiCommand::confirm);
+    EXPECT_FALSE(ui::build_shell_view_model(state, {}).modal.visible);
+  }
+
+  /**
+   * @brief Render both toggle states as checkboxes and describe favorites accurately.
+   */
+  TEST(ShellViewTest, AppActionsExposeRealCheckboxesAndSetFavoriteLabel) {
+    auto state = app::create_initial_state();
+    app::replace_hosts(state, {{"Office PC", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired}});
+    ASSERT_TRUE(app::begin_selected_host_app_browse(state, false));
+    state.hosts.active.apps = {{"Desktop", 1}};
+    state.modal.id = app::ModalId::app_actions;
+    auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.modal.actions.size(), 3U);
+    EXPECT_TRUE(view.modal.actions[0].checkable);
+    EXPECT_FALSE(view.modal.actions[0].checked);
+    EXPECT_FALSE(view.modal.actions[1].checkable);
+    EXPECT_TRUE(view.modal.actions[2].checkable);
+    EXPECT_FALSE(view.modal.actions[2].checked);
+    EXPECT_EQ(view.modal.actions[2].label, "Set favorite");
+    EXPECT_EQ(view.modal.actions[2].id, "toggle-favorite");
+    state.modal.selectedActionIndex = 2U;
+    EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.hostsChanged);
+    app::handle_command(state, input::UiCommand::open_context_menu);
+    view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.modal.actions.size(), 3U);
+    EXPECT_TRUE(view.modal.actions[2].checked);
+    EXPECT_EQ(view.modal.actions[2].label, "Set favorite");
   }
 
   TEST(ShellViewTest, BuildsTheAppsPageForASelectedPairedHost) {
@@ -269,7 +584,10 @@ namespace {
     EXPECT_EQ(viewModel.content.bodyLines.front(), "This host is not paired yet. Return and select it to begin pairing.");
   }
 
-  TEST(ShellViewTest, SuppressesTransientAppsLoadingTextAndNotifications) {
+  /**
+   * @brief Show inline loading feedback without raising a transient notification.
+   */
+  TEST(ShellViewTest, ShowsInlineLibraryLoadingWithoutNotifications) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
                                 {"Office PC", test_support::kTestIpv4Addresses[test_support::kIpOffice], test_support::kTestPorts[test_support::kPortDefaultHost], app::PairingState::paired, app::HostReachability::online},
@@ -279,7 +597,9 @@ namespace {
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
-    EXPECT_TRUE(viewModel.content.bodyLines.empty());
+    EXPECT_EQ(viewModel.frame.subtitle, "Refreshing your library...");
+    ASSERT_EQ(viewModel.content.bodyLines.size(), 2U);
+    EXPECT_EQ(viewModel.content.bodyLines.front(), "Loading your apps...");
     EXPECT_FALSE(viewModel.notification.visible);
   }
 
@@ -387,6 +707,9 @@ namespace {
     EXPECT_EQ(viewModel.content.appTiles[1].badgeLabel, "Hidden");
   }
 
+  /**
+   * @brief Port entry keeps its default value and controls inside the keypad dialog.
+   */
   TEST(ShellViewTest, BuildsThePortKeypadAndDefaultPortLabel) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::activate);
@@ -398,9 +721,9 @@ namespace {
 
     EXPECT_TRUE(viewModel.keypad.visible);
     EXPECT_EQ(viewModel.keypad.title, "Port Keypad");
-    ASSERT_GE(viewModel.keypad.lines.size(), 4U);
-    EXPECT_EQ(viewModel.keypad.lines[0], "Editing field: Port");
-    EXPECT_EQ(viewModel.keypad.lines[1], "Staged value: default (47989)");
+    ASSERT_EQ(viewModel.keypad.lines.size(), 1U);
+    EXPECT_EQ(viewModel.keypad.lines[0], "Enter a custom port, or leave empty for 47989.");
+    EXPECT_EQ(viewModel.keypad.value, "default (47989)");
     ASSERT_EQ(viewModel.keypad.buttons.size(), 10U);
     EXPECT_EQ(viewModel.keypad.buttons.back().label, "0");
     EXPECT_TRUE(viewModel.keypad.buttons[9].selected);
@@ -442,15 +765,21 @@ namespace {
     EXPECT_EQ(viewModel.modal.footerActions[1].iconAssetPath, "icons\\button-b.svg");
   }
 
+  /**
+   * @brief Show explicit operation outcomes on settings without relying on diagnostic text.
+   */
   TEST(ShellViewTest, ShowsNotificationsOnTheSettingsScreen) {
     app::ClientState state = app::create_initial_state();
     state.shell.activeScreen = app::ScreenId::settings;
-    state.shell.statusMessage = "Deleted saved file moonlight.log";
+    app::show_notification(state, app::NotificationKind::success, "File deleted", "moonlight.log has been removed.", 5000U);
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
     EXPECT_TRUE(viewModel.notification.visible);
-    EXPECT_EQ(viewModel.notification.content.message, "Deleted saved file moonlight.log");
+    ASSERT_EQ(viewModel.notification.items.size(), 1U);
+    EXPECT_EQ(viewModel.notification.items.front().title, "File deleted");
+    EXPECT_EQ(viewModel.notification.items.front().message, "moonlight.log has been removed.");
+    EXPECT_EQ(viewModel.notification.items.front().iconAssetPath, "icons\\circle-check.svg");
   }
 
   TEST(ShellViewTest, ShowsThePairingPinAsSoonAsItHasBeenGenerated) {

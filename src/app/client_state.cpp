@@ -28,7 +28,7 @@ namespace {
   constexpr std::size_t ADD_HOST_KEYPAD_COLUMN_COUNT = 3U;
   constexpr const char *DELETE_SAVED_FILE_MENU_ID_PREFIX = "delete-saved-file:";
   constexpr const char *SETTINGS_CATEGORY_PREFIX = "settings-category:";
-  constexpr std::array<char, 11> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0'};
+  constexpr std::array<char, 10> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr std::array<char, 10> ADD_HOST_PORT_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr int DEFAULT_STREAM_FRAMERATE = 30;
   constexpr int DEFAULT_STREAM_BITRATE_KBPS = 1000;
@@ -492,6 +492,12 @@ namespace {
     }
   }
 
+  /**
+   * @brief Build navigation actions, exposing host operations only after an address is supplied.
+   *
+   * @param state Current screen and entered host information.
+   * @return Menu entries available for the current task.
+   */
   std::vector<ui::MenuItem> build_menu_for_state(const app::ClientState &state) {
     switch (state.shell.activeScreen) {
       case app::ScreenId::settings:
@@ -502,14 +508,21 @@ namespace {
           {settings_category_menu_id(app::SettingsCategory::reset), "Reset", settings_category_description(app::SettingsCategory::reset), true},
         };
       case app::ScreenId::add_host:
-        return {
-          {"edit-address", "Host Address", "Enter the IPv4 address for the PC that should be added to Moonlight.", true},
-          {"edit-port", "Host Port", "Override the default Moonlight host port when the PC listens on a custom value.", true},
-          {"test-connection", "Test Connection", "Check whether the current host address and port respond before saving anything.", true},
-          {"start-pairing", "Start Pairing", "Connect to the current host and begin PIN-based pairing.", true},
-          {"save-host", "Save Host", "Store this host in the saved host list and return to the home screen.", true},
-          {"cancel-add-host", "Cancel", "Discard the current host draft and return without saving.", true},
-        };
+        {
+          std::vector<ui::MenuItem> items {
+            {"edit-address", "Host Address", "Enter the IPv4 address for the PC that should be added to Moonlight.", true},
+            {"edit-port", "Host Port", "Override the default Moonlight host port when the PC listens on a custom value.", true},
+          };
+          if (state.addHostDraft.addressInput.find_first_not_of(" \t\r\n") != std::string::npos) {
+            items.insert(items.end(), {
+                                        {"test-connection", "Test Connection", "Check whether the current host address and port respond before saving anything.", true},
+                                        {"start-pairing", "Start Pairing", "Connect to the current host and begin PIN-based pairing.", true},
+                                        {"save-host", "Save Host", "Store this host in the saved host list and return to the home screen.", true},
+                                      });
+          }
+          items.push_back({"cancel-add-host", "Cancel", "Discard the current host draft and return without saving.", true});
+          return items;
+        }
       case app::ScreenId::pair_host:
         return {
           {"cancel-pairing", "Cancel", "Stop the current pairing attempt and return to the previous screen.", true},
@@ -651,6 +664,26 @@ namespace {
     state.modal.selectedActionIndex = selectedActionIndex;
   }
 
+  /**
+   * @brief Show connection progress before scheduling the endpoint test.
+   *
+   * @param state Client state receiving the progress dialog.
+   * @param address Normalized IPv4 endpoint.
+   * @param port Effective host port.
+   * @param update Receives the background request and modal transition.
+   */
+  void request_connection_test(app::ClientState &state, const std::string &address, uint16_t port, app::AppUpdate *update) {
+    state.connectionTest = {true, false, address, app::effective_host_port(port), "Contacting the host. Please wait..."};
+    open_modal(state, app::ModalId::connection_test);
+    state.shell.statusMessage = "Testing connection to " + address + ":" + std::to_string(state.connectionTest.port) + "...";
+    if (update != nullptr) {
+      update->navigation.modalOpened = true;
+      update->requests.connectionTestRequested = true;
+      update->requests.connectionTestAddress = address;
+      update->requests.connectionTestPort = state.connectionTest.port;
+    }
+  }
+
   void cycle_log_viewer_placement(app::ClientState &state) {
     switch (state.settings.logViewerPlacement) {
       case app::LogViewerPlacement::full:
@@ -693,6 +726,7 @@ namespace {
       case app::ModalId::host_details:
       case app::ModalId::app_details:
       case app::ModalId::log_viewer:
+      case app::ModalId::connection_test:
         return 0U;
     }
     return 0U;
@@ -709,11 +743,33 @@ namespace {
     return state.modal.selectedActionIndex != current;
   }
 
+  /**
+   * @brief Open an isolated field draft, splitting saved addresses into editable sections.
+   *
+   * @param state Client state receiving the keypad draft.
+   * @param field Address or port to edit.
+   */
   void open_add_host_keypad(app::ClientState &state, app::AddHostField field) {
     state.addHostDraft.activeField = field;
     state.addHostDraft.keypad.visible = true;
     state.addHostDraft.keypad.selectedButtonIndex = 0U;
     state.addHostDraft.keypad.stagedInput = field == app::AddHostField::address ? state.addHostDraft.addressInput : state.addHostDraft.portInput;
+    auto &keypad = state.addHostDraft.keypad;
+    keypad.addressOctets = {};
+    keypad.activeOctet = 0U;
+    keypad.replaceOctet = true;
+    if (field == app::AddHostField::address) {
+      std::size_t start = 0U;
+      for (auto &octet : keypad.addressOctets) {
+        const std::size_t end = keypad.stagedInput.find('.', start);
+        octet = keypad.stagedInput.substr(start, end == std::string::npos ? end : end - start);
+        if (end == std::string::npos) {
+          break;
+        }
+        start = end + 1U;
+      }
+    }
+    state.addHostDraft.validationMessage.clear();
     state.shell.statusMessage = field == app::AddHostField::address ? "Editing host address" : "Editing host port";
     rebuild_menu(state, add_host_field_menu_id(field));
   }
@@ -785,16 +841,93 @@ namespace {
     return nextIndex != currentIndex;
   }
 
+  /**
+   * @brief Serialize the four IPv4 sections while preserving an entirely empty draft.
+   *
+   * @param keypad Keypad draft to synchronize.
+   */
+  void synchronize_address_draft(app::AddHostKeypadState &keypad) {
+    keypad.stagedInput.clear();
+    if (std::all_of(keypad.addressOctets.begin(), keypad.addressOctets.end(), [](const std::string &octet) {
+          return octet.empty();
+        })) {
+      return;
+    }
+    for (std::size_t index = 0; index < keypad.addressOctets.size(); ++index) {
+      if (index != 0U) {
+        keypad.stagedInput += '.';
+      }
+      keypad.stagedInput += keypad.addressOctets[index];
+    }
+  }
+
+  /**
+   * @brief Move between IPv4 sections without changing the numeric keypad selection.
+   *
+   * @param state Client state containing the field draft.
+   * @param direction Negative for the preceding section, positive for the next.
+   */
+  void move_address_octet(app::ClientState &state, int direction) {
+    if (state.addHostDraft.activeField != app::AddHostField::address) {
+      return;
+    }
+    auto &keypad = state.addHostDraft.keypad;
+    const std::size_t nextOctet = direction < 0 ? (keypad.activeOctet == 0U ? 0U : keypad.activeOctet - 1U) : std::min(keypad.activeOctet + 1U, keypad.addressOctets.size() - 1U);
+    if (nextOctet != keypad.activeOctet) {
+      keypad.activeOctet = nextOctet;
+      keypad.replaceOctet = true;
+    }
+  }
+
+  /**
+   * @brief Add a port digit or a bounded IPv4 digit, advancing after three digits.
+   *
+   * @param state Client state containing the field draft.
+   * @param character Selected numeric keypad character.
+   */
   void append_to_active_add_host_field(app::ClientState &state, char character) {
-    state.addHostDraft.keypad.stagedInput.push_back(character);
+    auto &keypad = state.addHostDraft.keypad;
+    if (state.addHostDraft.activeField == app::AddHostField::address) {
+      auto &octet = keypad.addressOctets[keypad.activeOctet];
+      const std::string candidate = (keypad.replaceOctet ? std::string {} : octet) + character;
+      if (candidate.size() > 3U || (candidate.size() == 3U && candidate > "255")) {
+        state.addHostDraft.validationMessage = "Each address section must be between 0 and 255.";
+        return;
+      }
+      octet = candidate;
+      keypad.replaceOctet = false;
+      synchronize_address_draft(keypad);
+      if (octet.size() == 3U && keypad.activeOctet + 1U < keypad.addressOctets.size()) {
+        move_address_octet(state, 1);
+      }
+    } else {
+      keypad.stagedInput.push_back(character);
+    }
     state.addHostDraft.validationMessage.clear();
     state.addHostDraft.connectionMessage.clear();
   }
 
+  /**
+   * @brief Delete a digit, returning to the previous IPv4 section when necessary.
+   *
+   * @param state Client state containing the field draft.
+   */
   void backspace_active_add_host_field(app::ClientState &state) {
-    if (!state.addHostDraft.keypad.stagedInput.empty()) {
-      state.addHostDraft.keypad.stagedInput.pop_back();
+    auto &keypad = state.addHostDraft.keypad;
+    if (state.addHostDraft.activeField == app::AddHostField::address) {
+      if (keypad.addressOctets[keypad.activeOctet].empty() && keypad.activeOctet > 0U) {
+        --keypad.activeOctet;
+      }
+      auto &octet = keypad.addressOctets[keypad.activeOctet];
+      if (!octet.empty()) {
+        octet.pop_back();
+      }
+      keypad.replaceOctet = false;
+      synchronize_address_draft(keypad);
+    } else if (!keypad.stagedInput.empty()) {
+      keypad.stagedInput.pop_back();
     }
+    state.addHostDraft.validationMessage.clear();
   }
 
   bool normalize_add_host_inputs(const app::ClientState &state, std::string *normalizedAddress, uint16_t *parsedPort, std::string *errorMessage) {
@@ -974,9 +1107,18 @@ namespace {
     set_screen(state, app::ScreenId::add_host, "edit-address");
   }
 
+  /**
+   * @brief Enter pairing or report an actionable failure before the workflow can open.
+   *
+   * @param state Mutable client state.
+   * @param address Target PC address.
+   * @param port Target PC port.
+   * @return True when the pairing page opened.
+   */
   bool enter_pair_host_screen(app::ClientState &state, const std::string &address, uint16_t port) {
     if (const app::HostRecord *host = find_loaded_host_by_endpoint(state, address, port); host != nullptr && host->reachability == app::HostReachability::offline) {
       state.shell.statusMessage = "Host is offline. Bring it online before pairing.";
+      app::show_notification(state, app::NotificationKind::error, "PC is offline", "Turn on the PC and make sure Sunshine is running before pairing.");
       return false;
     }
 
@@ -987,6 +1129,7 @@ namespace {
     std::string pairingPin;
     if (std::string pinError; !network::generate_pairing_pin(&pairingPin, &pinError)) {
       state.shell.statusMessage = pinError.empty() ? "Failed to generate a secure pairing PIN." : std::move(pinError);
+      app::show_notification(state, app::NotificationKind::error, "Couldn't start pairing", "A secure pairing PIN could not be created. Restart Moonlight and try again.");
       return false;
     }
 
@@ -995,6 +1138,13 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Open a paired PC's library or notify the user why it cannot be opened.
+   *
+   * @param state Mutable client state.
+   * @param showHiddenApps Include hidden apps in the library.
+   * @return True when the library page opened.
+   */
   bool enter_apps_screen(app::ClientState &state, bool showHiddenApps) {
     const app::HostRecord *host = state.hosts.items.empty() ? nullptr : &state.hosts.items[state.hosts.selectedHostIndex];
     if (host == nullptr) {
@@ -1002,10 +1152,12 @@ namespace {
     }
     if (host->reachability == app::HostReachability::offline) {
       state.shell.statusMessage = "Host is offline. Bring it online before opening apps.";
+      app::show_notification(state, app::NotificationKind::error, "PC is offline", "Turn on the PC and make sure Sunshine is running to open its apps.");
       return false;
     }
     if (host->pairingState != app::PairingState::paired) {
       state.shell.statusMessage = "This host is no longer paired. Pair it again before opening apps.";
+      app::show_notification(state, app::NotificationKind::error, "Pairing required", "Pair this PC again before opening its apps.");
       return false;
     }
 
@@ -1013,6 +1165,7 @@ namespace {
     state.apps.showHiddenApps = showHiddenApps;
     state.apps.selectedAppIndex = 0U;
     state.apps.scrollPage = 0U;
+    state.apps.refreshFailureNotified = false;
     state.hosts.active.appListState = app::HostAppListState::loading;
     state.hosts.active.appListStatusMessage = (state.hosts.active.apps.empty() ? "Loading apps for " : "Refreshing apps for ") + state.hosts.active.displayName + "...";
     state.shell.statusMessage.clear();
@@ -1251,12 +1404,7 @@ namespace {
         request_host_pairing(state, *host, update);
         return true;
       case 1:
-        close_modal_and_mark_closed(state, update);
-        if (update != nullptr) {
-          update->requests.connectionTestRequested = true;
-          update->requests.connectionTestAddress = host->address;
-          update->requests.connectionTestPort = app::effective_host_port(host->port);
-        }
+        request_connection_test(state, host->address, host->port, update);
         return true;
       case 2:
         delete_selected_host(state, update);
@@ -1334,6 +1482,7 @@ namespace {
       case app::ModalId::support:
       case app::ModalId::host_details:
       case app::ModalId::app_details:
+      case app::ModalId::connection_test:
         close_modal_and_mark_closed(state, update);
         return true;
       case app::ModalId::log_viewer:
@@ -1354,6 +1503,10 @@ namespace {
   bool handle_modal_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
     if (!state.modal.active()) {
       return false;
+    }
+
+    if (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress) {
+      return true;
     }
 
     if (handle_log_viewer_modal_command(state, command, update)) {
@@ -1384,6 +1537,41 @@ namespace {
 }  // namespace
 
 namespace app {
+
+  void show_notification(ClientState &state, NotificationKind kind, std::string title, std::string message, std::uint32_t autoDismissMilliseconds) {
+    if (message.empty()) {
+      return;
+    }
+    const auto duplicate = std::find_if(state.shell.notifications.begin(), state.shell.notifications.end(), [&](const NotificationState &notification) {
+      return notification.kind == kind && notification.title == title && notification.message == message;
+    });
+    if (duplicate != state.shell.notifications.end()) {
+      return;
+    }
+    state.shell.notifications.push_back({kind, std::move(title), std::move(message), autoDismissMilliseconds == 0U, autoDismissMilliseconds});
+  }
+
+  void dismiss_notification(ClientState &state) {
+    if (!state.shell.notifications.empty()) {
+      state.shell.notifications.pop_back();
+    }
+  }
+
+  void advance_notifications(ClientState &state, std::uint32_t elapsedMilliseconds) {
+    if (state.modal.active() || state.shell.overlayVisible || (state.shell.activeScreen == ScreenId::add_host && state.addHostDraft.keypad.visible)) {
+      return;
+    }
+    for (auto &notification : state.shell.notifications) {
+      if (!notification.requiresInteraction) {
+        notification.remainingMilliseconds = elapsedMilliseconds >= notification.remainingMilliseconds ? 0U : notification.remainingMilliseconds - elapsedMilliseconds;
+      }
+    }
+    auto &notifications = state.shell.notifications;
+    notifications.erase(std::remove_if(notifications.begin(), notifications.end(), [](const NotificationState &notification) {
+                          return !notification.requiresInteraction && notification.remainingMilliseconds == 0U;
+                        }),
+                        notifications.end());
+  }
 
   ClientState create_initial_state() {
     ClientState state;
@@ -1543,13 +1731,19 @@ namespace app {
   }
 
   void apply_connection_test_result(ClientState &state, bool success, std::string message) {
+    state.connectionTest.inProgress = false;
+    state.connectionTest.succeeded = success;
+    state.connectionTest.message = message;
     if (state.shell.activeScreen == ScreenId::add_host) {
       state.addHostDraft.connectionMessage = message;
       state.addHostDraft.lastConnectionSucceeded = success;
     }
-    if (!state.hosts.items.empty() && state.hosts.selectedHostIndex < state.hosts.items.size()) {
-      state.hosts.items[state.hosts.selectedHostIndex].reachability = success ? HostReachability::online : HostReachability::offline;
-    } else if (state.hosts.activeLoaded) {
+    for (auto &host : state.hosts.items) {
+      if (host.address == state.connectionTest.address && effective_host_port(host.port) == state.connectionTest.port) {
+        host.reachability = success ? HostReachability::online : HostReachability::offline;
+      }
+    }
+    if (state.hosts.activeLoaded && state.hosts.active.address == state.connectionTest.address && effective_host_port(state.hosts.active.port) == state.connectionTest.port) {
       state.hosts.active.reachability = success ? HostReachability::online : HostReachability::offline;
     }
     state.shell.statusMessage = std::move(message);
@@ -1581,6 +1775,7 @@ namespace app {
       }
       set_screen(state, ScreenId::hosts);
       state.hosts.dirty = true;
+      show_notification(state, NotificationKind::success, "PC paired", "Paired with " + address + ". Select the PC to browse its apps.", 5000U);
       return true;
     }
 
@@ -1657,7 +1852,7 @@ namespace app {
   }
 
   /**
-   * @brief Applies a failed app-list refresh that can fall back to cached app data.
+   * @brief Use cached apps after a failed refresh and report the degraded state once until recovery.
    *
    * @param state Client state to update.
    * @param host Host receiving the failure.
@@ -1673,6 +1868,10 @@ namespace app {
     host->appListStatusMessage = host->apps.empty() ? message : "Using cached apps. Last refresh failed: " + message;
     if (hostIsActiveAppsScreenSelection) {
       state.shell.statusMessage = std::move(message);
+      if (!host->apps.empty() && !state.apps.refreshFailureNotified) {
+        show_notification(state, NotificationKind::information, "Using saved apps", "The library could not be refreshed. Check that your PC is online.", 7000U);
+        state.apps.refreshFailureNotified = true;
+      }
     }
     refresh_running_flags(host);
     clamp_selected_app_index(state);
@@ -1762,6 +1961,7 @@ namespace app {
     state.hosts.dirty = state.hosts.dirty || persistedAppCacheChanged;
     if (hostIsActiveAppsScreenSelection) {
       state.shell.statusMessage.clear();
+      state.apps.refreshFailureNotified = false;
     }
 
     restore_selected_app_after_refresh(state, *host, selectedAppId);
@@ -1938,8 +2138,13 @@ namespace app {
           return true;
         }
       case input::UiCommand::open_context_menu:
+        return true;
       case input::UiCommand::previous_page:
+        move_address_octet(state, -1);
+        return true;
       case input::UiCommand::next_page:
+        move_address_octet(state, 1);
+        return true;
       case input::UiCommand::fast_previous_page:
       case input::UiCommand::fast_next_page:
       case input::UiCommand::toggle_overlay:
@@ -1951,7 +2156,7 @@ namespace app {
   }
 
   /**
-   * @brief Handles activation of a settings detail row.
+   * @brief Update settings inline without producing routine confirmation notifications.
    *
    * @param state Client state containing the settings menus.
    * @param detailUpdate Activated detail-menu update.
@@ -2345,10 +2550,7 @@ namespace app {
       }
       state.addHostDraft.validationMessage.clear();
       state.addHostDraft.connectionMessage = "Testing connection to " + normalizedAddress + (parsedPort == 0 ? std::string {} : ":" + std::to_string(parsedPort)) + "...";
-      state.shell.statusMessage = state.addHostDraft.connectionMessage;
-      update->requests.connectionTestRequested = true;
-      update->requests.connectionTestAddress = normalizedAddress;
-      update->requests.connectionTestPort = effective_host_port(parsedPort);
+      request_connection_test(state, normalizedAddress, parsedPort, update);
       return;
     }
     if (activatedItemId == "save-host") {
@@ -2414,7 +2616,8 @@ namespace app {
       return update;
     }
 
-    if (command == input::UiCommand::delete_character && !state.shell.statusMessage.empty()) {
+    if (command == input::UiCommand::delete_character && (!state.shell.notifications.empty() || !state.shell.statusMessage.empty())) {
+      dismiss_notification(state);
       state.shell.statusMessage.clear();
       return update;
     }
@@ -2431,6 +2634,9 @@ namespace app {
       return update;
     }
 
+    if (state.shell.activeScreen == ScreenId::add_host) {
+      rebuild_menu(state);
+    }
     const ui::MenuUpdate menuUpdate = state.menu.handle_command(command);
     if (menuUpdate.overlayToggleRequested) {
       state.shell.overlayVisible = !state.shell.overlayVisible;

@@ -64,6 +64,8 @@ namespace ui {
     bool enabled = true;  ///< True when the row can be activated.
     bool selected = false;  ///< True when the row currently has focus.
     bool checked = false;  ///< True when the row represents an enabled option.
+    std::string iconAssetPath;  ///< Optional icon displayed to the left of a menu label.
+    bool checkable = false;  ///< Draw a checkbox for both checked and unchecked toggle values.
   };
 
   /**
@@ -84,6 +86,7 @@ namespace ui {
     std::string title;  ///< Notification title.
     std::string message;  ///< Notification body message.
     std::vector<ShellFooterAction> actions;  ///< Footer actions shown with the notification.
+    std::string iconAssetPath;  ///< Severity icon shown beside the event title.
   };
 
   /**
@@ -102,6 +105,7 @@ namespace ui {
     app::ScreenId screen = app::ScreenId::hosts;  ///< Active screen being rendered.
     std::string title;  ///< Shell-wide title.
     std::string pageTitle;  ///< Primary page heading.
+    std::string subtitle;  ///< Concise page context, collection count, or loading state.
     std::string statusMessage;  ///< Status line shown near the footer.
     std::vector<ShellFooterAction> footerActions;  ///< Footer actions shown for the current screen.
   };
@@ -120,8 +124,8 @@ namespace ui {
     std::vector<ShellActionRow> detailMenuRows;  ///< Secondary action rows for details or settings.
     std::string selectedMenuRowLabel;  ///< Label of the currently selected primary menu row.
     std::string selectedMenuRowDescription;  ///< Description of the currently selected row, when available.
-    bool leftPanelActive = false;  ///< True when the left navigation panel should use the active accent border.
-    bool rightPanelActive = false;  ///< True when the right content panel should use the active accent border.
+    bool leftPanelActive = false;  ///< True when the left navigation list owns controller focus.
+    bool rightPanelActive = false;  ///< True when the settings options own controller focus.
   };
 
   /**
@@ -129,7 +133,7 @@ namespace ui {
    */
   struct ShellNotificationView {
     bool visible = false;  ///< True when a transient notification should be rendered.
-    ShellNotification content;  ///< Notification content when visible.
+    std::vector<ShellNotification> items;  ///< Outstanding notifications, oldest first.
   };
 
   /**
@@ -146,7 +150,9 @@ namespace ui {
    */
   struct ShellModalView {
     bool visible = false;  ///< True when a modal dialog should be rendered.
+    bool busy = false;  ///< Show progress instead of dismissal controls while work is pending.
     std::string title;  ///< Modal dialog title.
+    std::string iconAssetPath;  ///< Optional status icon beside the dialog title.
     std::vector<std::string> lines;  ///< Modal dialog body lines.
     std::vector<ShellActionRow> actions;  ///< Modal action rows.
     std::vector<ShellFooterAction> footerActions;  ///< Footer actions displayed while a modal is open.
@@ -169,9 +175,14 @@ namespace ui {
   struct ShellKeypadModalView {
     bool visible = false;  ///< True when the keypad modal should be rendered.
     std::string title;  ///< Title shown at the top of the keypad modal.
+    std::string value;  ///< Staged input displayed in the keypad text field.
+    bool segmentedAddress = false;  ///< Render four IPv4 sections with fixed period separators.
+    std::array<std::string, 4> addressOctets {};  ///< Draft digits displayed in each IPv4 section.
+    std::size_t activeOctet = 0U;  ///< Highlighted IPv4 section.
     std::vector<std::string> lines;  ///< Instruction and draft lines shown in the keypad modal.
     std::vector<ShellModalButton> buttons;  ///< Buttons rendered inside the keypad modal.
     std::size_t columnCount = 0U;  ///< Number of columns used to lay out keypad buttons.
+    std::vector<ShellFooterAction> footerActions;  ///< Input, delete, cancel and accept controls inside the dialog.
   };
 
   /**

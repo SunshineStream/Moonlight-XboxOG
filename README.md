@@ -21,6 +21,52 @@
 ![Hosts Screen](./docs/images/screenshots/02-hosts.png)
 ![Apps Screen](./docs/images/screenshots/03-apps.png)
 
+<details>
+<summary>Settings, host setup and dialogs</summary>
+
+![Settings](./docs/images/screenshots/04-settings.png)
+![Add Host](./docs/images/screenshots/05-add-host.png)
+![IP Address Entry](./docs/images/screenshots/06-ip-address.png)
+![App Actions](./docs/images/screenshots/07-app-actions.png)
+![Connection Test Progress](./docs/images/screenshots/08-connection-testing.png)
+![Successful Connection Test](./docs/images/screenshots/09-connection-success.png)
+![Failed Connection Test](./docs/images/screenshots/10-connection-failed.png)
+![Notification Stack](./docs/images/screenshots/11-notifications.png)
+
+</details>
+
+The interface takes its compact navigation and PC cards from Moonlight Qt, with a library designed
+for a controller and a television. Select a PC to pair or open its apps. Game covers have separate
+captions, and a blue focus ring shows which card will open. Running apps carry a **PLAYING** badge.
+Missing artwork uses Lucide desktop or gamepad placeholders.
+Use the D-pad or left stick to navigate, **A** to select, **B** to go back and **Y** for host or app
+actions. Move up from the first PC row to reach Settings, Support and Add Host.
+
+PCs use grayscale moon artwork inspired by One: a full moon for paired online PCs, a half moon for
+online PCs awaiting pairing, and a crescent for offline PCs. A separate orbit shows controller focus.
+
+Settings categories have icons and the detail panel extends beside the page heading, with a fixed help
+area above its options so changing values keeps the list in place. Dialogs contain their controller
+actions. Number pads use compact centered columns. IPv4 entry has four
+sections with fixed periods: three digits advance automatically, and **White / Black** move
+between sections. A new digit replaces a section after switching to it; **X** deletes the last digit.
+Connection, pairing and save actions appear after a host address has been entered. **Test Connection**
+shows a spinning progress indicator while contacting the PC, then keeps the result visible until dismissed.
+The app menu uses checkboxes for **Hide app** and **Set favorite**.
+
+Notifications stack above the footer. Brief confirmations disappear automatically; actionable errors
+stay until you press **X** to dismiss the newest card. Connection-test results stay in their dialog,
+and settings show their updated values inline.
+
+The layout scales with the output resolution and leaves a five-percent inset for television overscan.
+Large libraries scroll to keep the selected game visible. Settings use a category list alongside
+options and help for the selected item.
+
+Navigation icons use [Lucide](https://lucide.dev/). CPM downloads the tagged source release declared in
+`package-lock.cmake`; the inherited Renovate configuration updates its version.
+Only the required SVGs and their license are packaged on the ISO.
+No network connection or JavaScript runtime is needed to display the icons on the console.
+
 
 ## Streaming controls and statistics
 

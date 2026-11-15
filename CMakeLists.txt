@@ -15,6 +15,7 @@ option(MOONLIGHT_INPUT_DIAGNOSTICS "Display digital controller state while diagn
 
 if(MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
     project(Moonlight C CXX)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/packages.cmake")
 
     # add custom modules
     set(CMAKE_MODULE_PATH
@@ -32,6 +33,7 @@ if(MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
 endif()
 
 project(Moonlight C CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/packages.cmake")
 
 set(CMAKE_MODULE_PATH
         ${CMAKE_MODULE_PATH}

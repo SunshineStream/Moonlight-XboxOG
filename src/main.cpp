@@ -168,6 +168,12 @@ namespace {
     return 0;
   }
 
+  /**
+   * @brief Apply startup data and surface an actionable network error independently of diagnostics.
+   *
+   * @param clientState Client state receiving startup data and notifications.
+   * @param task Startup worker to join and read.
+   */
   void finish_startup_task(app::ClientState &clientState, StartupTaskState *task) {
     if (task == nullptr) {
       return;
@@ -193,6 +199,7 @@ namespace {
     }
     if (!task->runtimeNetworkStatus.ready) {
       clientState.shell.statusMessage = task->runtimeNetworkStatus.summary;
+      app::show_notification(clientState, app::NotificationKind::error, "Network unavailable", "Check the Ethernet cable and network settings before connecting to a PC.");
     }
   }
 
