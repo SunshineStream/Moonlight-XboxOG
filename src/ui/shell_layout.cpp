@@ -41,6 +41,11 @@ namespace ui {
     return {(width - w) / 2, (height - h) / 2, w, h};
   }
 
+  double shell_spinner_angle(std::uint32_t elapsedMilliseconds) {
+    constexpr std::uint32_t periodMilliseconds = 1200U;
+    return static_cast<double>(elapsedMilliseconds % periodMilliseconds) * 360.0 / periodMilliseconds;
+  }
+
   ShellGridLayout calculate_shell_grid(ShellRect bounds, std::size_t itemCount, std::size_t columns, std::size_t selectedIndex, int preferredHeight, int gap) {
     if (bounds.w <= 0 || bounds.h <= 0 || itemCount == 0U || columns == 0U) {
       return {};

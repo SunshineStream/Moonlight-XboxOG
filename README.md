@@ -49,7 +49,7 @@ the selected item above its options. Dialogs contain their controller actions. I
 sections with fixed periods: three digits advance automatically, and **White / Black** move
 between sections. A new digit replaces a section after switching to it; **X** deletes the last digit.
 Connection, pairing and save actions appear after a host address has been entered. **Test Connection**
-shows a progress dialog while contacting the PC, then keeps the result visible until dismissed.
+shows a spinning progress indicator while contacting the PC, then keeps the result visible until dismissed.
 The app menu uses checkboxes for **Hide app** and **Set favorite**.
 
 The layout scales with the output resolution and leaves a five-percent inset for television overscan.

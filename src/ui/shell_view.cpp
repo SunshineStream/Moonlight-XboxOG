@@ -667,7 +667,7 @@ namespace {
   }
 
   /**
-   * @brief Build controller hints, including original Xbox section-navigation buttons.
+   * @brief Build controller hints with section navigation immediately before keypad acceptance.
    *
    * @param state Current screen, dialog and input field.
    * @return Actions displayed within the page or active input dialog.
@@ -708,11 +708,11 @@ namespace {
             {"enter", "Enter Key", "icons\\button-a.svg", {}, true},
             {"delete", "Delete", "icons\\button-x.svg", {}, false},
             {"cancel", "Cancel", "icons\\button-b.svg", {}, false},
-            {"accept", "Accept", "icons\\button-start.svg", {}, false},
           };
           if (state.addHostDraft.activeField == app::AddHostField::address) {
             actions.push_back({"change-section", "Prev/Next", "icons\\button-lb.svg", "icons\\button-rb.svg", false});
           }
+          actions.push_back({"accept", "Accept", "icons\\button-start.svg", {}, false});
           return actions;
         }
         return {

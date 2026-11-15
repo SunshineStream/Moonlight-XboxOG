@@ -6,12 +6,30 @@
 #include <lizardbyte/common/testing.h>
 
 // standard includes
+#include <limits>
 #include <utility>
 
 // local includes
 #include "src/ui/shell_layout.h"
 
 namespace {
+
+  /**
+   * @brief Keep loading rotation smooth, clockwise and independent of frame frequency.
+   */
+  TEST(ShellLayoutTest, RotatesLoadingIconAtAFixedSpeedAndWrapsCleanly) {
+    EXPECT_DOUBLE_EQ(ui::shell_spinner_angle(0U), 0.0);
+    EXPECT_DOUBLE_EQ(ui::shell_spinner_angle(300U), 90.0);
+    EXPECT_DOUBLE_EQ(ui::shell_spinner_angle(600U), 180.0);
+    EXPECT_DOUBLE_EQ(ui::shell_spinner_angle(900U), 270.0);
+    EXPECT_DOUBLE_EQ(ui::shell_spinner_angle(1200U), 0.0);
+    EXPECT_DOUBLE_EQ(ui::shell_spinner_angle(1200300U), 90.0);
+    EXPECT_GT(ui::shell_spinner_angle(1199U), ui::shell_spinner_angle(1198U));
+    EXPECT_LT(ui::shell_spinner_angle(1199U), 360.0);
+    const double lastClockAngle = ui::shell_spinner_angle(std::numeric_limits<std::uint32_t>::max());
+    EXPECT_GE(lastClockAngle, 0.0);
+    EXPECT_LT(lastClockAngle, 360.0);
+  }
 
   /**
    * @brief Settings use the space beside the heading without overlapping the footer.

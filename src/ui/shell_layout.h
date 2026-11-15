@@ -6,6 +6,7 @@
 
 // standard includes
 #include <cstddef>
+#include <cstdint>
 
 namespace ui {
 
@@ -71,6 +72,14 @@ namespace ui {
    * @return Centered and clamped dialog bounds.
    */
   ShellRect calculate_shell_dialog(int width, int height, int desiredWidth, int desiredHeight);
+
+  /**
+   * @brief Calculate a clockwise loading-icon rotation at a fixed speed.
+   *
+   * @param elapsedMilliseconds Monotonic elapsed time from the shell clock.
+   * @return Rotation in degrees, wrapping every 1200 milliseconds.
+   */
+  double shell_spinner_angle(std::uint32_t elapsedMilliseconds);
 
   /**
    * @brief Lay out a scrolling grid without stretching short collections vertically.

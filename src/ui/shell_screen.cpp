@@ -372,7 +372,8 @@ namespace {
     TTF_Font *font,
     AssetTextureCache *assetCache,
     const std::vector<ui::ShellFooterAction> &actions,
-    const SDL_Rect &footerRect
+    const SDL_Rect &footerRect,
+    bool compact = false
   );
 
   void clear_cover_art_texture_cache(CoverArtTextureCache *cache) {
@@ -1259,10 +1260,24 @@ namespace {
     return SDL_RenderCopy(renderer, texture, &source, &rect) == 0;
   }
 
-  bool render_asset_icon(SDL_Renderer *renderer, AssetTextureCache *cache, const std::string &relativePath, const SDL_Rect &rect) {
+  /**
+   * @brief Draw a cached icon with optional clockwise rotation and a static fallback.
+   *
+   * @param renderer Active renderer, including the software fallback.
+   * @param cache Cached SVG textures.
+   * @param relativePath Bundled icon path.
+   * @param rect Icon bounds.
+   * @param angle Clockwise rotation in degrees; zero leaves the icon stationary.
+   * @return True when the rotated or stationary icon rendered successfully.
+   */
+  bool render_asset_icon(SDL_Renderer *renderer, AssetTextureCache *cache, const std::string &relativePath, const SDL_Rect &rect, double angle = 0.0) {
     SDL_Texture *texture = load_cached_asset_texture(renderer, cache, relativePath, rect.w, rect.h);
     if (texture == nullptr) {
       return false;
+    }
+
+    if (angle != 0.0 && SDL_RenderCopyEx(renderer, texture, nullptr, &rect, angle, nullptr, SDL_FLIP_NONE) == 0) {
+      return true;
     }
 
     return render_texture_fit(renderer, texture, rect);
@@ -1675,11 +1690,16 @@ namespace {
     return render_text_line_simple(renderer, smallFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, iconRect.x + iconRect.w + 8, buttonRect.y + std::max(6, (buttonRect.h - TTF_FontLineSkip(smallFont)) / 2), buttonRect.w - (iconRect.w + 26));
   }
 
+  /**
+   * @brief Measured controller hint with spacing suited to its available row width.
+   */
   struct FooterActionChipLayout {
-    int labelWidth = 0;
-    int iconSize = 0;
-    int iconBlockWidth = 0;
-    int chipWidth = 0;
+    int labelWidth = 0;  ///< Width of the action label.
+    int iconSize = 0;  ///< Square controller-glyph size.
+    int iconBlockWidth = 0;  ///< Combined width of the controller glyphs.
+    int chipWidth = 0;  ///< Total width including content and padding.
+    int horizontalPadding = 10;  ///< Inset at each horizontal edge.
+    int iconLabelGap = 8;  ///< Space between the glyphs and action label.
   };
 
   int measure_footer_action_label_width(TTF_Font *font, const std::string &label) {
@@ -1696,22 +1716,38 @@ namespace {
    * @param font Action label font.
    * @param action Controller glyphs and label.
    * @param chipHeight Available button height.
+   * @param compact Reduce horizontal spacing to fit five keypad controls at SD resolutions.
    * @return Measured icon, label and button widths.
    */
-  FooterActionChipLayout measure_footer_action_chip(TTF_Font *font, const ui::ShellFooterAction &action, int chipHeight) {
+  FooterActionChipLayout measure_footer_action_chip(TTF_Font *font, const ui::ShellFooterAction &action, int chipHeight, bool compact) {
     const int iconCount = (action.iconAssetPath.empty() ? 0 : 1) + (action.secondaryIconAssetPath.empty() ? 0 : 1);
     const int iconSize = (action.iconAssetPath.empty() && action.secondaryIconAssetPath.empty()) ? 0 : std::max(18, chipHeight - 14);
     const int iconBlockWidth = iconCount == 0 ? 0 : (iconSize * iconCount) + ((iconCount - 1) * 4);
+    const int padding = compact ? 6 : 10;
+    const int labelGap = compact ? 4 : 8;
     return {
       measure_footer_action_label_width(font, action.label),
       iconSize,
       iconBlockWidth,
-      10 + iconBlockWidth + (iconBlockWidth > 0 ? 8 : 0) + measure_footer_action_label_width(font, action.label) + 10,
+      padding * 2 + iconBlockWidth + (iconBlockWidth > 0 ? labelGap : 0) + measure_footer_action_label_width(font, action.label),
+      padding,
+      labelGap,
     };
   }
 
-  int render_footer_action_icons(SDL_Renderer *renderer, AssetTextureCache *assetCache, const ui::ShellFooterAction &action, const SDL_Rect &chipRect, int iconSize) {
-    int contentX = chipRect.x + 10;
+  /**
+   * @brief Draw controller glyphs using the same spacing as the measured action chip.
+   *
+   * @param renderer Active renderer.
+   * @param assetCache Cached controller icons.
+   * @param action Controller glyph paths.
+   * @param chipRect Action bounds.
+   * @param layout Measured icon sizes and spacing.
+   * @return Horizontal starting point for the action label.
+   */
+  int render_footer_action_icons(SDL_Renderer *renderer, AssetTextureCache *assetCache, const ui::ShellFooterAction &action, const SDL_Rect &chipRect, const FooterActionChipLayout &layout) {
+    int contentX = chipRect.x + layout.horizontalPadding;
+    const int iconSize = layout.iconSize;
     if (iconSize <= 0) {
       return contentX;
     }
@@ -1727,7 +1763,7 @@ namespace {
 
     render_icon(action.iconAssetPath);
     render_icon(action.secondaryIconAssetPath);
-    return contentX + 4;
+    return chipRect.x + layout.horizontalPadding + layout.iconBlockWidth + layout.iconLabelGap;
   }
 
   /**
@@ -1750,16 +1786,28 @@ namespace {
     const SDL_Rect &chipRect
   ) {
     fill_rounded_rect(renderer, chipRect, {PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xFF}, 6);
-    const int contentX = render_footer_action_icons(renderer, assetCache, action, chipRect, layout.iconSize);
-    return render_text_line(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, contentX, chipRect.y + std::max(6, (chipRect.h - TTF_FontLineSkip(font)) / 2), chipRect.w - (contentX - chipRect.x) - 10);
+    const int contentX = render_footer_action_icons(renderer, assetCache, action, chipRect, layout);
+    return render_text_line(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, contentX, chipRect.y + std::max(6, (chipRect.h - TTF_FontLineSkip(font)) / 2), chipRect.w - (contentX - chipRect.x) - layout.horizontalPadding);
   }
 
+  /**
+   * @brief Draw a controller-hint row with optional compact spacing for numeric entry.
+   *
+   * @param renderer Active renderer.
+   * @param font Action-label font.
+   * @param assetCache Cached controller glyphs.
+   * @param actions Ordered controller hints.
+   * @param footerRect Available row bounds.
+   * @param compact Use compact padding and gaps while preserving label and icon sizes.
+   * @return True when the visible action chips rendered successfully.
+   */
   bool render_footer_actions(
     SDL_Renderer *renderer,
     TTF_Font *font,
     AssetTextureCache *assetCache,
     const std::vector<ui::ShellFooterAction> &actions,
-    const SDL_Rect &footerRect
+    const SDL_Rect &footerRect,
+    bool compact
   ) {
     int cursorX = footerRect.x + 16;
     const int availableRight = footerRect.x + footerRect.w - 16;
@@ -1767,7 +1815,7 @@ namespace {
     const int chipY = footerRect.y + (footerRect.h - chipHeight) / 2;
 
     for (const ui::ShellFooterAction &action : actions) {
-      const FooterActionChipLayout layout = measure_footer_action_chip(font, action, chipHeight);
+      const FooterActionChipLayout layout = measure_footer_action_chip(font, action, chipHeight, compact);
       if (cursorX + layout.chipWidth > availableRight) {
         break;
       }
@@ -1776,7 +1824,7 @@ namespace {
         return false;
       }
 
-      cursorX += layout.chipWidth + 12;
+      cursorX += layout.chipWidth + (compact ? 6 : 12);
     }
 
     return true;
@@ -3784,7 +3832,7 @@ namespace {
     render_dialog_surface(renderer, bounds);
     const int titleInset = statusIconSize == 0 ? 0 : statusIconSize + 12;
     if (statusIconSize > 0) {
-      render_asset_icon(renderer, assetCache, modal.iconAssetPath, {bounds.x + padding, bounds.y + 28, statusIconSize, statusIconSize});
+      render_asset_icon(renderer, assetCache, modal.iconAssetPath, {bounds.x + padding, bounds.y + 28, statusIconSize, statusIconSize}, modal.busy ? ui::shell_spinner_angle(SDL_GetTicks()) : 0.0);
     }
     if (!render_text_line_simple(renderer, titleFont, modal.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, bounds.x + padding + titleInset, bounds.y + 28, innerWidth - titleInset)) {
       return false;
@@ -3836,8 +3884,7 @@ namespace {
     const int titleHeight = TTF_FontLineSkip(bodyFont) + 14;
     const int hintHeight = keypad_modal_text_height(renderer, smallFont, viewModel, innerWidth, cache);
     const int valueHeight = TTF_FontLineSkip(bodyFont) + 20;
-    const int footerRowHeight = std::max(38, TTF_FontLineSkip(smallFont) + 18);
-    const int footerHeight = footerRowHeight * (viewModel.keypad.segmentedAddress ? 2 : 1);
+    const int footerHeight = std::max(38, TTF_FontLineSkip(smallFont) + 18);
     const int preferredKeyHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 18);
     const int desiredHeight = padding * 2 + 12 + titleHeight + hintHeight + valueHeight + 20 + rows * (preferredKeyHeight + gap) + footerHeight;
     const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, desiredHeight));
@@ -3896,12 +3943,7 @@ namespace {
     }
     draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
     const auto &actions = viewModel.keypad.footerActions;
-    if (viewModel.keypad.segmentedAddress && actions.size() > 4U) {
-      const std::vector<ui::ShellFooterAction> editingActions(actions.begin(), actions.begin() + 4);
-      const std::vector<ui::ShellFooterAction> sectionActions(actions.begin() + 4, actions.end());
-      return render_footer_actions(renderer, smallFont, assetCache, editingActions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerRowHeight}) && render_footer_actions(renderer, smallFont, assetCache, sectionActions, {bounds.x + padding - 12, footerY + footerRowHeight, innerWidth + 24, footerRowHeight});
-    }
-    return render_footer_actions(renderer, smallFont, assetCache, actions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerHeight});
+    return render_footer_actions(renderer, smallFont, assetCache, actions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerHeight}, true);
   }
 
   /**

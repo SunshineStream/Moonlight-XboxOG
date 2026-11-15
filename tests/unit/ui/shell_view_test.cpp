@@ -337,10 +337,10 @@ namespace {
     EXPECT_EQ(viewModel.keypad.footerActions[0].label, "Enter Key");
     EXPECT_EQ(viewModel.keypad.footerActions[1].label, "Delete");
     EXPECT_EQ(viewModel.keypad.footerActions[2].label, "Cancel");
-    EXPECT_EQ(viewModel.keypad.footerActions[3].label, "Accept");
-    EXPECT_EQ(viewModel.keypad.footerActions[4].label, "Prev/Next");
-    EXPECT_EQ(viewModel.keypad.footerActions[4].iconAssetPath, "icons\\button-lb.svg");
-    EXPECT_EQ(viewModel.keypad.footerActions[4].secondaryIconAssetPath, "icons\\button-rb.svg");
+    EXPECT_EQ(viewModel.keypad.footerActions[3].label, "Prev/Next");
+    EXPECT_EQ(viewModel.keypad.footerActions[3].iconAssetPath, "icons\\button-lb.svg");
+    EXPECT_EQ(viewModel.keypad.footerActions[3].secondaryIconAssetPath, "icons\\button-rb.svg");
+    EXPECT_EQ(viewModel.keypad.footerActions[4].label, "Accept");
     ASSERT_EQ(viewModel.keypad.buttons.size(), 10U);
     EXPECT_EQ(viewModel.keypad.columnCount, 3U);
     EXPECT_EQ(viewModel.keypad.buttons[0].label, "1");
