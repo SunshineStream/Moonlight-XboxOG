@@ -14,6 +14,40 @@
 namespace {
 
   /**
+   * @brief Settings use the space beside the heading without overlapping the footer.
+   */
+  TEST(ShellLayoutTest, ExtendsSettingsAboveTheContentGrid) {
+    for (const auto [width, height] : {std::pair {640, 480}, {1280, 720}, {1920, 1080}}) {
+      const auto layout = ui::calculate_shell_layout(width, height);
+      const auto panel = ui::calculate_settings_panel(layout);
+      EXPECT_EQ(panel.y, layout.navigation.y);
+      EXPECT_LT(panel.y, layout.content.y);
+      EXPECT_GT(panel.x, layout.content.x + layout.content.w / 4);
+      EXPECT_EQ(panel.x + panel.w, layout.content.x + layout.content.w);
+      EXPECT_EQ(panel.y + panel.h, layout.footer.y - layout.gap);
+    }
+  }
+
+  /**
+   * @brief Long dialogs remain within overscan margins and short dialogs keep their requested size.
+   */
+  TEST(ShellLayoutTest, ClampsDialogsToTheSafeArea) {
+    const auto oversized = ui::calculate_shell_dialog(640, 480, 900, 900);
+    EXPECT_EQ(oversized.x, 32);
+    EXPECT_EQ(oversized.y, 24);
+    EXPECT_EQ(oversized.w, 576);
+    EXPECT_EQ(oversized.h, 432);
+    const auto compact = ui::calculate_shell_dialog(1280, 720, 640, 400);
+    EXPECT_EQ(compact.x, 320);
+    EXPECT_EQ(compact.y, 160);
+    EXPECT_EQ(compact.w, 640);
+    EXPECT_EQ(compact.h, 400);
+    const auto empty = ui::calculate_shell_dialog(0, 0, 0, -1);
+    EXPECT_EQ(empty.w, 1);
+    EXPECT_EQ(empty.h, 1);
+  }
+
+  /**
    * @brief Keep navigation, headings, cards and controls inside the overscan inset.
    */
   TEST(ShellLayoutTest, FitsStandardAndWidescreenDisplayModes) {

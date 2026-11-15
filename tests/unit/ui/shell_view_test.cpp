@@ -17,6 +17,66 @@
 namespace {
 
   /**
+   * @brief Host form actions have icons and entered text remains visible inside the keypad.
+   */
+  TEST(ShellViewTest, DecoratesHostOperationsAndShowsStagedInput) {
+    app::ClientState state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.menuRows.size(), 3U);
+    EXPECT_EQ(view.content.menuRows[0].iconAssetPath, "icons\\network.svg");
+    EXPECT_EQ(view.content.menuRows[1].iconAssetPath, "icons\\hash.svg");
+    state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpOffice];
+    app::handle_command(state, input::UiCommand::none);
+    view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.menuRows.size(), 6U);
+    EXPECT_EQ(view.content.menuRows[2].iconAssetPath, "icons\\activity.svg");
+    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\key-round.svg");
+    EXPECT_EQ(view.content.menuRows[4].iconAssetPath, "icons\\save.svg");
+    state.menu.select_item_by_id("edit-address");
+    app::handle_command(state, input::UiCommand::activate);
+    view = ui::build_shell_view_model(state, {});
+    EXPECT_EQ(view.keypad.value, test_support::kTestIpv4Addresses[test_support::kIpOffice]);
+    state.addHostDraft.activeField = app::AddHostField::port;
+    state.addHostDraft.keypad.stagedInput = "48000";
+    view = ui::build_shell_view_model(state, {});
+    EXPECT_EQ(view.keypad.value, "48000");
+  }
+
+  /**
+   * @brief Every settings category has a recognizable packaged Lucide icon.
+   */
+  TEST(ShellViewTest, DecoratesSettingsCategoriesWithIcons) {
+    app::ClientState state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::activate);
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.menuRows.size(), 4U);
+    EXPECT_EQ(view.content.menuRows[0].iconAssetPath, "icons\\scroll-text.svg");
+    EXPECT_EQ(view.content.menuRows[1].iconAssetPath, "icons\\monitor.svg");
+    EXPECT_EQ(view.content.menuRows[2].iconAssetPath, "icons\\gamepad-2.svg");
+    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\rotate-ccw.svg");
+  }
+
+  /**
+   * @brief Moon phases distinguish pairing and reachability without a green host symbol.
+   */
+  TEST(ShellViewTest, UsesMoonPhasesForHostState) {
+    app::ClientState state = app::create_initial_state();
+    app::replace_hosts(state, {
+                                {"Paired", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired, app::HostReachability::online},
+                                {"Unpaired", test_support::kTestIpv4Addresses[test_support::kIpHostGridA], 0, app::PairingState::not_paired, app::HostReachability::online},
+                                {"Offline", test_support::kTestIpv4Addresses[test_support::kIpLivingRoom], 0, app::PairingState::paired, app::HostReachability::offline},
+                              });
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.hostTiles.size(), 3U);
+    EXPECT_EQ(view.content.hostTiles[0].iconAssetPath, "hosts\\moon-full.svg");
+    EXPECT_EQ(view.content.hostTiles[1].iconAssetPath, "hosts\\moon-half.svg");
+    EXPECT_EQ(view.content.hostTiles[2].iconAssetPath, "hosts\\moon-crescent.svg");
+  }
+
+  /**
    * @brief Successful collection loading stays quiet while failures remain visible.
    */
   TEST(ShellViewTest, KeepsRoutineCollectionLoadingOutOfNotifications) {
@@ -80,7 +140,7 @@ namespace {
     EXPECT_EQ(viewModel.frame.pageTitle, "Your PCs");
     ASSERT_EQ(viewModel.content.toolbarButtons.size(), 3U);
     EXPECT_EQ(viewModel.content.toolbarButtons[0].iconAssetPath, "icons\\settings.svg");
-    EXPECT_EQ(viewModel.content.toolbarButtons[1].iconAssetPath, "icons\\life-buoy.svg");
+    EXPECT_EQ(viewModel.content.toolbarButtons[1].iconAssetPath, "icons\\question-mark.svg");
     EXPECT_TRUE(viewModel.content.toolbarButtons[2].selected);
     EXPECT_EQ(viewModel.content.toolbarButtons[2].label, "Add Host");
     EXPECT_EQ(viewModel.content.toolbarButtons[2].iconAssetPath, "icons\\circle-plus.svg");
@@ -116,10 +176,10 @@ namespace {
     ASSERT_EQ(viewModel.content.hostTiles.size(), 2U);
     EXPECT_EQ(viewModel.content.hostTiles[0].displayName, "Living Room PC");
     EXPECT_EQ(viewModel.content.hostTiles[0].statusLabel, "Offline");
-    EXPECT_EQ(viewModel.content.hostTiles[0].iconAssetPath, "icons\\monitor-off.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[0].iconAssetPath, "hosts\\moon-crescent.svg");
     EXPECT_EQ(viewModel.content.hostTiles[1].displayName, "Office PC");
     EXPECT_EQ(viewModel.content.hostTiles[1].statusLabel, "Online");
-    EXPECT_EQ(viewModel.content.hostTiles[1].iconAssetPath, "icons\\monitor-check.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[1].iconAssetPath, "hosts\\moon-full.svg");
     EXPECT_TRUE(viewModel.content.hostTiles[1].selected);
     EXPECT_EQ(viewModel.frame.subtitle, "Choose a PC to start playing.");
   }
@@ -253,6 +313,9 @@ namespace {
     EXPECT_FALSE(viewModel.content.rightPanelActive);
   }
 
+  /**
+   * @brief Input guidance and controller controls belong to the keypad dialog.
+   */
   TEST(ShellViewTest, BuildsTheAddHostKeypadModalAsANumberPad) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::activate);
@@ -263,8 +326,15 @@ namespace {
 
     EXPECT_TRUE(viewModel.keypad.visible);
     EXPECT_EQ(viewModel.keypad.title, "Address Keypad");
-    ASSERT_GE(viewModel.keypad.lines.size(), 3U);
-    EXPECT_EQ(viewModel.keypad.lines[0], "Editing field: Address");
+    ASSERT_EQ(viewModel.keypad.lines.size(), 1U);
+    EXPECT_EQ(viewModel.keypad.lines[0], "Enter your PC's IPv4 address.");
+    EXPECT_TRUE(viewModel.keypad.value.empty());
+    EXPECT_TRUE(viewModel.frame.footerActions.empty());
+    ASSERT_EQ(viewModel.keypad.footerActions.size(), 4U);
+    EXPECT_EQ(viewModel.keypad.footerActions[0].label, "Enter Key");
+    EXPECT_EQ(viewModel.keypad.footerActions[1].label, "Delete");
+    EXPECT_EQ(viewModel.keypad.footerActions[2].label, "Cancel");
+    EXPECT_EQ(viewModel.keypad.footerActions[3].label, "Accept");
     ASSERT_EQ(viewModel.keypad.buttons.size(), 11U);
     EXPECT_EQ(viewModel.keypad.columnCount, 3U);
     EXPECT_EQ(viewModel.keypad.buttons[0].label, "1");
@@ -453,6 +523,9 @@ namespace {
     EXPECT_EQ(viewModel.content.appTiles[1].badgeLabel, "Hidden");
   }
 
+  /**
+   * @brief Port entry keeps its default value and controls inside the keypad dialog.
+   */
   TEST(ShellViewTest, BuildsThePortKeypadAndDefaultPortLabel) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::activate);
@@ -464,9 +537,9 @@ namespace {
 
     EXPECT_TRUE(viewModel.keypad.visible);
     EXPECT_EQ(viewModel.keypad.title, "Port Keypad");
-    ASSERT_GE(viewModel.keypad.lines.size(), 4U);
-    EXPECT_EQ(viewModel.keypad.lines[0], "Editing field: Port");
-    EXPECT_EQ(viewModel.keypad.lines[1], "Staged value: default (47989)");
+    ASSERT_EQ(viewModel.keypad.lines.size(), 1U);
+    EXPECT_EQ(viewModel.keypad.lines[0], "Enter a custom port, or leave empty for 47989.");
+    EXPECT_EQ(viewModel.keypad.value, "default (47989)");
     ASSERT_EQ(viewModel.keypad.buttons.size(), 10U);
     EXPECT_EQ(viewModel.keypad.buttons.back().label, "0");
     EXPECT_TRUE(viewModel.keypad.buttons[9].selected);

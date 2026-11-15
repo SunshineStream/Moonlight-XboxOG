@@ -47,7 +47,6 @@ add_custom_target(sync_xbe_assets ALL
             "-DLUCIDE_SOURCE_DIR=${MOONLIGHT_LUCIDE_SOURCE_DIR}"
             "-DLUCIDE_ASSET_DIR=${XBOX_XBE_DIR}/assets"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage-lucide.cmake"
-        DEPENDS lucide_static
         COMMENT "Sync XBE assets"
         VERBATIM
 )

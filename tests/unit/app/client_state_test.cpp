@@ -5,17 +5,44 @@
 // test includes
 #include "tests/support/network_test_constants.h"
 
+#include <lizardbyte/common/testing.h>
+
 // standard includes
 #include <array>
 #include <string>
-
-// lib includes
-#include <lizardbyte/common/testing.h>
 
 // local includes
 #include "src/app/client_state.h"
 
 namespace {
+
+  /**
+   * @brief Host operations appear after entry and disappear after the address is cleared.
+   */
+  TEST(ClientStateTest, HidesHostOperationsUntilAnAddressIsEntered) {
+    app::ClientState state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    ASSERT_EQ(state.menu.items().size(), 3U);
+    EXPECT_FALSE(state.menu.select_item_by_id("test-connection"));
+    EXPECT_FALSE(state.menu.select_item_by_id("start-pairing"));
+    EXPECT_FALSE(state.menu.select_item_by_id("save-host"));
+    state.addHostDraft.addressInput = " \t\n";
+    app::handle_command(state, input::UiCommand::none);
+    EXPECT_EQ(state.menu.items().size(), 3U);
+    state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpOffice];
+    app::handle_command(state, input::UiCommand::none);
+    EXPECT_EQ(state.menu.items().size(), 6U);
+    EXPECT_TRUE(state.menu.select_item_by_id("test-connection"));
+    EXPECT_TRUE(state.menu.select_item_by_id("start-pairing"));
+    EXPECT_TRUE(state.menu.select_item_by_id("save-host"));
+    state.addHostDraft.addressInput.clear();
+    const auto update = app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.menu.items().size(), 3U);
+    EXPECT_FALSE(update.persistence.hostsChanged);
+    EXPECT_FALSE(update.requests.connectionTestRequested);
+    EXPECT_FALSE(update.requests.pairingRequested);
+    EXPECT_TRUE(state.addHostDraft.keypad.visible);
+  }
 
   /**
    * @brief Navigates from the initial hosts toolbar selection to the display settings options.
@@ -175,6 +202,9 @@ namespace {
     EXPECT_EQ(state.shell.activeScreen, app::ScreenId::hosts);
   }
 
+  /**
+   * @brief Refresh host actions after an address is entered and save a configured endpoint.
+   */
   TEST(ClientStateTest, CanSaveAManualHostEntryWithACustomPort) {
     app::ClientState state = app::create_initial_state();
 
@@ -185,6 +215,7 @@ namespace {
     ASSERT_EQ(state.shell.activeScreen, app::ScreenId::add_host);
     state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpManualCustomPort];
     state.addHostDraft.portInput = "48000";
+    app::handle_command(state, input::UiCommand::none);
     state.menu.select_item_by_id("save-host");
     update = app::handle_command(state, input::UiCommand::activate);
 
@@ -197,6 +228,9 @@ namespace {
     EXPECT_EQ(state.hosts.selectedHostIndex, 0U);
   }
 
+  /**
+   * @brief Keep duplicate validation and cancellation available after form actions appear.
+   */
   TEST(ClientStateTest, RejectsDuplicateHostEntriesAndAllowsCancellationBackToHosts) {
     app::ClientState state = app::create_initial_state();
 
@@ -204,6 +238,7 @@ namespace {
     state.hosts.selectedToolbarButtonIndex = 2U;
     app::handle_command(state, input::UiCommand::activate);
     state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpHostGridA];
+    app::handle_command(state, input::UiCommand::none);
     state.menu.select_item_by_id("save-host");
     app::handle_command(state, input::UiCommand::activate);
 
@@ -217,6 +252,7 @@ namespace {
     ASSERT_EQ(state.shell.activeScreen, app::ScreenId::add_host);
 
     state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpHostGridA];
+    app::handle_command(state, input::UiCommand::none);
     state.menu.select_item_by_id("save-host");
     update = app::handle_command(state, input::UiCommand::activate);
 
@@ -806,12 +842,16 @@ namespace {
     EXPECT_EQ(state.hosts.front().pairingState, app::PairingState::paired);
   }
 
+  /**
+   * @brief Reveal and dispatch connection testing after entering a host address.
+   */
   TEST(ClientStateTest, RequestsAConnectionTestFromTheAddHostScreen) {
     app::ClientState state = app::create_initial_state();
 
     app::handle_command(state, input::UiCommand::activate);
     state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpHostGridA];
     state.addHostDraft.portInput = "48000";
+    app::handle_command(state, input::UiCommand::none);
     state.menu.select_item_by_id("test-connection");
 
     const app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
@@ -918,10 +958,16 @@ namespace {
     EXPECT_EQ(state.hosts.active.reachability, app::HostReachability::online);
   }
 
+  /**
+   * @brief Keep pairing hidden for blank input and validate entered addresses before starting.
+   */
   TEST(ClientStateTest, AddHostStartPairingValidatesInputAndAddsNewHostsWhenNeeded) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.shell.activeScreen, app::ScreenId::add_host);
+    EXPECT_FALSE(state.menu.select_item_by_id("start-pairing"));
+    state.addHostDraft.addressInput = "invalid";
+    app::handle_command(state, input::UiCommand::none);
     ASSERT_TRUE(state.menu.select_item_by_id("start-pairing"));
 
     app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);

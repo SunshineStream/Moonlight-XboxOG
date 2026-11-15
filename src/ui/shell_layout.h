@@ -54,6 +54,25 @@ namespace ui {
   ShellLayout calculate_shell_layout(int width, int height);
 
   /**
+   * @brief Extend settings beside the navigation and heading.
+   *
+   * @param layout Shared shell regions.
+   * @return Detail panel bounded by the top and footer safe margins.
+   */
+  ShellRect calculate_settings_panel(const ShellLayout &layout);
+
+  /**
+   * @brief Center a dialog inside television-safe margins.
+   *
+   * @param width Logical display width.
+   * @param height Framebuffer height.
+   * @param desiredWidth Preferred dialog width.
+   * @param desiredHeight Preferred dialog height.
+   * @return Centered and clamped dialog bounds.
+   */
+  ShellRect calculate_shell_dialog(int width, int height, int desiredWidth, int desiredHeight);
+
+  /**
    * @brief Lay out a scrolling grid without stretching short collections vertically.
    *
    * @param bounds Available content rectangle.

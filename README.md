@@ -28,12 +28,20 @@ Missing artwork uses Lucide desktop or gamepad placeholders.
 Use the D-pad or left stick to navigate, **A** to select, **B** to go back and **Y** for host or app
 actions. Move up from the first PC row to reach Settings, Support and Add Host.
 
+PCs use grayscale moon artwork inspired by One: a full moon for paired online PCs, a half moon for
+online PCs awaiting pairing, and a crescent for offline PCs. A separate orbit shows controller focus.
+
+Settings categories have icons and the detail panel extends beside the page heading. Dialogs contain
+their controller actions; address and port entry show a separate input field above the keypad.
+Connection, pairing and save actions appear after a host address has been entered.
+
 The layout scales with the output resolution and leaves a five-percent inset for television overscan.
 Large libraries scroll to keep the selected game visible. Settings use a category list alongside
 options and help for the selected item.
 
-Navigation and PC status icons use [Lucide](https://lucide.dev/). The Xbox build fetches a pinned static
-release, verifies its SHA-256 hash and packages only the required SVGs and their license on the ISO.
+Navigation icons use [Lucide](https://lucide.dev/). CPM downloads the tagged source release declared in
+`package-lock.cmake`; the inherited Renovate configuration updates its version.
+Only the required SVGs and their license are packaged on the ISO.
 No network connection or JavaScript runtime is needed to display the icons on the console.
 
 

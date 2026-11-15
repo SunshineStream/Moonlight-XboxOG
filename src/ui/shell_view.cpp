@@ -134,19 +134,19 @@ namespace {
   }
 
   /**
-   * @brief Select the packaged Lucide monitor icon for a PC's connection state.
+   * @brief Select a grayscale moon phase for a PC's connection state.
    *
    * @param host Host whose reachability and pairing are displayed.
-   * @return SVG asset path staged by the Xbox build.
+   * @return Packaged first-party moon SVG path.
    */
   std::string host_tile_icon(const app::HostRecord &host) {
     if (host.reachability == app::HostReachability::online && host.pairingState == app::PairingState::paired) {
-      return "icons\\monitor-check.svg";
+      return "hosts\\moon-full.svg";
     }
     if (host.reachability == app::HostReachability::online) {
-      return "icons\\monitor-dot.svg";
+      return "hosts\\moon-half.svg";
     }
-    return "icons\\monitor-off.svg";
+    return "hosts\\moon-crescent.svg";
   }
 
   /**
@@ -158,7 +158,7 @@ namespace {
   std::vector<ui::ShellToolbarButton> toolbar_buttons(const app::ClientState &state) {
     return {
       {"settings", "Settings", "G", "icons\\settings.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 0U},
-      {"support", "Support", "?", "icons\\life-buoy.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 1U},
+      {"support", "Support", "?", "icons\\question-mark.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 1U},
       {"add-host", "Add Host", "+", "icons\\circle-plus.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 2U},
     };
   }
@@ -223,10 +223,6 @@ namespace {
     return tiles;
   }
 
-  std::string active_add_host_field_label(const app::ClientState &state) {
-    return state.addHostDraft.activeField == app::AddHostField::address ? "Address" : "Port";
-  }
-
   std::string keypad_value(const app::ClientState &state) {
     if (state.addHostDraft.keypad.visible) {
       return state.addHostDraft.keypad.stagedInput.empty() && state.addHostDraft.activeField == app::AddHostField::port ? "default (47989)" : state.addHostDraft.keypad.stagedInput;
@@ -272,20 +268,14 @@ namespace {
     return buttons;
   }
 
+  /**
+   * @brief Explain the active keypad field without repeating button hints or the input value.
+   *
+   * @param state Current add-host field.
+   * @return Concise guidance displayed above the keypad input.
+   */
   std::vector<std::string> keypad_modal_lines(const app::ClientState &state) {
-    std::vector<std::string> lines = {
-      std::string("Editing field: ") + active_add_host_field_label(state),
-      std::string("Staged value: ") + keypad_value(state),
-      "Use the D-pad or left stick to choose a key. Hold a direction to keep moving.",
-    };
-
-    if (state.addHostDraft.activeField == app::AddHostField::address) {
-      lines.emplace_back("Enter a dotted IPv4 address such as 192.168.0.10.");
-    } else {
-      lines.emplace_back("Enter digits for a custom TCP port, or leave it empty to keep the default of 47989.");
-    }
-
-    return lines;
+    return {state.addHostDraft.activeField == app::AddHostField::address ? "Enter your PC's IPv4 address." : "Enter a custom port, or leave empty for 47989."};
   }
 
   /**
@@ -431,6 +421,49 @@ namespace {
     return {};
   }
 
+  /**
+   * @brief Resolve a navigation icon from a stable settings or host action identifier.
+   *
+   * @param id Navigation action identifier.
+   * @return Packaged Lucide SVG path, or an empty path for undecorated actions.
+   */
+  std::string menu_icon(const std::string &id) {
+    if (id == "settings-category:logging") {
+      return "icons\\scroll-text.svg";
+    }
+    if (id == "settings-category:display") {
+      return "icons\\monitor.svg";
+    }
+    if (id == "settings-category:input") {
+      return "icons\\gamepad-2.svg";
+    }
+    if (id == "settings-category:reset") {
+      return "icons\\rotate-ccw.svg";
+    }
+    if (id == "edit-address") {
+      return "icons\\network.svg";
+    }
+    if (id == "edit-port") {
+      return "icons\\hash.svg";
+    }
+    if (id == "test-connection") {
+      return "icons\\activity.svg";
+    }
+    if (id == "start-pairing") {
+      return "icons\\key-round.svg";
+    }
+    if (id == "save-host") {
+      return "icons\\save.svg";
+    }
+    return {};
+  }
+
+  /**
+   * @brief Build navigation rows with contextual Lucide icons.
+   *
+   * @param state Current menu and selection state.
+   * @return Render-ready navigation actions.
+   */
   std::vector<ui::ShellActionRow> menu_rows(const app::ClientState &state) {
     std::vector<ui::ShellActionRow> rows;
     const ui::MenuItem *selectedItem = state.menu.selected_item();
@@ -441,6 +474,7 @@ namespace {
         item.enabled,
         selectedItem != nullptr && selectedItem->id == item.id,
         false,
+        menu_icon(item.id),
       });
     }
     return rows;
@@ -474,9 +508,9 @@ namespace {
   void fill_support_modal_view(ui::ShellViewModel *viewModel) {
     viewModel->modal.title = "Support";
     viewModel->modal.lines = {
-      "Moonlight Xbox OG prototype UI",
-      "Use the footer actions below to close this dialog.",
-      "Open host and app context menus from the Y action on the main screens.",
+      "Moonlight for the original Xbox",
+      "Run Sunshine on your PC, then select it here to pair and browse your games.",
+      "Press Y on a PC or app for more options.",
     };
     viewModel->modal.footerActions = {
       {"close", "Close", "icons\\button-a.svg", "icons\\button-start.svg", true},
@@ -782,6 +816,9 @@ namespace ui {
 
     if (viewModel.keypad.visible) {
       viewModel.keypad.lines = keypad_modal_lines(state);
+      viewModel.keypad.value = keypad_value(state);
+      viewModel.keypad.footerActions = viewModel.frame.footerActions;
+      viewModel.frame.footerActions.clear();
       viewModel.keypad.buttons = keypad_buttons(state);
     }
 

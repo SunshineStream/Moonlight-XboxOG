@@ -732,6 +732,18 @@ namespace {
     }
   }
 
+  /**
+   * @brief Draw the opaque rounded dialog surface above a dimmed page.
+   *
+   * @param renderer Active shell renderer.
+   * @param rect Dialog bounds.
+   */
+  void render_dialog_surface(SDL_Renderer *renderer, const SDL_Rect &rect) {
+    fill_rounded_rect(renderer, {rect.x + 5, rect.y + 7, rect.w, rect.h}, {0, 0, 0, 0x70}, 12);
+    fill_rounded_rect(renderer, rect, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF}, 12);
+    fill_rounded_rect(renderer, {rect.x + 20, rect.y + 16, 36, 3}, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, 1);
+  }
+
   bool render_text_line(  // NOSONAR(cpp:S107) helper keeps the SDL text rendering callsite contract explicit
     SDL_Renderer *renderer,
     TTF_Font *font,
@@ -1399,6 +1411,19 @@ namespace {
     fill_rect(renderer, thumbRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xD0);
   }
 
+  /**
+   * @brief Display diagnostics in the shared opaque rounded dialog surface.
+   *
+   * @param renderer Active renderer.
+   * @param bodyFont Dialog heading font.
+   * @param smallFont Diagnostic text font.
+   * @param assetCache Cached controller glyphs.
+   * @param viewModel Log content and pane placement.
+   * @param screenWidth Logical display width.
+   * @param screenHeight Framebuffer height.
+   * @param outerMargin Television-safe inset.
+   * @return True when the viewer rendered successfully.
+   */
   bool render_log_viewer_modal(  // NOSONAR(cpp:S107) modal rendering keeps the layout inputs explicit
     SDL_Renderer *renderer,
     TTF_Font *bodyFont,
@@ -1413,20 +1438,19 @@ namespace {
     fill_rect(renderer, {0, 0, screenWidth, screenHeight}, 0x00, 0x00, 0x00, 0xA6);
 
     const SDL_Rect modalRect = log_viewer_rect(viewModel, screenWidth, screenHeight, outerMargin);
-    fill_rect(renderer, modalRect, PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xF4);
-    draw_rect(renderer, modalRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
+    render_dialog_surface(renderer, modalRect);
 
-    if (!render_text_line_simple(renderer, bodyFont, viewModel.modal.title, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, modalRect.x + 18, modalRect.y + 16, modalRect.w - 36)) {
+    if (!render_text_line_simple(renderer, bodyFont, viewModel.modal.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 18, modalRect.y + 28, modalRect.w - 36)) {
       return false;
     }
 
     int pathHeight = 0;
-    if (!render_text_line_simple(renderer, smallFont, "Path: " + viewModel.logViewer.path, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 18, modalRect.y + 56, modalRect.w - 36, &pathHeight)) {
+    if (!render_text_line_simple(renderer, smallFont, "Path: " + viewModel.logViewer.path, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 18, modalRect.y + 64, modalRect.w - 36, &pathHeight)) {
       return false;
     }
 
     const int hintHeight = std::max(30, TTF_FontLineSkip(smallFont) + 10);
-    const SDL_Rect hintRect {modalRect.x + 18, modalRect.y + 56 + pathHeight + 8, modalRect.w - 36, hintHeight};
+    const SDL_Rect hintRect {modalRect.x + 18, modalRect.y + 64 + pathHeight + 8, modalRect.w - 36, hintHeight};
     if (const std::vector<ui::ShellFooterAction> logViewerActions = {
           {"change-view", "Change View", "icons\\button-x.svg", "icons\\button-y.svg", false},
           {"scroll", "Scroll", "icons\\button-lb.svg", "icons\\button-rb.svg", false},
@@ -1438,7 +1462,7 @@ namespace {
     }
 
     const int contentBottom = modalRect.y + modalRect.h - 18;
-    const int requestedContentY = modalRect.y + 56 + pathHeight + hintHeight + 18;
+    const int requestedContentY = modalRect.y + 64 + pathHeight + hintHeight + 18;
     const int contentAreaY = std::min(requestedContentY, std::max(modalRect.y + 72, contentBottom - 1));
     const SDL_Rect contentRect {
       modalRect.x + 18,
@@ -1490,6 +1514,8 @@ namespace {
    * @param rows Actions and their focus state.
    * @param rect Available list bounds.
    * @param rowHeight Height of an action row.
+   * @param assetCache Optional cache for menu icons.
+   * @param active Whether this list currently owns controller focus.
    * @return True when visible labels rendered successfully.
    */
   bool render_action_rows(
@@ -1497,7 +1523,9 @@ namespace {
     TTF_Font *font,
     const std::vector<ui::ShellActionRow> &rows,
     const SDL_Rect &rect,
-    int rowHeight
+    int rowHeight,
+    AssetTextureCache *assetCache = nullptr,
+    bool active = true
   ) {
     if (rows.empty()) {
       return true;
@@ -1535,12 +1563,20 @@ namespace {
       const ui::ShellActionRow &row = rows[index];
       const SDL_Rect rowRect {rect.x, y, contentWidth, rowHeight};
       if (row.selected) {
-        fill_rounded_rect(renderer, rowRect, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0x28}, 5);
-        fill_rect(renderer, {rowRect.x, rowRect.y + 7, 3, rowRect.h - 14}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
+        fill_rounded_rect(renderer, rowRect, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, static_cast<Uint8>(active ? 0x28 : 0x12)}, 7);
+        if (active) {
+          fill_rect(renderer, {rowRect.x, rowRect.y + 8, 3, rowRect.h - 16}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
+        }
       }
 
+      int labelX = rowRect.x + 12;
+      if (assetCache != nullptr && !row.iconAssetPath.empty()) {
+        const int iconSize = std::min(24, rowRect.h - 16);
+        render_asset_icon(renderer, assetCache, row.iconAssetPath, {labelX, rowRect.y + (rowRect.h - iconSize) / 2, iconSize, iconSize});
+        labelX += iconSize + 10;
+      }
       const std::string label = row.checked ? "[x] " + row.label : row.label;
-      if (const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}; !render_text_line_simple(renderer, font, label, color, rowRect.x + 12, rowRect.y + 8, rowRect.w - 24)) {
+      if (const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}; !render_text_line_simple(renderer, font, label, color, labelX, rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2, rowRect.x + rowRect.w - labelX - 12)) {
         return false;
       }
 
@@ -1605,6 +1641,14 @@ namespace {
     return labelWidth;
   }
 
+  /**
+   * @brief Measure a compact controller-action button so dialog controls fit SD output.
+   *
+   * @param font Action label font.
+   * @param action Controller glyphs and label.
+   * @param chipHeight Available button height.
+   * @return Measured icon, label and button widths.
+   */
   FooterActionChipLayout measure_footer_action_chip(TTF_Font *font, const ui::ShellFooterAction &action, int chipHeight) {
     const int iconCount = (action.iconAssetPath.empty() ? 0 : 1) + (action.secondaryIconAssetPath.empty() ? 0 : 1);
     const int iconSize = (action.iconAssetPath.empty() && action.secondaryIconAssetPath.empty()) ? 0 : std::max(18, chipHeight - 14);
@@ -1613,7 +1657,7 @@ namespace {
       measure_footer_action_label_width(font, action.label),
       iconSize,
       iconBlockWidth,
-      18 + iconBlockWidth + (iconBlockWidth > 0 ? 8 : 0) + measure_footer_action_label_width(font, action.label) + 18,
+      10 + iconBlockWidth + (iconBlockWidth > 0 ? 8 : 0) + measure_footer_action_label_width(font, action.label) + 10,
     };
   }
 
@@ -1637,6 +1681,17 @@ namespace {
     return contentX + 4;
   }
 
+  /**
+   * @brief Draw a rounded action button containing its controller glyph and label.
+   *
+   * @param renderer Active renderer.
+   * @param font Action label font.
+   * @param assetCache Cached controller glyphs.
+   * @param action Action represented by the button.
+   * @param layout Measured icon and label layout.
+   * @param chipRect Button bounds.
+   * @return True when its label rendered successfully.
+   */
   bool render_footer_action_chip(
     SDL_Renderer *renderer,
     TTF_Font *font,
@@ -1645,6 +1700,7 @@ namespace {
     const FooterActionChipLayout &layout,
     const SDL_Rect &chipRect
   ) {
+    fill_rounded_rect(renderer, chipRect, {PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xFF}, 6);
     const int contentX = render_footer_action_icons(renderer, assetCache, action, chipRect, layout.iconSize);
     return render_text_line(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, contentX, chipRect.y + std::max(6, (chipRect.h - TTF_FontLineSkip(font)) / 2), chipRect.w - (contentX - chipRect.x) - 10);
   }
@@ -3504,7 +3560,7 @@ namespace {
     const SDL_Rect optionsRect {bodyPanel.x + panelPadding, bodyPanel.y + panelPadding + headerHeight, innerWidth, optionsHeight};
     const int descriptionY = optionsRect.y + optionsRect.h + 12;
     const SDL_Rect descriptionRect {bodyPanel.x + panelPadding, descriptionY, innerWidth, std::max(1, bodyPanel.y + bodyPanel.h - panelPadding - descriptionY)};
-    if (!render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth) || !render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, optionsRect, rowHeight)) {
+    if (!render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth) || !render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, optionsRect, rowHeight, nullptr, viewModel.content.rightPanelActive)) {
       return false;
     }
     draw_line(renderer, descriptionRect.x, descriptionRect.y - 6, descriptionRect.x + descriptionRect.w, descriptionRect.y - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
@@ -3564,7 +3620,7 @@ namespace {
   }
 
   /**
-   * @brief Render PC cards with compact monitor artwork and explicit connection state.
+   * @brief Render grayscale moon avatars with an independent focus orbit and status labels.
    *
    * @param renderer Active shell renderer.
    * @param bodyFont Font for host names.
@@ -3584,18 +3640,19 @@ namespace {
     for (std::size_t index = first; index < end; ++index) {
       const SDL_Rect card = sdl_rect(ui::shell_grid_cell(bounds, grid, index));
       const auto &tile = viewModel.content.hostTiles[index];
-      render_card_surface(renderer, card, tile.selected);
       const int nameHeight = TTF_FontLineSkip(bodyFont);
       const int statusHeight = TTF_FontLineSkip(smallFont);
       const int nameY = card.y + card.h - nameHeight - statusHeight - 24;
-      const int iconSize = std::max(24, std::min(card.w / 2, nameY - card.y - 28));
+      const int iconSize = std::max(24, std::min(card.w - 24, nameY - card.y - 8));
       const SDL_Rect icon {card.x + (card.w - iconSize) / 2, card.y + std::max(12, (nameY - card.y - iconSize) / 2), iconSize, iconSize};
       render_asset_icon(renderer, assetCache, tile.iconAssetPath, icon);
+      if (tile.selected) {
+        render_asset_icon(renderer, assetCache, "hosts\\orbit.svg", icon);
+      }
       if (!render_text_centered_simple(renderer, bodyFont, tile.displayName, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, {card.x + 12, nameY, card.w - 24, nameHeight})) {
         return false;
       }
-      const bool online = tile.reachability == app::HostReachability::online;
-      const SDL_Color statusColor = online ? SDL_Color {0x79, 0xDB, 0xB0, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
+      const SDL_Color statusColor {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
       if (!render_text_centered_simple(renderer, smallFont, tile.statusLabel, statusColor, {card.x + 12, nameY + nameHeight + 6, card.w - 24, statusHeight})) {
         return false;
       }
@@ -3615,6 +3672,123 @@ namespace {
       viewModel.content.bodyLines,
       {{TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, gridRect.x + 24, gridRect.y + std::max(16, (gridRect.h - textHeight) / 2), gridRect.w - 48, lineGap}
     );
+  }
+
+  /**
+   * @brief Render a content-sized dialog with actions contained by its opaque surface.
+   *
+   * @param renderer Active renderer.
+   * @param titleFont Dialog heading font.
+   * @param bodyFont Action label font.
+   * @param smallFont Supporting text font.
+   * @param assetCache Cached controller glyphs and action icons.
+   * @param modal Dialog content.
+   * @param width Logical display width.
+   * @param height Framebuffer height.
+   * @return True when the dialog rendered successfully.
+   */
+  bool render_shell_dialog(SDL_Renderer *renderer, TTF_Font *titleFont, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellModalView &modal, int width, int height) {
+    const int padding = std::max(18, height / 40);
+    const int dialogWidth = std::min(760, width * 3 / 4);
+    const int innerWidth = dialogWidth - padding * 2;
+    const int titleHeight = TTF_FontLineSkip(titleFont) + 18;
+    const int footerHeight = std::max(40, TTF_FontLineSkip(smallFont) + 18);
+    const int rowHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 16);
+    const int textHeight = measure_body_lines_height(smallFont, modal.lines, innerWidth, 8);
+    const int actionsHeight = static_cast<int>(modal.actions.size()) * (rowHeight + 6);
+    const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, padding * 2 + titleHeight + textHeight + actionsHeight + footerHeight + 20));
+    fill_rect(renderer, {0, 0, width, height}, 0, 0, 0, 0xA0);
+    render_dialog_surface(renderer, bounds);
+    if (!render_text_line_simple(renderer, titleFont, modal.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, bounds.x + padding, bounds.y + 28, innerWidth)) {
+      return false;
+    }
+    const int footerY = bounds.y + bounds.h - padding - footerHeight;
+    int cursorY = bounds.y + padding + titleHeight + 10;
+    const int actionSpace = std::min(actionsHeight, std::max(0, footerY - cursorY - 12));
+    const int textBottom = footerY - actionSpace - 12;
+    for (const auto &line : modal.lines) {
+      int drawnHeight = 0;
+      if (!render_bounded_text(renderer, smallFont, line, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {bounds.x + padding, cursorY, innerWidth, textBottom - cursorY}, &drawnHeight)) {
+        return false;
+      }
+      cursorY += drawnHeight + 8;
+    }
+    if (!modal.actions.empty() && !render_action_rows(renderer, bodyFont, modal.actions, {bounds.x + padding, cursorY + 4, innerWidth, footerY - cursorY - 12}, rowHeight, assetCache)) {
+      return false;
+    }
+    draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
+    const std::vector<ui::ShellFooterAction> defaultActions = modal.actions.empty() ?
+                                                                std::vector<ui::ShellFooterAction> {{"close", "Close", "icons\\button-b.svg", {}, false}} :
+                                                                std::vector<ui::ShellFooterAction> {{"select", "Select", "icons\\button-a.svg", {}, true}, {"back", "Back", "icons\\button-b.svg", {}, false}};
+    return render_footer_actions(renderer, smallFont, assetCache, modal.footerActions.empty() ? defaultActions : modal.footerActions, {bounds.x + padding - 6, footerY, innerWidth + 12, footerHeight});
+  }
+
+  /**
+   * @brief Render an input dialog with a separate value field, rounded keys and in-dialog controls.
+   *
+   * @param renderer Active renderer.
+   * @param bodyFont Heading, input and key font.
+   * @param smallFont Guidance and action font.
+   * @param assetCache Cached button glyphs.
+   * @param viewModel Current keypad state.
+   * @param width Logical display width.
+   * @param height Framebuffer height.
+   * @param cache Reusable keypad text and measurements.
+   * @return True when the complete keypad rendered.
+   */
+  bool render_keypad_dialog(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, int width, int height, KeypadModalLayoutCache *cache) {
+    const int padding = std::max(18, height / 40);
+    const int dialogWidth = std::min(720, width * 4 / 5);
+    const int innerWidth = dialogWidth - padding * 2;
+    const int columns = std::max(1, static_cast<int>(viewModel.keypad.columnCount));
+    const int rows = std::max(1, static_cast<int>((viewModel.keypad.buttons.size() + columns - 1) / columns));
+    const int gap = 8;
+    const int titleHeight = TTF_FontLineSkip(bodyFont) + 14;
+    const int hintHeight = keypad_modal_text_height(renderer, smallFont, viewModel, innerWidth, cache);
+    const int valueHeight = TTF_FontLineSkip(bodyFont) + 20;
+    const int footerHeight = std::max(38, TTF_FontLineSkip(smallFont) + 18);
+    const int preferredKeyHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 18);
+    const int desiredHeight = padding * 2 + 12 + titleHeight + hintHeight + valueHeight + 20 + rows * (preferredKeyHeight + gap) + footerHeight;
+    const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, desiredHeight));
+    fill_rect(renderer, {0, 0, width, height}, 0, 0, 0, 0xA0);
+    render_dialog_surface(renderer, bounds);
+    if (!ensure_single_line_text_texture(renderer, bodyFont, viewModel.keypad.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, innerWidth, &cache->titleTexture) || !render_cached_text_texture(renderer, cache->titleTexture, bounds.x + padding, bounds.y + 28)) {
+      return false;
+    }
+    int cursorY = bounds.y + padding + titleHeight + 12;
+    for (const auto &line : cache->lineTextures) {
+      int drawnHeight = 0;
+      if (!render_cached_text_texture(renderer, line, bounds.x + padding, cursorY, &drawnHeight)) {
+        return false;
+      }
+      cursorY += drawnHeight + 6;
+    }
+    const SDL_Rect valueRect {bounds.x + padding, cursorY + 2, innerWidth, valueHeight};
+    fill_rounded_rect(renderer, valueRect, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF}, 6);
+    const bool emptyValue = viewModel.keypad.value.empty();
+    if (!render_text_line_simple(renderer, bodyFont, emptyValue ? "192.168.0.10" : viewModel.keypad.value, emptyValue ? SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF} : SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, valueRect.x + 12, valueRect.y + 8, valueRect.w - 24)) {
+      return false;
+    }
+    const int keysY = valueRect.y + valueRect.h + 12;
+    const int footerY = bounds.y + bounds.h - padding - footerHeight;
+    const int keyHeight = std::max(1, (footerY - 12 - keysY - gap * (rows - 1)) / rows);
+    const int keyWidth = (innerWidth - gap * (columns - 1)) / columns;
+    if (cache->buttonLabelTextures.size() > viewModel.keypad.buttons.size()) {
+      for (std::size_t index = viewModel.keypad.buttons.size(); index < cache->buttonLabelTextures.size(); ++index) {
+        clear_cached_text_texture(&cache->buttonLabelTextures[index]);
+      }
+    }
+    cache->buttonLabelTextures.resize(viewModel.keypad.buttons.size());
+    for (std::size_t index = 0; index < viewModel.keypad.buttons.size(); ++index) {
+      const SDL_Rect key {bounds.x + padding + static_cast<int>(index % columns) * (keyWidth + gap), keysY + static_cast<int>(index / columns) * (keyHeight + gap), keyWidth, keyHeight};
+      const auto &button = viewModel.keypad.buttons[index];
+      render_card_surface(renderer, key, button.selected);
+      if (!ensure_single_line_text_texture(renderer, bodyFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, key.w, &cache->buttonLabelTextures[index]) || !render_cached_centered_text_texture(renderer, cache->buttonLabelTextures[index], key)) {
+        return false;
+      }
+    }
+    draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
+    return render_footer_actions(renderer, smallFont, assetCache, viewModel.keypad.footerActions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerHeight});
   }
 
   /**
@@ -3726,7 +3900,7 @@ namespace {
       };
       const int menuPanelWidth = (panelArea.w * 30) / 100;
       const SDL_Rect menuPanel {panelArea.x, panelArea.y, menuPanelWidth, panelArea.h};
-      const SDL_Rect bodyPanel {panelArea.x + menuPanelWidth + panelGap, panelArea.y, panelArea.w - menuPanelWidth - panelGap, panelArea.h};
+      const SDL_Rect bodyPanel = settingsScreen ? sdl_rect(ui::calculate_settings_panel(layout)) : SDL_Rect {panelArea.x + menuPanelWidth + panelGap, panelArea.y, panelArea.w - menuPanelWidth - panelGap, panelArea.h};
       fill_rounded_rect(renderer, bodyPanel, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF});
       // Focus belongs to the selected row, rather than an entire outlined pane.
 
@@ -3740,7 +3914,9 @@ namespace {
             bodyFont,
             viewModel.content.menuRows,
             {menuPanel.x + panelPadding, menuHeaderRect.y + menuHeaderRect.h + 12, menuPanel.w - (panelPadding * 2), menuPanel.h - (menuHeaderRect.h + (panelPadding * 2) + 12)},
-            std::max(36, screenHeight / 13)
+            std::max(36, screenHeight / 13),
+            assetCache,
+            viewModel.content.leftPanelActive
           )) {
         return false;
       }
@@ -3761,7 +3937,7 @@ namespace {
       }
     }
 
-    if (!render_footer_actions(renderer, smallFont, assetCache, viewModel.frame.footerActions, footerRect)) {
+    if (!viewModel.modal.visible && !viewModel.keypad.visible && !render_footer_actions(renderer, smallFont, assetCache, viewModel.frame.footerActions, footerRect)) {
       return false;
     }
 
@@ -3812,121 +3988,12 @@ namespace {
         render_text_line_simple(renderer, smallFont, "Press B to close.", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_FontLineSkip(smallFont) + 8, modalRect.w - 32);
       }
     } else if (viewModel.modal.visible) {
-      SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-      fill_rect(renderer, {0, 0, screenWidth, screenHeight}, 0x00, 0x00, 0x00, 0xA6);
-      const SDL_Rect modalRect {
-        screenWidth / 6,
-        screenHeight / 6,
-        (screenWidth * 2) / 3,
-        (screenHeight * 2) / 3,
-      };
-      fill_rect(renderer, modalRect, PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xF2);
-      draw_rect(renderer, modalRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
-      if (!render_text_line(renderer, bodyFont, viewModel.modal.title, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 16, modalRect.w - 32)) {
+      if (!render_shell_dialog(renderer, titleFont, bodyFont, smallFont, assetCache, viewModel.modal, screenWidth, screenHeight)) {
         return false;
-      }
-
-      int modalY = modalRect.y + 54;
-      for (const std::string &line : viewModel.modal.lines) {
-        int drawnHeight = 0;
-        if (!render_text_line(renderer, smallFont, line, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 16, modalY, modalRect.w - 32, &drawnHeight)) {
-          return false;
-        }
-        modalY += drawnHeight + 6;
-      }
-
-      if (!viewModel.modal.actions.empty()) {
-        if (!render_action_rows(renderer, bodyFont, viewModel.modal.actions, {modalRect.x + 16, modalY + 8, modalRect.w - 32, modalRect.h - (modalY - modalRect.y) - 24}, std::max(34, TTF_FontLineSkip(bodyFont) + 12))) {
-          return false;
-        }
-      } else if (!viewModel.modal.footerActions.empty()) {
-        const SDL_Rect modalFooterRect {modalRect.x + 16, modalRect.y + modalRect.h - 56, modalRect.w - 32, 40};
-        if (!render_footer_actions(renderer, smallFont, assetCache, viewModel.modal.footerActions, modalFooterRect)) {
-          return false;
-        }
       }
     }
-
-    if (viewModel.keypad.visible) {
-      SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-      const SDL_Rect scrimRect {0, 0, screenWidth, screenHeight};
-      fill_rect(renderer, scrimRect, 0x00, 0x00, 0x00, 0x9C);
-
-      const int modalWidth = std::min(screenWidth - (outerMargin * 2), std::max(360, screenWidth / 2));
-      const int buttonGap = 10;
-      const int buttonColumnCount = std::max(1, static_cast<int>(viewModel.keypad.columnCount));
-      const int buttonRowCount = std::max(1, static_cast<int>((viewModel.keypad.buttons.size() + viewModel.keypad.columnCount - 1) / viewModel.keypad.columnCount));
-      const int preferredButtonHeight = std::max(40, TTF_FontLineSkip(bodyFont) + 16);
-      const int modalInnerWidth = modalWidth - 32;
-      const int modalTextHeight = keypad_modal_text_height(renderer, smallFont, viewModel, modalInnerWidth, keypadModalLayoutCache);
-      const int desiredButtonAreaHeight = (buttonRowCount * preferredButtonHeight) + (buttonGap * std::max(0, buttonRowCount - 1));
-      const int desiredModalHeight = 52 + modalTextHeight + 16 + desiredButtonAreaHeight + 28;
-      const int modalHeight = std::min(screenHeight - (outerMargin * 2), std::max(300, desiredModalHeight));
-      const SDL_Rect modalRect {
-        (screenWidth - modalWidth) / 2,
-        (screenHeight - modalHeight) / 2,
-        modalWidth,
-        modalHeight,
-      };
-
-      fill_rect(renderer, modalRect, PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xF0);
-      draw_rect(renderer, modalRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
-
-      if (
-        !ensure_wrapped_text_texture(renderer, bodyFont, viewModel.keypad.title, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, modalRect.w - 32, &keypadModalLayoutCache->titleTexture) ||
-        !render_cached_text_texture(renderer, keypadModalLayoutCache->titleTexture, modalRect.x + 16, modalRect.y + 16)
-      ) {
-        return false;
-      }
-
-      int modalY = modalRect.y + 52;
-      keypadModalLayoutCache->lineTextures.resize(viewModel.keypad.lines.size());
-      for (std::size_t index = 0; index < viewModel.keypad.lines.size(); ++index) {
-        int drawnHeight = 0;
-        if (!render_cached_text_texture(renderer, keypadModalLayoutCache->lineTextures[index], modalRect.x + 16, modalY, &drawnHeight)) {
-          return false;
-        }
-        modalY += drawnHeight + 6;
-      }
-
-      const int buttonAreaTop = modalY + 16;
-      const int buttonAreaHeight = (modalRect.y + modalRect.h) - buttonAreaTop - 24;
-      const int buttonWidth = (modalRect.w - 32 - (buttonGap * (buttonColumnCount - 1))) / buttonColumnCount;
-      const int buttonHeight = std::max(34, (buttonAreaHeight - (buttonGap * std::max(0, buttonRowCount - 1))) / buttonRowCount);
-
-      if (keypadModalLayoutCache->buttonLabelTextures.size() > viewModel.keypad.buttons.size()) {
-        for (std::size_t index = viewModel.keypad.buttons.size(); index < keypadModalLayoutCache->buttonLabelTextures.size(); ++index) {
-          clear_cached_text_texture(&keypadModalLayoutCache->buttonLabelTextures[index]);
-        }
-      }
-      keypadModalLayoutCache->buttonLabelTextures.resize(viewModel.keypad.buttons.size());
-
-      for (std::size_t index = 0; index < viewModel.keypad.buttons.size(); ++index) {
-        const auto row = static_cast<int>(index / viewModel.keypad.columnCount);
-        const auto column = static_cast<int>(index % viewModel.keypad.columnCount);
-        const SDL_Rect buttonRect {
-          modalRect.x + 16 + (column * (buttonWidth + buttonGap)),
-          buttonAreaTop + (row * (buttonHeight + buttonGap)),
-          buttonWidth,
-          buttonHeight,
-        };
-        const ui::ShellModalButton &button = viewModel.keypad.buttons[index];
-
-        if (button.selected) {
-          fill_rect(renderer, buttonRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0x55);
-        } else {
-          fill_rect(renderer, buttonRect, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xE0);
-        }
-        draw_rect(renderer, buttonRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
-
-        const SDL_Color buttonColor = button.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
-        if (
-          !ensure_single_line_text_texture(renderer, bodyFont, button.label, buttonColor, buttonRect.w, &keypadModalLayoutCache->buttonLabelTextures[index]) ||
-          !render_cached_centered_text_texture(renderer, keypadModalLayoutCache->buttonLabelTextures[index], buttonRect)
-        ) {
-          return false;
-        }
-      }
+    if (viewModel.keypad.visible && !render_keypad_dialog(renderer, bodyFont, smallFont, assetCache, viewModel, screenWidth, screenHeight, keypadModalLayoutCache)) {
+      return false;
     }
 
     SDL_RenderPresent(renderer);

@@ -64,6 +64,7 @@ namespace ui {
     bool enabled = true;  ///< True when the row can be activated.
     bool selected = false;  ///< True when the row currently has focus.
     bool checked = false;  ///< True when the row represents an enabled option.
+    std::string iconAssetPath;  ///< Optional icon displayed to the left of a menu label.
   };
 
   /**
@@ -121,8 +122,8 @@ namespace ui {
     std::vector<ShellActionRow> detailMenuRows;  ///< Secondary action rows for details or settings.
     std::string selectedMenuRowLabel;  ///< Label of the currently selected primary menu row.
     std::string selectedMenuRowDescription;  ///< Description of the currently selected row, when available.
-    bool leftPanelActive = false;  ///< True when the left navigation panel should use the active accent border.
-    bool rightPanelActive = false;  ///< True when the right content panel should use the active accent border.
+    bool leftPanelActive = false;  ///< True when the left navigation list owns controller focus.
+    bool rightPanelActive = false;  ///< True when the settings options own controller focus.
   };
 
   /**
@@ -170,9 +171,11 @@ namespace ui {
   struct ShellKeypadModalView {
     bool visible = false;  ///< True when the keypad modal should be rendered.
     std::string title;  ///< Title shown at the top of the keypad modal.
+    std::string value;  ///< Staged input displayed in the keypad text field.
     std::vector<std::string> lines;  ///< Instruction and draft lines shown in the keypad modal.
     std::vector<ShellModalButton> buttons;  ///< Buttons rendered inside the keypad modal.
     std::size_t columnCount = 0U;  ///< Number of columns used to lay out keypad buttons.
+    std::vector<ShellFooterAction> footerActions;  ///< Input, delete, cancel and accept controls inside the dialog.
   };
 
   /**

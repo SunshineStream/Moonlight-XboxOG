@@ -30,6 +30,17 @@ namespace ui {
     };
   }
 
+  ShellRect calculate_settings_panel(const ShellLayout &layout) {
+    const int x = layout.content.x + layout.content.w * 30 / 100 + layout.gap;
+    return {x, layout.navigation.y, layout.content.x + layout.content.w - x, layout.footer.y - layout.gap - layout.navigation.y};
+  }
+
+  ShellRect calculate_shell_dialog(int width, int height, int desiredWidth, int desiredHeight) {
+    const int w = std::clamp(desiredWidth, 1, std::max(1, width - width / 10));
+    const int h = std::clamp(desiredHeight, 1, std::max(1, height - height / 10));
+    return {(width - w) / 2, (height - h) / 2, w, h};
+  }
+
   ShellGridLayout calculate_shell_grid(ShellRect bounds, std::size_t itemCount, std::size_t columns, std::size_t selectedIndex, int preferredHeight, int gap) {
     if (bounds.w <= 0 || bounds.h <= 0 || itemCount == 0U || columns == 0U) {
       return {};

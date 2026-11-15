@@ -492,6 +492,12 @@ namespace {
     }
   }
 
+  /**
+   * @brief Build navigation actions, exposing host operations only after an address is supplied.
+   *
+   * @param state Current screen and entered host information.
+   * @return Menu entries available for the current task.
+   */
   std::vector<ui::MenuItem> build_menu_for_state(const app::ClientState &state) {
     switch (state.shell.activeScreen) {
       case app::ScreenId::settings:
@@ -502,14 +508,21 @@ namespace {
           {settings_category_menu_id(app::SettingsCategory::reset), "Reset", settings_category_description(app::SettingsCategory::reset), true},
         };
       case app::ScreenId::add_host:
-        return {
-          {"edit-address", "Host Address", "Enter the IPv4 address for the PC that should be added to Moonlight.", true},
-          {"edit-port", "Host Port", "Override the default Moonlight host port when the PC listens on a custom value.", true},
-          {"test-connection", "Test Connection", "Check whether the current host address and port respond before saving anything.", true},
-          {"start-pairing", "Start Pairing", "Connect to the current host and begin PIN-based pairing.", true},
-          {"save-host", "Save Host", "Store this host in the saved host list and return to the home screen.", true},
-          {"cancel-add-host", "Cancel", "Discard the current host draft and return without saving.", true},
-        };
+        {
+          std::vector<ui::MenuItem> items {
+            {"edit-address", "Host Address", "Enter the IPv4 address for the PC that should be added to Moonlight.", true},
+            {"edit-port", "Host Port", "Override the default Moonlight host port when the PC listens on a custom value.", true},
+          };
+          if (state.addHostDraft.addressInput.find_first_not_of(" \t\r\n") != std::string::npos) {
+            items.insert(items.end(), {
+                                        {"test-connection", "Test Connection", "Check whether the current host address and port respond before saving anything.", true},
+                                        {"start-pairing", "Start Pairing", "Connect to the current host and begin PIN-based pairing.", true},
+                                        {"save-host", "Save Host", "Store this host in the saved host list and return to the home screen.", true},
+                                      });
+          }
+          items.push_back({"cancel-add-host", "Cancel", "Discard the current host draft and return without saving.", true});
+          return items;
+        }
       case app::ScreenId::pair_host:
         return {
           {"cancel-pairing", "Cancel", "Stop the current pairing attempt and return to the previous screen.", true},
@@ -2431,6 +2444,9 @@ namespace app {
       return update;
     }
 
+    if (state.shell.activeScreen == ScreenId::add_host) {
+      rebuild_menu(state);
+    }
     const ui::MenuUpdate menuUpdate = state.menu.handle_command(command);
     if (menuUpdate.overlayToggleRequested) {
       state.shell.overlayVisible = !state.shell.overlayVisible;
