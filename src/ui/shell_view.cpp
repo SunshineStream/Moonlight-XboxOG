@@ -622,7 +622,7 @@ namespace {
   }
 
   /**
-   * @brief Build the active dialog, including connection-test progress and diagnostics.
+   * @brief Build the active dialog, including connection-test status icons and diagnostics.
    *
    * @param state Current reducer-owned modal state.
    * @param viewModel Receives render-ready dialog content.
@@ -658,6 +658,7 @@ namespace {
       case app::ModalId::connection_test:
         viewModel->modal.busy = state.connectionTest.inProgress;
         viewModel->modal.title = state.connectionTest.inProgress ? "Testing connection" : (state.connectionTest.succeeded ? "Connection successful" : "Connection failed");
+        viewModel->modal.iconAssetPath = state.connectionTest.inProgress ? "icons\\loader-circle.svg" : (state.connectionTest.succeeded ? "icons\\circle-check.svg" : "icons\\circle-x.svg");
         viewModel->modal.lines = {state.connectionTest.address + ":" + std::to_string(state.connectionTest.port), state.connectionTest.message};
         return;
       case app::ModalId::none:
@@ -710,8 +711,7 @@ namespace {
             {"accept", "Accept", "icons\\button-start.svg", {}, false},
           };
           if (state.addHostDraft.activeField == app::AddHostField::address) {
-            actions.push_back({"previous-section", "Previous section", "icons\\button-lb.svg", {}, false});
-            actions.push_back({"next-section", "Next section", "icons\\button-rb.svg", {}, false});
+            actions.push_back({"change-section", "Prev/Next", "icons\\button-lb.svg", "icons\\button-rb.svg", false});
           }
           return actions;
         }

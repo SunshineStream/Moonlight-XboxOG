@@ -151,6 +151,7 @@ namespace ui {
     bool visible = false;  ///< True when a modal dialog should be rendered.
     bool busy = false;  ///< Show progress instead of dismissal controls while work is pending.
     std::string title;  ///< Modal dialog title.
+    std::string iconAssetPath;  ///< Optional status icon beside the dialog title.
     std::vector<std::string> lines;  ///< Modal dialog body lines.
     std::vector<ShellActionRow> actions;  ///< Modal action rows.
     std::vector<ShellFooterAction> footerActions;  ///< Footer actions displayed while a modal is open.

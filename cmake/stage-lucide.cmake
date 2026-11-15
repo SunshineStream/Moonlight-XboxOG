@@ -6,15 +6,22 @@ endif()
 file(MAKE_DIRECTORY "${LUCIDE_ASSET_DIR}/icons" "${LUCIDE_ASSET_DIR}/licenses")
 foreach(icon IN ITEMS
         settings circle-question-mark circle-plus monitor gamepad-2 scroll-text rotate-ccw
-        network hash activity key-round save)
+        network hash activity key-round save loader-circle circle-check circle-x)
     set(_icon_source "${LUCIDE_SOURCE_DIR}/icons/${icon}.svg")
     if(NOT EXISTS "${_icon_source}")
         message(FATAL_ERROR "Required Lucide icon not found: ${_icon_source}")
     endif()
     file(READ "${_icon_source}" _icon_svg)
     # NanoSVG does not resolve CSS currentColor. Bake the shell's foreground
-    # color into the build copy so standalone SVGs work without CSS support.
+    # colors into the build copy so standalone SVGs work without CSS support.
     set(_icon_color "#F2F5F8")
+    if(icon STREQUAL "loader-circle")
+        set(_icon_color "#86B7FF")
+    elseif(icon STREQUAL "circle-check")
+        set(_icon_color "#7DD3A8")
+    elseif(icon STREQUAL "circle-x")
+        set(_icon_color "#F28B82")
+    endif()
     string(REPLACE "currentColor" "${_icon_color}" _icon_svg "${_icon_svg}")
     # Older NanoSVG requires separators between arc flags and coordinates.
     # Expand the compact question-mark flags in the build copy only.

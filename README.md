@@ -21,6 +21,19 @@
 ![Hosts Screen](./docs/images/screenshots/02-hosts.png)
 ![Apps Screen](./docs/images/screenshots/03-apps.png)
 
+<details>
+<summary>Settings, host setup and dialogs</summary>
+
+![Settings](./docs/images/screenshots/04-settings.png)
+![Add Host](./docs/images/screenshots/05-add-host.png)
+![IP Address Entry](./docs/images/screenshots/06-ip-address.png)
+![App Actions](./docs/images/screenshots/07-app-actions.png)
+![Connection Test Progress](./docs/images/screenshots/08-connection-testing.png)
+![Successful Connection Test](./docs/images/screenshots/09-connection-success.png)
+![Failed Connection Test](./docs/images/screenshots/10-connection-failed.png)
+
+</details>
+
 The interface takes its compact navigation and PC cards from Moonlight Qt, with a library designed
 for a controller and a television. Select a PC to pair or open its apps. Game covers have separate
 captions, and a blue focus ring shows which card will open. Running apps carry a **PLAYING** badge.

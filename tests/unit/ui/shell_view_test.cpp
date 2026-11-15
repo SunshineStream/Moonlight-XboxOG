@@ -333,15 +333,14 @@ namespace {
     EXPECT_EQ(viewModel.keypad.addressOctets, (std::array<std::string, 4> {}));
     EXPECT_TRUE(viewModel.keypad.value.empty());
     EXPECT_TRUE(viewModel.frame.footerActions.empty());
-    ASSERT_EQ(viewModel.keypad.footerActions.size(), 6U);
+    ASSERT_EQ(viewModel.keypad.footerActions.size(), 5U);
     EXPECT_EQ(viewModel.keypad.footerActions[0].label, "Enter Key");
     EXPECT_EQ(viewModel.keypad.footerActions[1].label, "Delete");
     EXPECT_EQ(viewModel.keypad.footerActions[2].label, "Cancel");
     EXPECT_EQ(viewModel.keypad.footerActions[3].label, "Accept");
-    EXPECT_EQ(viewModel.keypad.footerActions[4].label, "Previous section");
+    EXPECT_EQ(viewModel.keypad.footerActions[4].label, "Prev/Next");
     EXPECT_EQ(viewModel.keypad.footerActions[4].iconAssetPath, "icons\\button-lb.svg");
-    EXPECT_EQ(viewModel.keypad.footerActions[5].label, "Next section");
-    EXPECT_EQ(viewModel.keypad.footerActions[5].iconAssetPath, "icons\\button-rb.svg");
+    EXPECT_EQ(viewModel.keypad.footerActions[4].secondaryIconAssetPath, "icons\\button-rb.svg");
     ASSERT_EQ(viewModel.keypad.buttons.size(), 10U);
     EXPECT_EQ(viewModel.keypad.columnCount, 3U);
     EXPECT_EQ(viewModel.keypad.buttons[0].label, "1");
@@ -368,7 +367,7 @@ namespace {
   }
 
   /**
-   * @brief Show immediate connection progress and retain success or failure diagnostics.
+   * @brief Show connection progress and result diagnostics with distinct status icons.
    */
   TEST(ShellViewTest, ConnectionTestModalShowsProgressAndResults) {
     auto state = app::create_initial_state();
@@ -381,6 +380,7 @@ namespace {
     ASSERT_TRUE(view.modal.visible);
     EXPECT_TRUE(view.modal.busy);
     EXPECT_EQ(view.modal.title, "Testing connection");
+    EXPECT_EQ(view.modal.iconAssetPath, "icons\\loader-circle.svg");
     ASSERT_EQ(view.modal.lines.size(), 2U);
     EXPECT_EQ(view.modal.lines[0], state.addHostDraft.addressInput + ":" + std::to_string(app::DEFAULT_HOST_PORT));
     EXPECT_FALSE(view.modal.lines[1].empty());
@@ -391,6 +391,7 @@ namespace {
       EXPECT_TRUE(view.modal.visible);
       EXPECT_FALSE(view.modal.busy);
       EXPECT_EQ(view.modal.title, success ? "Connection successful" : "Connection failed");
+      EXPECT_EQ(view.modal.iconAssetPath, success ? "icons\\circle-check.svg" : "icons\\circle-x.svg");
       EXPECT_EQ(view.modal.lines[1], "Diagnostic result");
     }
     app::handle_command(state, input::UiCommand::confirm);

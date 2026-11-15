@@ -698,6 +698,43 @@ namespace {
   }
 
   /**
+   * @brief Outline the same rounded contour used by filled checkbox surfaces.
+   *
+   * @param renderer Active shell renderer, including the software fallback.
+   * @param rect Outer bounds of the outline.
+   * @param color Border color.
+   * @param radius Outer corner radius in logical pixels.
+   */
+  void draw_rounded_rect_outline(SDL_Renderer *renderer, const SDL_Rect &rect, SDL_Color color, int radius) {
+    if (rect.w <= 0 || rect.h <= 0) {
+      return;
+    }
+    radius = std::max(0, std::min(radius, std::min(rect.w, rect.h) / 2));
+    const int border = std::min(2, std::min(rect.w, rect.h) / 2);
+    const auto corner_inset = [](int y, int height, int cornerRadius) {
+      const int edgeDistance = std::min(y, height - y - 1);
+      if (edgeDistance >= cornerRadius) {
+        return 0;
+      }
+      const int dy = cornerRadius - edgeDistance - 1;
+      return cornerRadius - static_cast<int>(std::sqrt(cornerRadius * cornerRadius - dy * dy));
+    };
+    for (int y = 0; y < rect.h; ++y) {
+      const int outerInset = corner_inset(y, rect.h, radius);
+      if (border == 0 || rect.w <= border * 2 || y < border || y >= rect.h - border) {
+        fill_rect(renderer, {rect.x + outerInset, rect.y + y, rect.w - outerInset * 2, 1}, color.r, color.g, color.b, color.a);
+        continue;
+      }
+      const int innerInset = corner_inset(y - border, rect.h - border * 2, std::max(0, radius - border));
+      const int edgeWidth = border + innerInset - outerInset;
+      if (edgeWidth > 0) {
+        fill_rect(renderer, {rect.x + outerInset, rect.y + y, edgeWidth, 1}, color.r, color.g, color.b, color.a);
+        fill_rect(renderer, {rect.x + rect.w - outerInset - edgeWidth, rect.y + y, edgeWidth, 1}, color.r, color.g, color.b, color.a);
+      }
+    }
+  }
+
+  /**
    * @brief Fill a modestly rounded surface using primitives supported by both SDL paths.
    *
    * @param renderer Active shell renderer.
@@ -1507,7 +1544,7 @@ namespace {
   }
 
   /**
-   * @brief Draw scrollable action rows with a filled selection and focus rail.
+   * @brief Draw scrollable action rows with rounded checkboxes, a filled selection and focus rail.
    *
    * @param renderer Active shell renderer.
    * @param font Font for action labels.
@@ -1585,7 +1622,7 @@ namespace {
             draw_line(renderer, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, checkbox.x + checkboxSize * 3 / 4, checkbox.y + checkboxSize / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
           }
         } else {
-          draw_rect(renderer, checkbox, MUTED_RED, MUTED_GREEN, MUTED_BLUE);
+          draw_rounded_rect_outline(renderer, checkbox, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, 4);
         }
       }
       if (const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}; !render_text_line_simple(renderer, font, row.label, color, labelX, rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2, rowRect.x + rowRect.w - labelX - 12 - (row.checkable ? checkboxSize + 16 : 0))) {
@@ -3720,7 +3757,7 @@ namespace {
   }
 
   /**
-   * @brief Render a content-sized dialog with contained actions or pending-work feedback.
+   * @brief Render a content-sized dialog with a status icon and contained actions or progress.
    *
    * @param renderer Active renderer.
    * @param titleFont Dialog heading font.
@@ -3736,7 +3773,8 @@ namespace {
     const int padding = std::max(18, height / 40);
     const int dialogWidth = std::min(760, width * 3 / 4);
     const int innerWidth = dialogWidth - padding * 2;
-    const int titleHeight = TTF_FontLineSkip(titleFont) + 18;
+    const int statusIconSize = modal.iconAssetPath.empty() ? 0 : std::max(28, TTF_FontLineSkip(titleFont));
+    const int titleHeight = std::max(TTF_FontLineSkip(titleFont), statusIconSize) + 18;
     const int footerHeight = std::max(40, TTF_FontLineSkip(smallFont) + 18);
     const int rowHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 16);
     const int textHeight = measure_body_lines_height(smallFont, modal.lines, innerWidth, 8);
@@ -3744,7 +3782,11 @@ namespace {
     const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, padding * 2 + titleHeight + textHeight + actionsHeight + footerHeight + 20));
     fill_rect(renderer, {0, 0, width, height}, 0, 0, 0, 0xA0);
     render_dialog_surface(renderer, bounds);
-    if (!render_text_line_simple(renderer, titleFont, modal.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, bounds.x + padding, bounds.y + 28, innerWidth)) {
+    const int titleInset = statusIconSize == 0 ? 0 : statusIconSize + 12;
+    if (statusIconSize > 0) {
+      render_asset_icon(renderer, assetCache, modal.iconAssetPath, {bounds.x + padding, bounds.y + 28, statusIconSize, statusIconSize});
+    }
+    if (!render_text_line_simple(renderer, titleFont, modal.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, bounds.x + padding + titleInset, bounds.y + 28, innerWidth - titleInset)) {
       return false;
     }
     const int footerY = bounds.y + bounds.h - padding - footerHeight;
