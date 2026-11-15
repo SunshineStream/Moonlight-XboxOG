@@ -31,6 +31,7 @@
 ![Connection Test Progress](./docs/images/screenshots/08-connection-testing.png)
 ![Successful Connection Test](./docs/images/screenshots/09-connection-success.png)
 ![Failed Connection Test](./docs/images/screenshots/10-connection-failed.png)
+![Notification Stack](./docs/images/screenshots/11-notifications.png)
 
 </details>
 
@@ -51,6 +52,10 @@ between sections. A new digit replaces a section after switching to it; **X** de
 Connection, pairing and save actions appear after a host address has been entered. **Test Connection**
 shows a spinning progress indicator while contacting the PC, then keeps the result visible until dismissed.
 The app menu uses checkboxes for **Hide app** and **Set favorite**.
+
+Notifications stack above the footer. Brief confirmations disappear automatically; actionable errors
+stay until you press **X** to dismiss the newest card. Connection-test results stay in their dialog,
+and settings show their updated values inline.
 
 The layout scales with the output resolution and leaves a five-percent inset for television overscan.
 Large libraries scroll to keep the selected game visible. Settings use a category list alongside

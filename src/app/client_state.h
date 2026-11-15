@@ -7,6 +7,7 @@
 // standard includes
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -167,6 +168,26 @@ namespace app {
   };
 
   /**
+   * @brief Visual intent of an explicitly requested user notification.
+   */
+  enum class NotificationKind {
+    information,  ///< Non-blocking information about a completed or degraded operation.
+    success,  ///< Confirmation that a user-requested operation completed.
+    error,  ///< Actionable failure requiring attention.
+  };
+
+  /**
+   * @brief One notification retained independently of diagnostic and workflow status.
+   */
+  struct NotificationState {
+    NotificationKind kind = NotificationKind::information;  ///< Notification severity and icon.
+    std::string title;  ///< Concise description of the event.
+    std::string message;  ///< User-facing consequence or recovery guidance.
+    bool requiresInteraction = true;  ///< Retain until explicitly dismissed when true.
+    std::uint32_t remainingMilliseconds = 0;  ///< Visible lifetime left for an automatic notification.
+  };
+
+  /**
    * @brief Shell-wide state that is not owned by a specific workflow screen.
    */
   struct ShellState {
@@ -174,7 +195,8 @@ namespace app {
     bool overlayVisible = false;  ///< True when the diagnostics overlay is visible.
     bool shouldExit = false;  ///< True when the application should terminate.
     std::size_t overlayScrollOffset = 0U;  ///< Scroll offset used by long overlay content.
-    std::string statusMessage;  ///< Primary user-visible status line.
+    std::string statusMessage;  ///< Diagnostic or workflow status; never implicitly raises a notification.
+    std::vector<NotificationState> notifications;  ///< Outstanding notifications in arrival order.
   };
 
   /**
@@ -318,6 +340,7 @@ namespace app {
     std::size_t selectedAppIndex = 0U;  ///< Zero-based selection inside the visible app list.
     std::size_t scrollPage = 0U;  ///< Horizontal page offset for paged app browsing.
     bool showHiddenApps = false;  ///< True when hidden apps should remain visible in the apps screen.
+    bool refreshFailureNotified = false;  ///< Suppress repeated cached-library refresh warnings until recovery.
   };
 
   /**
@@ -426,6 +449,32 @@ namespace app {
   ClientState create_initial_state();
 
   /**
+   * @brief Queue an intentional notification without duplicating an outstanding event.
+   *
+   * @param state Mutable client state.
+   * @param kind Severity used to select the notification icon.
+   * @param title Concise event description.
+   * @param message Consequence or recovery guidance; empty messages are ignored.
+   * @param autoDismissMilliseconds Visible lifetime, or zero to require explicit dismissal.
+   */
+  void show_notification(ClientState &state, NotificationKind kind, std::string title, std::string message, std::uint32_t autoDismissMilliseconds = 0U);
+
+  /**
+   * @brief Dismiss the newest outstanding notification targeted by the controller hint.
+   *
+   * @param state Mutable client state.
+   */
+  void dismiss_notification(ClientState &state);
+
+  /**
+   * @brief Expire automatic notifications, pausing while a modal, keypad or overlay covers the stack.
+   *
+   * @param state Mutable client state.
+   * @param elapsedMilliseconds Shell time elapsed since the preceding update.
+   */
+  void advance_notifications(ClientState &state, std::uint32_t elapsedMilliseconds);
+
+  /**
    * @brief Return a display label for a screen identifier.
    *
    * @param screen Screen identifier to stringify.
@@ -501,7 +550,7 @@ namespace app {
   void apply_connection_test_result(ClientState &state, bool success, std::string message);
 
   /**
-   * @brief Apply the result of a pairing attempt to the current shell state.
+   * @brief Apply a pairing result and confirm a successful pairing with a brief notification.
    *
    * @param state Mutable app state.
    * @param address Host address used for pairing.

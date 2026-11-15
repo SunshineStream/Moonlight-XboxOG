@@ -12,14 +12,6 @@
 
 namespace {
 
-  bool starts_with(const std::string &value, const char *prefix) {
-    return value.rfind(prefix, 0U) == 0U;
-  }
-
-  bool screen_supports_notifications(const app::ClientState &state) {
-    return state.shell.activeScreen == app::ScreenId::home || state.shell.activeScreen == app::ScreenId::hosts || state.shell.activeScreen == app::ScreenId::apps || state.shell.activeScreen == app::ScreenId::settings;
-  }
-
   std::string format_file_size(std::uint64_t sizeBytes) {
     if (sizeBytes < 1024ULL) {
       return std::to_string(sizeBytes) + " B";
@@ -28,34 +20,6 @@ namespace {
       return std::to_string((sizeBytes + 1023ULL) / 1024ULL) + " KB";
     }
     return std::to_string((sizeBytes + (1024ULL * 1024ULL) - 1ULL) / (1024ULL * 1024ULL)) + " MB";
-  }
-
-  /**
-   * @brief Keep routine loading messages from obscuring the library with a notification.
-   *
-   * @param state Current application state and status message.
-   * @return True for routine progress or successful collection loading.
-   */
-  bool is_minor_status_message(const app::ClientState &state) {
-    if (state.shell.statusMessage.empty()) {
-      return true;
-    }
-
-    if (starts_with(state.shell.statusMessage, "Loaded ") && (state.shell.statusMessage.find(" saved host(s)") != std::string::npos || state.shell.statusMessage.find(" app(s)") != std::string::npos)) {
-      return true;
-    }
-
-    if (starts_with(state.shell.statusMessage, "Loaded recent log file lines") || starts_with(state.shell.statusMessage, "No log file has been written yet") || starts_with(state.shell.statusMessage, "Testing connection to ") || starts_with(state.shell.statusMessage, "Editing host ") || starts_with(state.shell.statusMessage, "Updated host ") || starts_with(state.shell.statusMessage, "Cancelled host ") || starts_with(state.shell.statusMessage, "Using default Moonlight host port") || starts_with(state.shell.statusMessage, "Loading apps for ") || starts_with(state.shell.statusMessage, "Pairing is preparing the client identity")) {
-      return true;
-    }
-
-    if (state.shell.activeScreen == app::ScreenId::apps) {
-      if (const app::HostRecord *host = app::apps_host(state); host != nullptr) {
-        return host->appListState == app::HostAppListState::loading && state.shell.statusMessage == host->appListStatusMessage;
-      }
-    }
-
-    return false;
   }
 
   /**
@@ -504,14 +468,22 @@ namespace {
     return rows;
   }
 
-  ui::ShellNotification notification(const app::ClientState &state) {
-    return {
-      "Notification",
-      state.shell.statusMessage,
-      {
-        {"dismiss-notification", "Dismiss", "icons\\button-x.svg", {}, false},
-      },
-    };
+  /**
+   * @brief Present only explicit notification events, with dismissal focused on the newest card.
+   *
+   * @param state Outstanding user notifications.
+   * @return Cards in arrival order with severity icons and one controller dismissal target.
+   */
+  std::vector<ui::ShellNotification> notification_views(const app::ClientState &state) {
+    std::vector<ui::ShellNotification> notifications;
+    for (const auto &notification : state.shell.notifications) {
+      const std::string icon = notification.kind == app::NotificationKind::success ? "icons\\circle-check.svg" : (notification.kind == app::NotificationKind::error ? "icons\\circle-x.svg" : "icons\\info.svg");
+      notifications.push_back({notification.title, notification.message, {}, icon});
+    }
+    if (!notifications.empty()) {
+      notifications.back().actions = {{"dismiss-notification", notifications.size() > 1U ? "Dismiss latest" : "Dismiss", "icons\\button-x.svg", {}, false}};
+    }
+    return notifications;
   }
 
   void fill_support_modal_view(ui::ShellViewModel *viewModel) {
@@ -830,9 +802,9 @@ namespace ui {
     viewModel.frame.pageTitle = page_title(state);
     viewModel.frame.subtitle = page_subtitle(state);
     viewModel.frame.statusMessage = state.shell.statusMessage;
-    viewModel.notification.visible = screen_supports_notifications(state) && !state.shell.statusMessage.empty() && !is_minor_status_message(state) && !state.modal.active() && !(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible);
+    viewModel.notification.visible = !state.shell.notifications.empty() && !state.modal.active() && !state.shell.overlayVisible && !(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible);
     if (viewModel.notification.visible) {
-      viewModel.notification.content = notification(state);
+      viewModel.notification.items = notification_views(state);
     }
     viewModel.content.hostColumnCount = 3U;
     viewModel.content.appColumnCount = 4U;

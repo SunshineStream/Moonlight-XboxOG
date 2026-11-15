@@ -86,6 +86,7 @@ namespace ui {
     std::string title;  ///< Notification title.
     std::string message;  ///< Notification body message.
     std::vector<ShellFooterAction> actions;  ///< Footer actions shown with the notification.
+    std::string iconAssetPath;  ///< Severity icon shown beside the event title.
   };
 
   /**
@@ -132,7 +133,7 @@ namespace ui {
    */
   struct ShellNotificationView {
     bool visible = false;  ///< True when a transient notification should be rendered.
-    ShellNotification content;  ///< Notification content when visible.
+    std::vector<ShellNotification> items;  ///< Outstanding notifications, oldest first.
   };
 
   /**

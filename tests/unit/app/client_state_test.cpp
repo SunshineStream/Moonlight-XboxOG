@@ -9,12 +9,122 @@
 
 // standard includes
 #include <array>
+#include <cstdint>
+#include <limits>
 #include <string>
 
 // local includes
 #include "src/app/client_state.h"
 
 namespace {
+
+  /**
+   * @brief Queue distinct events together without duplicating an outstanding notification.
+   */
+  TEST(ClientStateTest, QueuesDistinctNotificationsAndCoalescesDuplicates) {
+    auto state = app::create_initial_state();
+    app::show_notification(state, app::NotificationKind::error, "Ignored", "");
+    EXPECT_TRUE(state.shell.notifications.empty());
+    app::show_notification(state, app::NotificationKind::error, "Storage", "Changes were not saved.");
+    app::show_notification(state, app::NotificationKind::error, "Storage", "Changes were not saved.");
+    ASSERT_EQ(state.shell.notifications.size(), 1U);
+    app::show_notification(state, app::NotificationKind::error, "Storage", "A file was not deleted.");
+    app::show_notification(state, app::NotificationKind::error, "Settings", "Changes were not saved.");
+    app::show_notification(state, app::NotificationKind::success, "Storage", "Changes were not saved.", 5000U);
+    ASSERT_EQ(state.shell.notifications.size(), 4U);
+    EXPECT_TRUE(state.shell.notifications.front().requiresInteraction);
+    EXPECT_FALSE(state.shell.notifications.back().requiresInteraction);
+    EXPECT_EQ(state.shell.notifications.back().remainingMilliseconds, 5000U);
+  }
+
+  /**
+   * @brief Expire automatic cards independently while keeping manual errors until acknowledged.
+   */
+  TEST(ClientStateTest, ExpiresAutomaticNotificationsAndRetainsManualNotifications) {
+    auto state = app::create_initial_state();
+    app::show_notification(state, app::NotificationKind::error, "Storage", "Free some space and try again.");
+    app::show_notification(state, app::NotificationKind::success, "Saved", "The PC was saved.", 100U);
+    app::show_notification(state, app::NotificationKind::information, "Library", "Showing saved apps.", 300U);
+    app::advance_notifications(state, 0U);
+    EXPECT_EQ(state.shell.notifications.size(), 3U);
+    app::advance_notifications(state, 99U);
+    EXPECT_EQ(state.shell.notifications[1].remainingMilliseconds, 1U);
+    app::advance_notifications(state, 1U);
+    ASSERT_EQ(state.shell.notifications.size(), 2U);
+    EXPECT_EQ(state.shell.notifications.back().title, "Library");
+    EXPECT_EQ(state.shell.notifications.back().remainingMilliseconds, 200U);
+    app::advance_notifications(state, std::numeric_limits<std::uint32_t>::max());
+    ASSERT_EQ(state.shell.notifications.size(), 1U);
+    EXPECT_EQ(state.shell.notifications.front().title, "Storage");
+    app::dismiss_notification(state);
+    app::dismiss_notification(state);
+    app::advance_notifications(state, 0U);
+    EXPECT_TRUE(state.shell.notifications.empty());
+  }
+
+  /**
+   * @brief X acknowledges only the newest card and leaves older events available.
+   */
+  TEST(ClientStateTest, DismissesTheNewestNotificationWithTheController) {
+    auto state = app::create_initial_state();
+    app::show_notification(state, app::NotificationKind::error, "Older", "Needs attention.");
+    app::show_notification(state, app::NotificationKind::success, "Newer", "Completed.", 5000U);
+    state.shell.statusMessage = "Diagnostic status";
+    app::handle_command(state, input::UiCommand::delete_character);
+    ASSERT_EQ(state.shell.notifications.size(), 1U);
+    EXPECT_EQ(state.shell.notifications.front().title, "Older");
+    EXPECT_TRUE(state.shell.statusMessage.empty());
+    app::handle_command(state, input::UiCommand::delete_character);
+    EXPECT_TRUE(state.shell.notifications.empty());
+  }
+
+  /**
+   * @brief Preserve automatic-card lifetimes while dialogs, diagnostics or numeric input cover them.
+   */
+  TEST(ClientStateTest, PausesNotificationTimersWhileTheStackIsCovered) {
+    auto state = app::create_initial_state();
+    app::show_notification(state, app::NotificationKind::success, "Saved", "The PC was saved.", 5000U);
+    state.modal.id = app::ModalId::support;
+    app::advance_notifications(state, 4000U);
+    state.modal.id = app::ModalId::none;
+    state.shell.overlayVisible = true;
+    app::advance_notifications(state, 4000U);
+    state.shell.overlayVisible = false;
+    state.shell.activeScreen = app::ScreenId::add_host;
+    state.addHostDraft.keypad.visible = true;
+    app::advance_notifications(state, 4000U);
+    ASSERT_EQ(state.shell.notifications.size(), 1U);
+    EXPECT_EQ(state.shell.notifications.front().remainingMilliseconds, 5000U);
+    state.addHostDraft.keypad.visible = false;
+    app::advance_notifications(state, 4000U);
+    EXPECT_EQ(state.shell.notifications.front().remainingMilliseconds, 1000U);
+    state.shell.activeScreen = app::ScreenId::hosts;
+    state.addHostDraft.keypad.visible = true;
+    app::advance_notifications(state, 1000U);
+    EXPECT_TRUE(state.shell.notifications.empty());
+  }
+
+  /**
+   * @brief Repeated background refresh failures produce one notice until the library recovers.
+   */
+  TEST(ClientStateTest, ReportsCachedLibraryRefreshFailureOnceUntilRecovery) {
+    auto state = app::create_initial_state();
+    const std::string address = test_support::kTestIpv4Addresses[test_support::kIpOffice];
+    app::replace_hosts(state, {{"Office PC", address, 0, app::PairingState::paired}});
+    ASSERT_TRUE(app::begin_selected_host_app_browse(state, false));
+    state.hosts.active.apps = {{"Desktop", 1}};
+    app::apply_app_list_result(state, address, app::DEFAULT_HOST_PORT, {}, 0U, false, "Timed out");
+    ASSERT_EQ(state.shell.notifications.size(), 1U);
+    EXPECT_EQ(state.shell.notifications.front().kind, app::NotificationKind::information);
+    EXPECT_FALSE(state.shell.notifications.front().requiresInteraction);
+    app::dismiss_notification(state);
+    app::apply_app_list_result(state, address, app::DEFAULT_HOST_PORT, {}, 0U, false, "Connection refused");
+    EXPECT_TRUE(state.shell.notifications.empty());
+    app::apply_app_list_result(state, address, app::DEFAULT_HOST_PORT, {{"Desktop", 1}}, 1U, true, "Loaded 1 app(s)");
+    EXPECT_FALSE(state.apps.refreshFailureNotified);
+    app::apply_app_list_result(state, address, app::DEFAULT_HOST_PORT, {}, 0U, false, "Timed out again");
+    EXPECT_EQ(state.shell.notifications.size(), 1U);
+  }
 
   /**
    * @brief Host operations appear after entry and disappear after the address is cleared.

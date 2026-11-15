@@ -1107,9 +1107,18 @@ namespace {
     set_screen(state, app::ScreenId::add_host, "edit-address");
   }
 
+  /**
+   * @brief Enter pairing or report an actionable failure before the workflow can open.
+   *
+   * @param state Mutable client state.
+   * @param address Target PC address.
+   * @param port Target PC port.
+   * @return True when the pairing page opened.
+   */
   bool enter_pair_host_screen(app::ClientState &state, const std::string &address, uint16_t port) {
     if (const app::HostRecord *host = find_loaded_host_by_endpoint(state, address, port); host != nullptr && host->reachability == app::HostReachability::offline) {
       state.shell.statusMessage = "Host is offline. Bring it online before pairing.";
+      app::show_notification(state, app::NotificationKind::error, "PC is offline", "Turn on the PC and make sure Sunshine is running before pairing.");
       return false;
     }
 
@@ -1120,6 +1129,7 @@ namespace {
     std::string pairingPin;
     if (std::string pinError; !network::generate_pairing_pin(&pairingPin, &pinError)) {
       state.shell.statusMessage = pinError.empty() ? "Failed to generate a secure pairing PIN." : std::move(pinError);
+      app::show_notification(state, app::NotificationKind::error, "Couldn't start pairing", "A secure pairing PIN could not be created. Restart Moonlight and try again.");
       return false;
     }
 
@@ -1128,6 +1138,13 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Open a paired PC's library or notify the user why it cannot be opened.
+   *
+   * @param state Mutable client state.
+   * @param showHiddenApps Include hidden apps in the library.
+   * @return True when the library page opened.
+   */
   bool enter_apps_screen(app::ClientState &state, bool showHiddenApps) {
     const app::HostRecord *host = state.hosts.items.empty() ? nullptr : &state.hosts.items[state.hosts.selectedHostIndex];
     if (host == nullptr) {
@@ -1135,10 +1152,12 @@ namespace {
     }
     if (host->reachability == app::HostReachability::offline) {
       state.shell.statusMessage = "Host is offline. Bring it online before opening apps.";
+      app::show_notification(state, app::NotificationKind::error, "PC is offline", "Turn on the PC and make sure Sunshine is running to open its apps.");
       return false;
     }
     if (host->pairingState != app::PairingState::paired) {
       state.shell.statusMessage = "This host is no longer paired. Pair it again before opening apps.";
+      app::show_notification(state, app::NotificationKind::error, "Pairing required", "Pair this PC again before opening its apps.");
       return false;
     }
 
@@ -1146,6 +1165,7 @@ namespace {
     state.apps.showHiddenApps = showHiddenApps;
     state.apps.selectedAppIndex = 0U;
     state.apps.scrollPage = 0U;
+    state.apps.refreshFailureNotified = false;
     state.hosts.active.appListState = app::HostAppListState::loading;
     state.hosts.active.appListStatusMessage = (state.hosts.active.apps.empty() ? "Loading apps for " : "Refreshing apps for ") + state.hosts.active.displayName + "...";
     state.shell.statusMessage.clear();
@@ -1518,6 +1538,41 @@ namespace {
 
 namespace app {
 
+  void show_notification(ClientState &state, NotificationKind kind, std::string title, std::string message, std::uint32_t autoDismissMilliseconds) {
+    if (message.empty()) {
+      return;
+    }
+    const auto duplicate = std::find_if(state.shell.notifications.begin(), state.shell.notifications.end(), [&](const NotificationState &notification) {
+      return notification.kind == kind && notification.title == title && notification.message == message;
+    });
+    if (duplicate != state.shell.notifications.end()) {
+      return;
+    }
+    state.shell.notifications.push_back({kind, std::move(title), std::move(message), autoDismissMilliseconds == 0U, autoDismissMilliseconds});
+  }
+
+  void dismiss_notification(ClientState &state) {
+    if (!state.shell.notifications.empty()) {
+      state.shell.notifications.pop_back();
+    }
+  }
+
+  void advance_notifications(ClientState &state, std::uint32_t elapsedMilliseconds) {
+    if (state.modal.active() || state.shell.overlayVisible || (state.shell.activeScreen == ScreenId::add_host && state.addHostDraft.keypad.visible)) {
+      return;
+    }
+    for (auto &notification : state.shell.notifications) {
+      if (!notification.requiresInteraction) {
+        notification.remainingMilliseconds = elapsedMilliseconds >= notification.remainingMilliseconds ? 0U : notification.remainingMilliseconds - elapsedMilliseconds;
+      }
+    }
+    auto &notifications = state.shell.notifications;
+    notifications.erase(std::remove_if(notifications.begin(), notifications.end(), [](const NotificationState &notification) {
+                          return !notification.requiresInteraction && notification.remainingMilliseconds == 0U;
+                        }),
+                        notifications.end());
+  }
+
   ClientState create_initial_state() {
     ClientState state;
     state.shell.activeScreen = ScreenId::hosts;
@@ -1720,6 +1775,7 @@ namespace app {
       }
       set_screen(state, ScreenId::hosts);
       state.hosts.dirty = true;
+      show_notification(state, NotificationKind::success, "PC paired", "Paired with " + address + ". Select the PC to browse its apps.", 5000U);
       return true;
     }
 
@@ -1796,7 +1852,7 @@ namespace app {
   }
 
   /**
-   * @brief Applies a failed app-list refresh that can fall back to cached app data.
+   * @brief Use cached apps after a failed refresh and report the degraded state once until recovery.
    *
    * @param state Client state to update.
    * @param host Host receiving the failure.
@@ -1812,6 +1868,10 @@ namespace app {
     host->appListStatusMessage = host->apps.empty() ? message : "Using cached apps. Last refresh failed: " + message;
     if (hostIsActiveAppsScreenSelection) {
       state.shell.statusMessage = std::move(message);
+      if (!host->apps.empty() && !state.apps.refreshFailureNotified) {
+        show_notification(state, NotificationKind::information, "Using saved apps", "The library could not be refreshed. Check that your PC is online.", 7000U);
+        state.apps.refreshFailureNotified = true;
+      }
     }
     refresh_running_flags(host);
     clamp_selected_app_index(state);
@@ -1901,6 +1961,7 @@ namespace app {
     state.hosts.dirty = state.hosts.dirty || persistedAppCacheChanged;
     if (hostIsActiveAppsScreenSelection) {
       state.shell.statusMessage.clear();
+      state.apps.refreshFailureNotified = false;
     }
 
     restore_selected_app_after_refresh(state, *host, selectedAppId);
@@ -2095,7 +2156,7 @@ namespace app {
   }
 
   /**
-   * @brief Handles activation of a settings detail row.
+   * @brief Update settings inline without producing routine confirmation notifications.
    *
    * @param state Client state containing the settings menus.
    * @param detailUpdate Activated detail-menu update.
@@ -2555,7 +2616,8 @@ namespace app {
       return update;
     }
 
-    if (command == input::UiCommand::delete_character && !state.shell.statusMessage.empty()) {
+    if (command == input::UiCommand::delete_character && (!state.shell.notifications.empty() || !state.shell.statusMessage.empty())) {
+      dismiss_notification(state);
       state.shell.statusMessage.clear();
       return update;
     }

@@ -46,6 +46,23 @@ namespace ui {
     return static_cast<double>(elapsedMilliseconds % periodMilliseconds) * 360.0 / periodMilliseconds;
   }
 
+  std::vector<ShellRect> calculate_notification_stack(ShellRect area, const std::vector<int> &newestFirstHeights) {
+    if (area.w <= 0 || area.h <= 0) {
+      return {};
+    }
+    std::vector<ShellRect> cards;
+    int bottom = area.y + area.h;
+    for (const int desiredHeight : newestFirstHeights) {
+      const int height = std::clamp(desiredHeight, 1, area.h);
+      if (cards.size() == MAX_VISIBLE_NOTIFICATIONS || height > bottom - area.y) {
+        break;
+      }
+      cards.push_back({area.x, bottom - height, area.w, height});
+      bottom -= height + 10;
+    }
+    return cards;
+  }
+
   ShellGridLayout calculate_shell_grid(ShellRect bounds, std::size_t itemCount, std::size_t columns, std::size_t selectedIndex, int preferredHeight, int gap) {
     if (bounds.w <= 0 || bounds.h <= 0 || itemCount == 0U || columns == 0U) {
       return {};

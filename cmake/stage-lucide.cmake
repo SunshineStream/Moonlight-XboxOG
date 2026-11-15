@@ -6,7 +6,7 @@ endif()
 file(MAKE_DIRECTORY "${LUCIDE_ASSET_DIR}/icons" "${LUCIDE_ASSET_DIR}/licenses")
 foreach(icon IN ITEMS
         settings circle-question-mark circle-plus monitor gamepad-2 scroll-text rotate-ccw
-        network hash activity key-round save loader-circle circle-check circle-x)
+        network hash activity key-round save loader-circle circle-check circle-x info)
     set(_icon_source "${LUCIDE_SOURCE_DIR}/icons/${icon}.svg")
     if(NOT EXISTS "${_icon_source}")
         message(FATAL_ERROR "Required Lucide icon not found: ${_icon_source}")
@@ -15,7 +15,7 @@ foreach(icon IN ITEMS
     # NanoSVG does not resolve CSS currentColor. Bake the shell's foreground
     # colors into the build copy so standalone SVGs work without CSS support.
     set(_icon_color "#F2F5F8")
-    if(icon STREQUAL "loader-circle")
+    if(icon STREQUAL "loader-circle" OR icon STREQUAL "info")
         set(_icon_color "#86B7FF")
     elseif(icon STREQUAL "circle-check")
         set(_icon_color "#7DD3A8")

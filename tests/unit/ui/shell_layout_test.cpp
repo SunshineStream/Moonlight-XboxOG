@@ -15,6 +15,48 @@
 namespace {
 
   /**
+   * @brief Fit concurrent cards above the footer without overlapping on SD or HD output.
+   */
+  TEST(ShellLayoutTest, StacksRecentNotificationsWithinTheirSafeColumn) {
+    for (const auto [width, height] : {std::pair {640, 480}, {1280, 720}}) {
+      const auto layout = ui::calculate_shell_layout(width, height);
+      const ui::ShellRect area {width - 332, layout.navigation.y, 300, layout.footer.y - layout.navigation.y - 14};
+      const auto cards = ui::calculate_notification_stack(area, {140, 100, 100, 100});
+      ASSERT_GE(cards.size(), 2U);
+      EXPECT_LE(cards.size(), ui::MAX_VISIBLE_NOTIFICATIONS);
+      EXPECT_EQ(cards.front().y + cards.front().h, area.y + area.h);
+      for (std::size_t index = 0; index < cards.size(); ++index) {
+        EXPECT_EQ(cards[index].x, area.x);
+        EXPECT_EQ(cards[index].w, area.w);
+        EXPECT_GE(cards[index].y, area.y);
+        if (index > 0U) {
+          EXPECT_LE(cards[index].y + cards[index].h + 10, cards[index - 1U].y);
+        }
+      }
+    }
+    const auto limited = ui::calculate_notification_stack({0, 0, 300, 1000}, {100, 100, 100, 100});
+    EXPECT_EQ(limited.size(), ui::MAX_VISIBLE_NOTIFICATIONS);
+    const auto tight = ui::calculate_notification_stack({0, 0, 300, 250}, {140, 100, 100});
+    EXPECT_EQ(tight.size(), 2U);
+  }
+
+  /**
+   * @brief Clamp oversized cards and handle absent or invalid notification areas safely.
+   */
+  TEST(ShellLayoutTest, ClampsNotificationCardsAndHandlesEmptyAreas) {
+    EXPECT_TRUE(ui::calculate_notification_stack({0, 0, 0, 100}, {50}).empty());
+    EXPECT_TRUE(ui::calculate_notification_stack({0, 0, 300, 0}, {50}).empty());
+    EXPECT_TRUE(ui::calculate_notification_stack({0, 0, 300, 100}, {}).empty());
+    const auto oversized = ui::calculate_notification_stack({20, 30, 300, 100}, {900, 50});
+    ASSERT_EQ(oversized.size(), 1U);
+    EXPECT_EQ(oversized[0].y, 30);
+    EXPECT_EQ(oversized[0].h, 100);
+    const auto minimum = ui::calculate_notification_stack({0, 0, 300, 100}, {0});
+    ASSERT_EQ(minimum.size(), 1U);
+    EXPECT_EQ(minimum[0].h, 1);
+  }
+
+  /**
    * @brief Keep loading rotation smooth, clockwise and independent of frame frequency.
    */
   TEST(ShellLayoutTest, RotatesLoadingIconAtAFixedSpeedAndWrapsCleanly) {

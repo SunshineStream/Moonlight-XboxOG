@@ -8,6 +8,7 @@
 #include <lizardbyte/common/testing.h>
 
 // standard includes
+#include <array>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,111 @@
 #include "src/ui/shell_view.h"
 
 namespace {
+
+  /**
+   * @brief Keep simultaneous events ordered and target controller dismissal at the newest card.
+   */
+  TEST(ShellViewTest, BuildsAnOrderedNotificationStackWithOneDismissalTarget) {
+    auto state = app::create_initial_state();
+    app::show_notification(state, app::NotificationKind::information, "Library", "Showing saved apps.", 7000U);
+    app::show_notification(state, app::NotificationKind::error, "Settings not saved", "Free some storage and try again.");
+    app::show_notification(state, app::NotificationKind::success, "PC saved", "Select the PC to pair.", 5000U);
+    app::show_notification(state, app::NotificationKind::error, "File not deleted", "Try again after restarting.");
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_TRUE(view.notification.visible);
+    ASSERT_EQ(view.notification.items.size(), 4U);
+    EXPECT_EQ(view.notification.items[0].iconAssetPath, "icons\\info.svg");
+    EXPECT_EQ(view.notification.items[1].iconAssetPath, "icons\\circle-x.svg");
+    EXPECT_EQ(view.notification.items[2].iconAssetPath, "icons\\circle-check.svg");
+    for (std::size_t index = 0; index < 3U; ++index) {
+      EXPECT_TRUE(view.notification.items[index].actions.empty());
+    }
+    ASSERT_EQ(view.notification.items.back().actions.size(), 1U);
+    EXPECT_EQ(view.notification.items.back().actions[0].label, "Dismiss latest");
+    EXPECT_EQ(view.notification.items.back().actions[0].iconAssetPath, "icons\\button-x.svg");
+  }
+
+  /**
+   * @brief Hide a covered stack without discarding outstanding events.
+   */
+  TEST(ShellViewTest, PreservesNotificationsBehindModalsKeypadsAndDiagnostics) {
+    auto state = app::create_initial_state();
+    app::show_notification(state, app::NotificationKind::error, "Storage", "Free some space and try again.");
+    state.modal.id = app::ModalId::support;
+    EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    state.modal.id = app::ModalId::none;
+    state.shell.overlayVisible = true;
+    EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    state.shell.overlayVisible = false;
+    state.shell.activeScreen = app::ScreenId::add_host;
+    state.addHostDraft.keypad.visible = true;
+    EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    state.addHostDraft.keypad.visible = false;
+    EXPECT_TRUE(ui::build_shell_view_model(state, {}).notification.visible);
+    EXPECT_EQ(state.shell.notifications.size(), 1U);
+  }
+
+  /**
+   * @brief Closing a connection-test result never produces a second notification for its diagnostics.
+   */
+  TEST(ShellViewTest, KeepsConnectionTestResultsOutOfTheNotificationQueueAfterDismissal) {
+    for (const bool success : {false, true}) {
+      for (const bool existingNotification : {false, true}) {
+        auto state = app::create_initial_state();
+        app::replace_hosts(state, {{"Office PC", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired}});
+        if (existingNotification) {
+          app::show_notification(state, app::NotificationKind::error, "Storage", "Free some space and try again.");
+        }
+        app::handle_command(state, input::UiCommand::move_down);
+        app::handle_command(state, input::UiCommand::open_context_menu);
+        app::handle_command(state, input::UiCommand::move_down);
+        app::handle_command(state, input::UiCommand::activate);
+        ASSERT_EQ(state.modal.id, app::ModalId::connection_test);
+        app::apply_connection_test_result(state, success, success ? "Received /serverinfo" : "Failed to query /serverinfo");
+        EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+        app::handle_command(state, input::UiCommand::back);
+        const auto view = ui::build_shell_view_model(state, {});
+        EXPECT_EQ(view.notification.visible, existingNotification);
+        EXPECT_EQ(state.shell.notifications.size(), existingNotification ? 1U : 0U);
+        if (existingNotification) {
+          ASSERT_EQ(view.notification.items.size(), 1U);
+          EXPECT_EQ(view.notification.items[0].title, "Storage");
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Setting rows provide their own feedback without adding confirmation cards.
+   */
+  TEST(ShellViewTest, KeepsRoutineSettingChangesInline) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::activate);
+    for (const auto *id : {"cycle-log-level", "cycle-xemu-console-log-level"}) {
+      ASSERT_TRUE(state.detailMenu.select_item_by_id(id));
+      app::handle_command(state, input::UiCommand::activate);
+      EXPECT_FALSE(state.shell.statusMessage.empty());
+      EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    }
+  }
+
+  /**
+   * @brief An empty library reports its fetch failure inline without duplicating it in a card.
+   */
+  TEST(ShellViewTest, ShowsEmptyLibraryFailuresInlineWithoutNotifications) {
+    auto state = app::create_initial_state();
+    const std::string address = test_support::kTestIpv4Addresses[test_support::kIpOffice];
+    app::replace_hosts(state, {{"Office PC", address, 0, app::PairingState::paired}});
+    ASSERT_TRUE(app::begin_selected_host_app_browse(state, false));
+    app::apply_app_list_result(state, address, app::DEFAULT_HOST_PORT, {}, 0U, false, "No server response");
+    const auto view = ui::build_shell_view_model(state, {});
+    EXPECT_FALSE(view.notification.visible);
+    ASSERT_EQ(view.content.bodyLines.size(), 1U);
+    EXPECT_EQ(view.content.bodyLines[0], "No server response");
+  }
 
   /**
    * @brief Host form actions have icons and entered text remains visible inside the keypad.
@@ -77,18 +183,14 @@ namespace {
   }
 
   /**
-   * @brief Successful collection loading stays quiet while failures remain visible.
+   * @brief Diagnostic status never implicitly becomes a notification, including handled failures.
    */
-  TEST(ShellViewTest, KeepsRoutineCollectionLoadingOutOfNotifications) {
+  TEST(ShellViewTest, KeepsDiagnosticStatusOutOfNotifications) {
     app::ClientState state = app::create_initial_state();
-    for (const char *message : {"Loaded 0 saved host(s)", "Loaded 2 saved host(s)", "Loaded 4 app(s)"}) {
+    for (const char *message : {"Loaded 0 saved host(s)", "Loaded 2 saved host(s)", "Loaded 4 app(s)", "Could not load saved hosts", "Loaded host data contains invalid entries", "Failed to query /serverinfo", "Stream bitrate set to 5 Mbps"}) {
       state.shell.statusMessage = message;
       EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
     }
-    state.shell.statusMessage = "Could not load saved hosts";
-    EXPECT_TRUE(ui::build_shell_view_model(state, {}).notification.visible);
-    state.shell.statusMessage = "Loaded host data contains invalid entries";
-    EXPECT_TRUE(ui::build_shell_view_model(state, {}).notification.visible);
   }
 
   /**
@@ -663,15 +765,21 @@ namespace {
     EXPECT_EQ(viewModel.modal.footerActions[1].iconAssetPath, "icons\\button-b.svg");
   }
 
+  /**
+   * @brief Show explicit operation outcomes on settings without relying on diagnostic text.
+   */
   TEST(ShellViewTest, ShowsNotificationsOnTheSettingsScreen) {
     app::ClientState state = app::create_initial_state();
     state.shell.activeScreen = app::ScreenId::settings;
-    state.shell.statusMessage = "Deleted saved file moonlight.log";
+    app::show_notification(state, app::NotificationKind::success, "File deleted", "moonlight.log has been removed.", 5000U);
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
     EXPECT_TRUE(viewModel.notification.visible);
-    EXPECT_EQ(viewModel.notification.content.message, "Deleted saved file moonlight.log");
+    ASSERT_EQ(viewModel.notification.items.size(), 1U);
+    EXPECT_EQ(viewModel.notification.items.front().title, "File deleted");
+    EXPECT_EQ(viewModel.notification.items.front().message, "moonlight.log has been removed.");
+    EXPECT_EQ(viewModel.notification.items.front().iconAssetPath, "icons\\circle-check.svg");
   }
 
   TEST(ShellViewTest, ShowsThePairingPinAsSoonAsItHasBeenGenerated) {

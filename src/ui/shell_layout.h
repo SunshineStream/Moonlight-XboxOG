@@ -7,8 +7,11 @@
 // standard includes
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace ui {
+
+  inline constexpr std::size_t MAX_VISIBLE_NOTIFICATIONS = 3U;  ///< Maximum number of simultaneous notification cards.
 
   /**
    * @brief Rectangle in square-pixel shell coordinates, before encoder correction.
@@ -80,6 +83,15 @@ namespace ui {
    * @return Rotation in degrees, wrapping every 1200 milliseconds.
    */
   double shell_spinner_angle(std::uint32_t elapsedMilliseconds);
+
+  /**
+   * @brief Stack recent notifications above the footer without leaving their safe area.
+   *
+   * @param area Available notification column.
+   * @param newestFirstHeights Measured card heights, newest first.
+   * @return Visible card bounds, newest first; older cards remain queued by the application.
+   */
+  std::vector<ShellRect> calculate_notification_stack(ShellRect area, const std::vector<int> &newestFirstHeights);
 
   /**
    * @brief Lay out a scrolling grid without stretching short collections vertically.

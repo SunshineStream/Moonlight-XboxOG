@@ -1830,58 +1830,65 @@ namespace {
     return true;
   }
 
-  bool render_notification(  // NOSONAR(cpp:S107) notification layout helper keeps the render inputs explicit
+  /**
+   * @brief Draw rounded notification cards with contextual icons above the page footer.
+   *
+   * @param renderer Active renderer, including the software fallback.
+   * @param titleFont Card-title font.
+   * @param bodyFont Supporting text and controller-hint font.
+   * @param assetCache Cached Lucide and controller glyphs.
+   * @param notifications Outstanding notifications in arrival order.
+   * @param area Safe notification column above the footer.
+   * @return True when all visible notification cards rendered successfully.
+   */
+  bool render_notifications(
     SDL_Renderer *renderer,
     TTF_Font *titleFont,
     TTF_Font *bodyFont,
     AssetTextureCache *assetCache,
-    const ui::ShellNotification &notification,
-    int screenWidth,
-    int footerTop,
-    int outerMargin
+    const std::vector<ui::ShellNotification> &notifications,
+    const SDL_Rect &area
   ) {
-    if (notification.message.empty()) {
+    if (notifications.empty()) {
       return true;
     }
-
-    const int notificationWidth = std::min(420, std::max(300, screenWidth / 3));
-    const int innerWidth = notificationWidth - 28;
-    const int titleHeight = notification.title.empty() ? 0 : TTF_FontLineSkip(titleFont);
-    const int messageHeight = measure_wrapped_text_height(bodyFont, notification.message, innerWidth);
-    const int actionHeight = notification.actions.empty() ? 0 : std::max(30, TTF_FontLineSkip(bodyFont) + 10);
-    const int notificationHeight = 14 + titleHeight + (titleHeight > 0 ? 8 : 0) + messageHeight + (actionHeight > 0 ? 14 + actionHeight : 0) + 14;
-    const SDL_Rect notificationRect {
-      screenWidth - outerMargin - notificationWidth,
-      std::max(outerMargin, footerTop - notificationHeight - 14),
-      notificationWidth,
-      notificationHeight,
-    };
-
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    fill_rect(renderer, notificationRect, PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xF0);
-    draw_rect(renderer, notificationRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
-
-    int cursorY = notificationRect.y + 12;
-    if (!notification.title.empty()) {
-      if (!render_text_line_simple(renderer, titleFont, notification.title, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, notificationRect.x + 14, cursorY, innerWidth)) {
+    const int padding = 16;
+    const int innerWidth = area.w - padding * 2;
+    const int titleHeight = TTF_FontLineSkip(titleFont);
+    const int iconSize = std::max(20, titleHeight - 2);
+    const int actionHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 18);
+    std::vector<int> heights;
+    for (std::size_t offset = 0; offset < std::min(notifications.size(), ui::MAX_VISIBLE_NOTIFICATIONS); ++offset) {
+      const auto &notification = notifications[notifications.size() - offset - 1U];
+      const int messageHeight = std::min(measure_wrapped_text_height(bodyFont, notification.message, innerWidth), TTF_FontLineSkip(bodyFont) * 3);
+      heights.push_back(28 + titleHeight + 8 + messageHeight + padding + (notification.actions.empty() ? 0 : actionHeight + 12));
+    }
+    const auto cards = ui::calculate_notification_stack({area.x, area.y, area.w, area.h}, heights);
+    for (std::size_t offset = 0; offset < cards.size(); ++offset) {
+      const auto &notification = notifications[notifications.size() - offset - 1U];
+      const SDL_Rect card = sdl_rect(cards[offset]);
+      render_dialog_surface(renderer, card);
+      int titleX = card.x + padding;
+      if (!notification.iconAssetPath.empty()) {
+        render_asset_icon(renderer, assetCache, notification.iconAssetPath, {titleX, card.y + 28, iconSize, iconSize});
+        titleX += iconSize + 10;
+      }
+      if (!render_text_line_simple(renderer, titleFont, notification.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, titleX, card.y + 28, card.x + card.w - padding - titleX)) {
         return false;
       }
-      cursorY += titleHeight + 8;
-    }
-
-    int messageDrawnHeight = 0;
-    if (!render_text_line(renderer, bodyFont, notification.message, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, notificationRect.x + 14, cursorY, innerWidth, &messageDrawnHeight)) {
-      return false;
-    }
-    cursorY += messageDrawnHeight;
-
-    if (!notification.actions.empty()) {
-      cursorY += 10;
-      if (!render_footer_actions(renderer, bodyFont, assetCache, notification.actions, {notificationRect.x + 10, cursorY, notificationRect.w - 20, actionHeight})) {
+      const int footerY = card.y + card.h - padding - (notification.actions.empty() ? 0 : actionHeight);
+      const int bodyY = card.y + 28 + titleHeight + 8;
+      const int bodyBottom = footerY - (notification.actions.empty() ? 0 : 12);
+      if (!render_bounded_text(renderer, bodyFont, notification.message, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {card.x + padding, bodyY, innerWidth, bodyBottom - bodyY})) {
         return false;
       }
+      if (!notification.actions.empty()) {
+        draw_line(renderer, card.x + padding, footerY - 6, card.x + card.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
+        if (!render_footer_actions(renderer, bodyFont, assetCache, notification.actions, {card.x + padding - 16, footerY, innerWidth + 32, actionHeight})) {
+          return false;
+        }
+      }
     }
-
     return true;
   }
 
@@ -2367,12 +2374,25 @@ namespace {
     return false;
   }
 
+  /**
+   * @brief Persist user-requested PC changes and report the completed operation or storage failure.
+   *
+   * @param state Mutable client state.
+   * @param update Requested persistence operation.
+   */
   void persist_hosts_if_needed(app::ClientState &state, const app::AppUpdate &update) {
     if (!update.persistence.hostsChanged) {
       return;
     }
 
-    persist_hosts(state);
+    if (!persist_hosts(state)) {
+      app::show_notification(state, app::NotificationKind::error, "PC changes not saved", "Your changes could not be saved. Check the available storage and try again.");
+    } else if (update.persistence.hostDeleteCleanupRequested) {
+      app::show_notification(state, app::NotificationKind::success, "PC removed", "Removed the saved PC at " + update.persistence.deletedHostAddress + ":" + std::to_string(app::effective_host_port(update.persistence.deletedHostPort)) + ".", 5000U);
+    } else if (update.navigation.activatedItemId == "save-host") {
+      const app::HostRecord *host = app::selected_host(state);
+      app::show_notification(state, app::NotificationKind::success, "PC saved", (host == nullptr ? std::string("Your PC") : host->displayName) + " has been saved. Select it to pair and stream.", 5000U);
+    }
   }
 
   app::AppSettings persistent_settings_from_state(const app::ClientState &state) {
@@ -2390,6 +2410,12 @@ namespace {
     };
   }
 
+  /**
+   * @brief Save changed settings quietly, surfacing only an actionable storage failure.
+   *
+   * @param state Mutable client state.
+   * @param update Requested settings operation.
+   */
   void persist_settings_if_needed(app::ClientState &state, const app::AppUpdate &update) {
     if (!update.persistence.settingsChanged || !state.settings.dirty) {
       return;
@@ -2403,6 +2429,7 @@ namespace {
     }
 
     logging::error("settings", saveResult.errorMessage);
+    app::show_notification(state, app::NotificationKind::error, "Settings not saved", "Your changes work for this session. Check the available storage and try again.");
   }
 
   bool update_host_metadata_from_server_info(app::HostRecord *host, const std::string &address, const network::HostPairingServerInfo &serverInfo) {
@@ -2541,6 +2568,13 @@ namespace {
     }
   }
 
+  /**
+   * @brief Delete a requested file and report its confirmed outcome.
+   *
+   * @param state Mutable client state.
+   * @param update Requested file deletion.
+   * @param coverArtTextureCache Cached artwork affected by the deletion.
+   */
   void delete_saved_file_if_requested(app::ClientState &state, const app::AppUpdate &update, CoverArtTextureCache *coverArtTextureCache) {
     if (!update.persistence.savedFileDeleteRequested) {
       return;
@@ -2548,6 +2582,7 @@ namespace {
 
     if (std::string errorMessage; !startup::delete_saved_file(update.persistence.savedFileDeletePath, &errorMessage)) {
       state.shell.statusMessage = errorMessage;
+      app::show_notification(state, app::NotificationKind::error, "File not deleted", "The file could not be removed. Restart Moonlight and try again.");
       logging::warn("storage", errorMessage);
       return;
     }
@@ -2558,6 +2593,7 @@ namespace {
     clear_cover_art_texture(coverArtTextureCache, deletedCoverArtCacheKey);
     state.settings.savedFilesDirty = true;
     state.shell.statusMessage = "Deleted saved file " + deletedDisplayName;
+    app::show_notification(state, app::NotificationKind::success, "File deleted", deletedDisplayName + " has been removed.", 5000U);
     logging::info("storage", state.shell.statusMessage);
   }
 
@@ -2603,6 +2639,13 @@ namespace {
     logging::info("storage", state.shell.statusMessage);
   }
 
+  /**
+   * @brief Apply a confirmed reset and report completion or an actionable failure.
+   *
+   * @param state Mutable client state.
+   * @param update Confirmed reset request.
+   * @param coverArtTextureCache Cached artwork to release after the reset.
+   */
   void factory_reset_if_requested(app::ClientState &state, const app::AppUpdate &update, CoverArtTextureCache *coverArtTextureCache) {
     if (!update.persistence.factoryResetRequested) {
       return;
@@ -2610,6 +2653,7 @@ namespace {
 
     if (std::string errorMessage; !startup::delete_all_saved_files(&errorMessage)) {
       state.shell.statusMessage = errorMessage;
+      app::show_notification(state, app::NotificationKind::error, "Reset incomplete", "Some saved data could not be removed. Restart Moonlight and try again.");
       logging::warn("storage", errorMessage);
       return;
     }
@@ -2619,6 +2663,7 @@ namespace {
     state.settings.savedFiles.clear();
     state.settings.savedFilesDirty = true;
     state.shell.statusMessage = "Factory reset completed";
+    app::show_notification(state, app::NotificationKind::success, "Reset complete", "Moonlight's saved PCs, settings and cached artwork have been removed.", 5000U);
     clear_cover_art_texture_cache(coverArtTextureCache);
     app::set_log_file_path(state, logging::default_log_file_path());
     logging::info("storage", state.shell.statusMessage);
@@ -2802,6 +2847,12 @@ namespace {
     return attempt != nullptr && attempt->thread != nullptr && attempt->completed.load();
   }
 
+  /**
+   * @brief Join a pairing attempt and report storage failures after successful authorization.
+   *
+   * @param state Client state receiving the result, or null when discarding it.
+   * @param attempt Completed pairing worker to join and release.
+   */
   void finalize_pairing_attempt(app::ClientState *state, std::unique_ptr<PairingAttemptState> attempt) {
     if (attempt == nullptr || attempt->thread == nullptr) {
       return;
@@ -2836,7 +2887,9 @@ namespace {
 
     logging::log(result.success || result.alreadyPaired ? logging::LogLevel::info : logging::LogLevel::warning, "pairing", result.message);
     if (hostsChanged) {
-      persist_hosts(*state);
+      if (!persist_hosts(*state)) {
+        app::show_notification(*state, app::NotificationKind::error, "Pairing not saved", "Pairing succeeded, but the PC could not be saved. Check the available storage.");
+      }
     }
   }
 
@@ -3085,6 +3138,12 @@ namespace {
     }
   }
 
+  /**
+   * @brief Open a PC's library, reporting failures that otherwise leave the browser unchanged.
+   *
+   * @param state Mutable client state.
+   * @param update Requested library navigation.
+   */
   void browse_host_apps_if_requested(app::ClientState &state, const app::AppUpdate &update) {
     if (!update.requests.appsBrowseRequested) {
       return;
@@ -3111,6 +3170,7 @@ namespace {
         }
       }
       state.shell.statusMessage = resultMessage;
+      app::show_notification(state, app::NotificationKind::error, "PC unavailable", "Check that the PC is online and Sunshine is running, then try again.");
       logging::warn("apps", resultMessage);
       return;
     }
@@ -3123,6 +3183,7 @@ namespace {
     host = app::selected_host(state);
     if (host == nullptr || host->pairingState != app::PairingState::paired) {
       state.shell.statusMessage = host != nullptr && !host->appListStatusMessage.empty() ? host->appListStatusMessage : "This host is no longer paired. Pair it again before opening apps.";
+      app::show_notification(state, app::NotificationKind::error, "Pairing required", "Pair this PC again before opening its apps.");
       logging::warn("apps", state.shell.statusMessage);
       return;
     }
@@ -4096,8 +4157,12 @@ namespace {
       return false;
     }
 
-    if (viewModel.notification.visible && !viewModel.notification.content.message.empty() && !render_notification(renderer, bodyFont, smallFont, assetCache, viewModel.notification.content, screenWidth, footerRect.y, outerMargin)) {
-      return false;
+    if (viewModel.notification.visible) {
+      const int notificationWidth = std::min(420, std::max(300, screenWidth / 3));
+      const SDL_Rect notificationArea {screenWidth - outerMargin - notificationWidth, outerMargin, notificationWidth, footerRect.y - outerMargin - 14};
+      if (!render_notifications(renderer, bodyFont, smallFont, assetCache, viewModel.notification.items, notificationArea)) {
+        return false;
+      }
     }
 
     if (viewModel.overlay.visible) {
@@ -4522,6 +4587,7 @@ namespace {
     ShellInputState inputState {};  ///< Current controller and trigger input state.
     Uint32 nextHostDiscoveryTick = 0;  ///< Next scheduled host auto-discovery time.
     Uint32 nextHostProbeTick = 0;  ///< Next scheduled host probe time.
+    Uint32 notificationTick = 0;  ///< Last clock sample used to advance visible notification lifetimes.
     PairingTaskState pairingTask {};  ///< Background pairing workflow state.
     ConnectionTestTaskState connectionTestTask {};  ///< Background manual connection test.
     AppListTaskState appListTask {};  ///< Background app-list fetch state.
@@ -4682,7 +4748,7 @@ namespace {
   }
 
   /**
-   * @brief Initialize mutable shell runtime state for a new interactive session.
+   * @brief Initialize shell tasks and the notification lifetime clock for a new session.
    *
    * @param state Client state whose logging configuration should be applied.
    * @param runtime Runtime state to prepare.
@@ -4697,6 +4763,7 @@ namespace {
     reset_app_art_task(&runtime->appArtTask);
     reset_host_discovery_task(&runtime->hostDiscoveryTask);
     reset_host_probe_task(&runtime->hostProbeTask);
+    runtime->notificationTick = SDL_GetTicks();
     logging::set_minimum_level(logging::LogLevel::trace);
     logging::set_file_minimum_level(state.settings.loggingLevel);
     logging::set_debugger_console_minimum_level(state.settings.xemuConsoleLoggingLevel);
@@ -4768,7 +4835,7 @@ namespace {
   }
 
   /**
-   * @brief Launch the selected stream when requested by the app state update.
+   * @brief Launch the selected stream and report startup failures not covered by its end summary.
    *
    * @param window Shared SDL window reused when entering a streaming session.
    * @param activeVideoMode Active output mode used by the shell renderer.
@@ -4794,6 +4861,7 @@ namespace {
     const app::HostAppRecord *streamApp = app::selected_app(state);
     if (streamHost == nullptr || streamApp == nullptr) {
       state.shell.statusMessage = "Select a valid app before starting a stream.";
+      app::show_notification(state, app::NotificationKind::error, "No app selected", "Select an app from the library before starting a stream.");
       logging::warn("stream", state.shell.statusMessage);
       return true;
     }
@@ -4801,12 +4869,14 @@ namespace {
     network::PairingIdentity clientIdentity {};
     if (std::string identityError; !load_saved_pairing_identity_for_streaming(&clientIdentity, &identityError)) {
       state.shell.statusMessage = identityError;
+      app::show_notification(state, app::NotificationKind::error, "Pairing required", "Pair this PC again before starting a stream.");
       logging::warn("stream", identityError);
       return true;
     }
 
     if (window == nullptr) {
       state.shell.statusMessage = "Streaming requires a valid SDL window.";
+      app::show_notification(state, app::NotificationKind::error, "Couldn't start stream", "Restart Moonlight and try again.");
       logging::error("stream", state.shell.statusMessage);
       return true;
     }
@@ -4821,6 +4891,9 @@ namespace {
     SDL_GameController *returnController = nullptr;
     const bool streamStarted = streaming::run_stream_session(window, activeVideoMode, state.settings, *streamHost, *streamApp, clientIdentity, retainedController.get(), &returnController, &sessionMessage);
     state.shell.statusMessage = sessionMessage;
+    if (!streamStarted) {
+      app::show_notification(state, app::NotificationKind::error, "Streaming failed", "Check that the PC is online and Sunshine is running, then try again.");
+    }
     if (returnController != nullptr) {
       retainedController.reset(returnController);
     }
@@ -4902,7 +4975,7 @@ namespace {
   }
 
   /**
-   * @brief Process one shell frame, including input, background tasks, and redraws.
+   * @brief Process shell input, notification lifetimes, background tasks and redraws.
    *
    * @param window Shared SDL window reused for shell and streaming rendering.
    * @param videoMode Active output mode used by the shell renderer.
@@ -4915,6 +4988,10 @@ namespace {
     if (window == nullptr || resources == nullptr || runtime == nullptr) {
       return false;
     }
+
+    const Uint32 notificationNow = SDL_GetTicks();
+    app::advance_notifications(state, notificationNow - runtime->notificationTick);
+    runtime->notificationTick = notificationNow;
 
     const auto processCommand = [window, &state, videoMode, resources, runtime](input::UiCommand command) {
       process_shell_command(window, videoMode, state, command, resources, runtime);
