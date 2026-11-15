@@ -6,13 +6,15 @@
 #include "src/app/client_state.h"
 
 // standard includes
-#include "src/network/host_pairing.h"
-
 #include <algorithm>
 #include <array>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+// local includes
+#include "src/app/stream_bitrate.h"
+#include "src/network/host_pairing.h"
 
 namespace {
 
@@ -31,7 +33,7 @@ namespace {
   constexpr int DEFAULT_STREAM_FRAMERATE = 30;
   constexpr int DEFAULT_STREAM_BITRATE_KBPS = 1000;
   constexpr std::array<int, 6> STREAM_FRAMERATE_OPTIONS {15, 20, 24, 25, 30, 60};
-  constexpr std::array<int, 9> STREAM_BITRATE_OPTIONS {500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000};
+  constexpr std::array<int, 24> STREAM_BITRATE_OPTIONS {500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000, 19000, 20000};
 
   /**
    * @brief Describes the keypad characters available for the active add-host field.
@@ -165,7 +167,17 @@ namespace {
   }
 
   /**
-   * @brief Advance the preferred stream resolution to the next detected Xbox video mode.
+   * @brief Reset the bitrate for the selected resolution and frame rate, using 640x480 before detection.
+   *
+   * @param settings Stream settings receiving the calculated default bitrate.
+   */
+  void reset_stream_bitrate_to_default(app::SettingsState &settings) {
+    const VIDEO_MODE mode = settings.preferredVideoModeSet ? settings.preferredVideoMode : VIDEO_MODE {640, 480, 32, 60};
+    settings.streamBitrateKbps = app::default_stream_bitrate_kbps(mode.width, mode.height, settings.streamFramerate);
+  }
+
+  /**
+   * @brief Advance the preferred stream resolution and reset the bitrate when its dimensions change.
    *
    * @param state Current client state containing detected stream-resolution modes.
    */
@@ -177,12 +189,17 @@ namespace {
     }
 
     const std::size_t nextIndex = (selected_stream_video_mode_index(state) + 1U) % state.settings.availableVideoModes.size();
-    state.settings.preferredVideoMode = state.settings.availableVideoModes[nextIndex];
+    const VIDEO_MODE nextMode = state.settings.availableVideoModes[nextIndex];
+    const bool resolutionChanged = !state.settings.preferredVideoModeSet || !stream_resolutions_match(state.settings.preferredVideoMode, nextMode);
+    state.settings.preferredVideoMode = nextMode;
     state.settings.preferredVideoModeSet = true;
+    if (resolutionChanged) {
+      reset_stream_bitrate_to_default(state.settings);
+    }
   }
 
   /**
-   * @brief Advance the preferred stream frame rate to the next supported option.
+   * @brief Advance the preferred stream frame rate and reset the bitrate for the new rate.
    *
    * @param state Current client state containing the preferred frame rate.
    */
@@ -190,27 +207,21 @@ namespace {
     const auto current = std::find(STREAM_FRAMERATE_OPTIONS.begin(), STREAM_FRAMERATE_OPTIONS.end(), state.settings.streamFramerate);
     if (current == STREAM_FRAMERATE_OPTIONS.end()) {
       state.settings.streamFramerate = DEFAULT_STREAM_FRAMERATE;
-      return;
+    } else {
+      const std::size_t nextIndex = (static_cast<std::size_t>(std::distance(STREAM_FRAMERATE_OPTIONS.begin(), current)) + 1U) % STREAM_FRAMERATE_OPTIONS.size();
+      state.settings.streamFramerate = STREAM_FRAMERATE_OPTIONS[nextIndex];
     }
-
-    const std::size_t nextIndex = (static_cast<std::size_t>(std::distance(STREAM_FRAMERATE_OPTIONS.begin(), current)) + 1U) % STREAM_FRAMERATE_OPTIONS.size();
-    state.settings.streamFramerate = STREAM_FRAMERATE_OPTIONS[nextIndex];
+    reset_stream_bitrate_to_default(state.settings);
   }
 
   /**
-   * @brief Advance the preferred stream bitrate to the next supported option.
+   * @brief Advance the preferred stream bitrate to the next larger option, wrapping at the maximum.
    *
    * @param state Current client state containing the preferred bitrate.
    */
   void cycle_stream_bitrate(app::ClientState &state) {
-    const auto current = std::find(STREAM_BITRATE_OPTIONS.begin(), STREAM_BITRATE_OPTIONS.end(), state.settings.streamBitrateKbps);
-    if (current == STREAM_BITRATE_OPTIONS.end()) {
-      state.settings.streamBitrateKbps = STREAM_BITRATE_OPTIONS.front();
-      return;
-    }
-
-    const std::size_t nextIndex = (static_cast<std::size_t>(std::distance(STREAM_BITRATE_OPTIONS.begin(), current)) + 1U) % STREAM_BITRATE_OPTIONS.size();
-    state.settings.streamBitrateKbps = STREAM_BITRATE_OPTIONS[nextIndex];
+    const auto next = std::upper_bound(STREAM_BITRATE_OPTIONS.begin(), STREAM_BITRATE_OPTIONS.end(), state.settings.streamBitrateKbps);
+    state.settings.streamBitrateKbps = next == STREAM_BITRATE_OPTIONS.end() ? STREAM_BITRATE_OPTIONS.front() : *next;
   }
 
   std::string pairing_reset_endpoint_key(std::string_view address, uint16_t port) {
@@ -529,19 +540,19 @@ namespace {
           {
             "cycle-stream-video-mode",
             std::string("Stream Resolution: ") + describe_stream_resolution(state.settings.preferredVideoMode),
-            "Cycle through detected Xbox video modes enabled by the console settings. The selected resolution is requested from the host the next time a stream starts.",
+            "Cycle through detected Xbox video modes enabled by the console settings. Changing resolution resets the bitrate to a recommended default for the resolution and frame rate.",
             true,
           },
           {
             "cycle-stream-framerate",
             std::string("Stream Frame Rate: ") + std::to_string(state.settings.streamFramerate) + " FPS",
-            "Cycle through the preferred stream frame rate. Lower frame rates can reduce video packet pressure on slower or lossy networks.",
+            "Cycle through the preferred stream frame rate. Changing frame rate resets the bitrate to a recommended default for the resolution and frame rate.",
             true,
           },
           {
             "cycle-stream-bitrate",
-            std::string("Stream Bitrate: ") + std::to_string(state.settings.streamBitrateKbps) + " kbps",
-            "Cycle through the preferred video bitrate. Lower bitrates reduce bandwidth use and can help when running Sunshine and xemu on the same NATed host.",
+            std::string("Stream Bitrate: ") + app::format_stream_bitrate_mbps(state.settings.streamBitrateKbps),
+            "Cycle through the preferred video bitrate. Lower bitrates reduce bandwidth use. Changing resolution or frame rate resets this value to a recommended default.",
             true,
           },
           {
@@ -1992,7 +2003,7 @@ namespace app {
       cycle_stream_bitrate(state);
       state.settings.dirty = true;
       update->persistence.settingsChanged = true;
-      state.shell.statusMessage = std::string("Stream bitrate set to ") + std::to_string(state.settings.streamBitrateKbps) + " kbps";
+      state.shell.statusMessage = std::string("Stream bitrate set to ") + app::format_stream_bitrate_mbps(state.settings.streamBitrateKbps);
       rebuild_menu(state, "cycle-stream-bitrate");
       return;
     }

@@ -24,6 +24,14 @@
 
 ## Streaming controls and statistics
 
+Changing **Settings → Display → Stream Resolution** or **Stream Frame Rate** resets **Stream Bitrate**
+to a default calculated with Moonlight Android's resolution factors and pixel-count interpolation,
+scaled by the selected FPS and rounded to whole Mbps. At 30 / 60 FPS, the defaults are 1 / 3 Mbps for
+640x480, 2 / 3 Mbps for 720x480, 5 / 10 Mbps for 1280x720, and 10 / 20 Mbps for 1920x1080.
+Bitrates are displayed in Mbps. You can then adjust **Stream Bitrate** manually; the setting is saved
+until resolution or FPS changes again.
+These are starting values for image quality and bandwidth, not a guarantee of Xbox decoding performance.
+
 To quit a stream, press **Back/Select + Black + White (LB + RB)** together on any connected controller.
 The client displays **Stopping stream...**, then a stream summary. Release the buttons, then press a
 button to return to the menu.
