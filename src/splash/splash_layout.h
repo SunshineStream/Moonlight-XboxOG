@@ -48,12 +48,13 @@ namespace splash {
    *
    * When the framebuffer aspect ratio differs from the effective display aspect,
    * this returns the width that should be used for layout before horizontal
-   * scaling is applied back onto the framebuffer.
+   * scaling is applied back onto the framebuffer. Integer aspect ratios and
+   * nearest-pixel rounding keep the width independent of floating-point state.
    *
    * @param screenHeight Height of the destination surface.
    * @param videoMode The video mode being rendered.
    * @param encoderSettings The value returned by XVideoGetEncoderSettings().
-   * @return The logical display width corresponding to the effective aspect ratio.
+   * @return Logical width clamped to the positive integer range, or one for invalid dimensions.
    */
   int calculate_display_width(int screenHeight, const VIDEO_MODE &videoMode, unsigned long encoderSettings);
 

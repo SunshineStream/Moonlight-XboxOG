@@ -8,6 +8,9 @@
 // standard includes
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
 
 namespace {
 
@@ -41,7 +44,23 @@ namespace splash {
   }
 
   int calculate_display_width(int screenHeight, const VIDEO_MODE &videoMode, unsigned long encoderSettings) {
-    return clamp_scaled_dimension(static_cast<float>(screenHeight) * get_display_aspect_ratio(videoMode, encoderSettings));
+    if (screenHeight <= 0 || videoMode.width <= 0 || videoMode.height <= 0) {
+      return 1;
+    }
+
+    const std::int64_t preferredNumerator = (encoderSettings & VIDEO_WIDESCREEN) != 0UL ? 16 : 4;
+    const std::int64_t preferredDenominator = (encoderSettings & VIDEO_WIDESCREEN) != 0UL ? 9 : 3;
+    constexpr int toleranceDenominator = 20;  ///< Exact 0.05 aspect tolerance used by get_display_aspect_ratio().
+    const std::int64_t aspectDifference = std::abs(static_cast<std::int64_t>(videoMode.width) * preferredDenominator - static_cast<std::int64_t>(videoMode.height) * preferredNumerator);
+    const bool matchesDisplay = aspectDifference * toleranceDenominator <= videoMode.height * preferredDenominator;
+    const std::int64_t numerator = matchesDisplay ? videoMode.width : preferredNumerator;
+    const std::int64_t denominator = matchesDisplay ? videoMode.height : preferredDenominator;
+
+    // x87 intermediates can fall just below an exact pixel width after settings
+    // arithmetic. Truncating that float briefly changed 1280 to 1279 and shifted
+    // the entire shell. Keep the ratio integral and round to the nearest pixel.
+    const std::int64_t width = (static_cast<std::int64_t>(screenHeight) * numerator + denominator / 2) / denominator;
+    return static_cast<int>(std::clamp<std::int64_t>(width, 1, std::numeric_limits<int>::max()));
   }
 
   float get_logo_width_aspect_correction(const VIDEO_MODE &videoMode, unsigned long encoderSettings) {
