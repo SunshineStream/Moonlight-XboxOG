@@ -2,15 +2,18 @@
  * @file tests/unit/app/client_state_test.cpp
  * @brief Verifies client state models and transitions.
  */
-// class header include
-#include "src/app/client_state.h"
+// test includes
+#include "tests/support/network_test_constants.h"
+
+// standard includes
+#include <array>
+#include <string>
 
 // lib includes
 #include <lizardbyte/common/testing.h>
-#include <string>
 
-// test includes
-#include "tests/support/network_test_constants.h"
+// local includes
+#include "src/app/client_state.h"
 
 namespace {
 
@@ -1025,6 +1028,9 @@ namespace {
     EXPECT_FALSE(update.navigation.screenChanged);
   }
 
+  /**
+   * @brief Changing stream resolution resets custom bitrate, persists both values and refreshes the menu.
+   */
   TEST(ClientStateTest, DisplaySettingsCanCycleXboxVideoModeStreamChoices) {
     app::ClientState state = app::create_initial_state();
     state.settings.availableVideoModes = {
@@ -1034,19 +1040,63 @@ namespace {
     };
     state.settings.preferredVideoMode = state.settings.availableVideoModes.front();
     state.settings.preferredVideoModeSet = true;
+    state.settings.streamBitrateKbps = 750;
 
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
 
-    const app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
+    app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(update.navigation.activatedItemId, "cycle-stream-video-mode");
     EXPECT_TRUE(update.persistence.settingsChanged);
     EXPECT_EQ(state.settings.preferredVideoMode.width, 720);
     EXPECT_EQ(state.settings.preferredVideoMode.height, 480);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 2000);
+    EXPECT_TRUE(state.settings.dirty);
     EXPECT_EQ(state.shell.statusMessage, "Stream resolution set to 720x480");
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-stream-bitrate"));
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Stream Bitrate: 2 Mbps");
+
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-stream-video-mode"));
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 5000);
+    update = app::handle_command(state, input::UiCommand::activate);
+    EXPECT_TRUE(update.persistence.settingsChanged);
+    EXPECT_EQ(state.settings.preferredVideoMode.width, 640);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 1000);
   }
 
+  /**
+   * @brief Cycling an unchanged or unavailable resolution preserves a manually selected bitrate.
+   */
+  TEST(ClientStateTest, DisplaySettingsPreserveCustomBitrateWithoutAResolutionChange) {
+    app::ClientState state = app::create_initial_state();
+    state.settings.availableVideoModes = {VIDEO_MODE {1280, 720, 32, 60}};
+    state.settings.preferredVideoMode = state.settings.availableVideoModes.front();
+    state.settings.preferredVideoModeSet = true;
+    state.settings.streamBitrateKbps = 750;
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 750);
+
+    state.settings.availableVideoModes.clear();
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_FALSE(state.settings.preferredVideoModeSet);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 750);
+
+    state.settings.availableVideoModes = {VIDEO_MODE {1280, 720, 32, 60}};
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_TRUE(state.settings.preferredVideoModeSet);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 5000);
+  }
+
+  /**
+   * @brief FPS changes reset bitrate using the selected stream dimensions rather than display refresh.
+   */
   TEST(ClientStateTest, DisplaySettingsCanCycleStreamFramerateThroughSixtyFps) {
     app::ClientState state = app::create_initial_state();
+    state.settings.preferredVideoMode = VIDEO_MODE {1280, 720, 32, 50};
+    state.settings.preferredVideoModeSet = true;
+    state.settings.streamBitrateKbps = 750;
 
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
 
@@ -1055,6 +1105,8 @@ namespace {
     EXPECT_EQ(update.navigation.activatedItemId, "cycle-stream-framerate");
     EXPECT_TRUE(update.persistence.settingsChanged);
     EXPECT_EQ(state.settings.streamFramerate, 60);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 10000);
+    EXPECT_TRUE(state.settings.dirty);
     EXPECT_EQ(state.shell.statusMessage, "Stream frame rate set to 60 FPS");
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Stream Frame Rate: 60 FPS");
@@ -1062,13 +1114,75 @@ namespace {
     update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(update.navigation.activatedItemId, "cycle-stream-framerate");
     EXPECT_EQ(state.settings.streamFramerate, 15);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 3000);
     EXPECT_EQ(state.shell.statusMessage, "Stream frame rate set to 15 FPS");
 
     state.settings.streamFramerate = 999;
     update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(update.navigation.activatedItemId, "cycle-stream-framerate");
     EXPECT_EQ(state.settings.streamFramerate, 30);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 5000);
     EXPECT_EQ(state.shell.statusMessage, "Stream frame rate set to 30 FPS");
+  }
+
+  /**
+   * @brief FPS changes before mode detection use the normal 640x480 default dimensions.
+   */
+  TEST(ClientStateTest, DisplaySettingsUseDefaultResolutionForFramerateChangesBeforeDetection) {
+    app::ClientState state = app::create_initial_state();
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-stream-framerate"));
+
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.settings.streamFramerate, 60);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 3000);
+  }
+
+  /**
+   * @brief Manual bitrate adjustment covers all Xbox defaults, wraps and formats fractional Mbps.
+   */
+  TEST(ClientStateTest, DisplaySettingsCycleManualBitrateInMbpsThroughTheHighestDefault) {
+    app::ClientState state = app::create_initial_state();
+    state.settings.streamBitrateKbps = 7000;
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-stream-bitrate"));
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Stream Bitrate: 7 Mbps");
+
+    for (int bitrateKbps = 8000; bitrateKbps <= 20000; bitrateKbps += 1000) {
+      state.settings.dirty = false;
+      const app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
+      EXPECT_TRUE(update.persistence.settingsChanged);
+      EXPECT_TRUE(state.settings.dirty);
+      EXPECT_EQ(state.settings.streamBitrateKbps, bitrateKbps);
+    }
+
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 500);
+    EXPECT_EQ(state.shell.statusMessage, "Stream bitrate set to 0.5 Mbps");
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Stream Bitrate: 0.5 Mbps");
+
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 750);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Stream Bitrate: 0.75 Mbps");
+
+    state.settings.streamBitrateKbps = 3500;
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 4000);
+  }
+
+  /**
+   * @brief Other display controls leave a manually selected bitrate unchanged.
+   */
+  TEST(ClientStateTest, DisplaySettingsPreserveManualBitrateWhenOtherOptionsChange) {
+    app::ClientState state = app::create_initial_state();
+    state.settings.streamBitrateKbps = 1500;
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+    constexpr std::array<const char *, 3> controls {"toggle-play-audio-on-pc", "toggle-play-audio-on-xbox", "toggle-show-performance-stats"};
+    for (const char *control : controls) {
+      ASSERT_TRUE(state.detailMenu.select_item_by_id(control));
+      app::handle_command(state, input::UiCommand::activate);
+      EXPECT_EQ(state.settings.streamBitrateKbps, 1500);
+    }
   }
 
   TEST(ClientStateTest, DisplaySettingsCanToggleXboxAudioAndPerformanceStats) {
