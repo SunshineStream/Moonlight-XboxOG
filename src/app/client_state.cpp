@@ -28,7 +28,7 @@ namespace {
   constexpr std::size_t ADD_HOST_KEYPAD_COLUMN_COUNT = 3U;
   constexpr const char *DELETE_SAVED_FILE_MENU_ID_PREFIX = "delete-saved-file:";
   constexpr const char *SETTINGS_CATEGORY_PREFIX = "settings-category:";
-  constexpr std::array<char, 11> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0'};
+  constexpr std::array<char, 10> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr std::array<char, 10> ADD_HOST_PORT_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr int DEFAULT_STREAM_FRAMERATE = 30;
   constexpr int DEFAULT_STREAM_BITRATE_KBPS = 1000;
@@ -664,6 +664,26 @@ namespace {
     state.modal.selectedActionIndex = selectedActionIndex;
   }
 
+  /**
+   * @brief Show connection progress before scheduling the endpoint test.
+   *
+   * @param state Client state receiving the progress dialog.
+   * @param address Normalized IPv4 endpoint.
+   * @param port Effective host port.
+   * @param update Receives the background request and modal transition.
+   */
+  void request_connection_test(app::ClientState &state, const std::string &address, uint16_t port, app::AppUpdate *update) {
+    state.connectionTest = {true, false, address, app::effective_host_port(port), "Contacting the host. Please wait..."};
+    open_modal(state, app::ModalId::connection_test);
+    state.shell.statusMessage = "Testing connection to " + address + ":" + std::to_string(state.connectionTest.port) + "...";
+    if (update != nullptr) {
+      update->navigation.modalOpened = true;
+      update->requests.connectionTestRequested = true;
+      update->requests.connectionTestAddress = address;
+      update->requests.connectionTestPort = state.connectionTest.port;
+    }
+  }
+
   void cycle_log_viewer_placement(app::ClientState &state) {
     switch (state.settings.logViewerPlacement) {
       case app::LogViewerPlacement::full:
@@ -706,6 +726,7 @@ namespace {
       case app::ModalId::host_details:
       case app::ModalId::app_details:
       case app::ModalId::log_viewer:
+      case app::ModalId::connection_test:
         return 0U;
     }
     return 0U;
@@ -722,11 +743,33 @@ namespace {
     return state.modal.selectedActionIndex != current;
   }
 
+  /**
+   * @brief Open an isolated field draft, splitting saved addresses into editable sections.
+   *
+   * @param state Client state receiving the keypad draft.
+   * @param field Address or port to edit.
+   */
   void open_add_host_keypad(app::ClientState &state, app::AddHostField field) {
     state.addHostDraft.activeField = field;
     state.addHostDraft.keypad.visible = true;
     state.addHostDraft.keypad.selectedButtonIndex = 0U;
     state.addHostDraft.keypad.stagedInput = field == app::AddHostField::address ? state.addHostDraft.addressInput : state.addHostDraft.portInput;
+    auto &keypad = state.addHostDraft.keypad;
+    keypad.addressOctets = {};
+    keypad.activeOctet = 0U;
+    keypad.replaceOctet = true;
+    if (field == app::AddHostField::address) {
+      std::size_t start = 0U;
+      for (auto &octet : keypad.addressOctets) {
+        const std::size_t end = keypad.stagedInput.find('.', start);
+        octet = keypad.stagedInput.substr(start, end == std::string::npos ? end : end - start);
+        if (end == std::string::npos) {
+          break;
+        }
+        start = end + 1U;
+      }
+    }
+    state.addHostDraft.validationMessage.clear();
     state.shell.statusMessage = field == app::AddHostField::address ? "Editing host address" : "Editing host port";
     rebuild_menu(state, add_host_field_menu_id(field));
   }
@@ -798,16 +841,93 @@ namespace {
     return nextIndex != currentIndex;
   }
 
+  /**
+   * @brief Serialize the four IPv4 sections while preserving an entirely empty draft.
+   *
+   * @param keypad Keypad draft to synchronize.
+   */
+  void synchronize_address_draft(app::AddHostKeypadState &keypad) {
+    keypad.stagedInput.clear();
+    if (std::all_of(keypad.addressOctets.begin(), keypad.addressOctets.end(), [](const std::string &octet) {
+          return octet.empty();
+        })) {
+      return;
+    }
+    for (std::size_t index = 0; index < keypad.addressOctets.size(); ++index) {
+      if (index != 0U) {
+        keypad.stagedInput += '.';
+      }
+      keypad.stagedInput += keypad.addressOctets[index];
+    }
+  }
+
+  /**
+   * @brief Move between IPv4 sections without changing the numeric keypad selection.
+   *
+   * @param state Client state containing the field draft.
+   * @param direction Negative for the preceding section, positive for the next.
+   */
+  void move_address_octet(app::ClientState &state, int direction) {
+    if (state.addHostDraft.activeField != app::AddHostField::address) {
+      return;
+    }
+    auto &keypad = state.addHostDraft.keypad;
+    const std::size_t nextOctet = direction < 0 ? (keypad.activeOctet == 0U ? 0U : keypad.activeOctet - 1U) : std::min(keypad.activeOctet + 1U, keypad.addressOctets.size() - 1U);
+    if (nextOctet != keypad.activeOctet) {
+      keypad.activeOctet = nextOctet;
+      keypad.replaceOctet = true;
+    }
+  }
+
+  /**
+   * @brief Add a port digit or a bounded IPv4 digit, advancing after three digits.
+   *
+   * @param state Client state containing the field draft.
+   * @param character Selected numeric keypad character.
+   */
   void append_to_active_add_host_field(app::ClientState &state, char character) {
-    state.addHostDraft.keypad.stagedInput.push_back(character);
+    auto &keypad = state.addHostDraft.keypad;
+    if (state.addHostDraft.activeField == app::AddHostField::address) {
+      auto &octet = keypad.addressOctets[keypad.activeOctet];
+      const std::string candidate = (keypad.replaceOctet ? std::string {} : octet) + character;
+      if (candidate.size() > 3U || (candidate.size() == 3U && candidate > "255")) {
+        state.addHostDraft.validationMessage = "Each address section must be between 0 and 255.";
+        return;
+      }
+      octet = candidate;
+      keypad.replaceOctet = false;
+      synchronize_address_draft(keypad);
+      if (octet.size() == 3U && keypad.activeOctet + 1U < keypad.addressOctets.size()) {
+        move_address_octet(state, 1);
+      }
+    } else {
+      keypad.stagedInput.push_back(character);
+    }
     state.addHostDraft.validationMessage.clear();
     state.addHostDraft.connectionMessage.clear();
   }
 
+  /**
+   * @brief Delete a digit, returning to the previous IPv4 section when necessary.
+   *
+   * @param state Client state containing the field draft.
+   */
   void backspace_active_add_host_field(app::ClientState &state) {
-    if (!state.addHostDraft.keypad.stagedInput.empty()) {
-      state.addHostDraft.keypad.stagedInput.pop_back();
+    auto &keypad = state.addHostDraft.keypad;
+    if (state.addHostDraft.activeField == app::AddHostField::address) {
+      if (keypad.addressOctets[keypad.activeOctet].empty() && keypad.activeOctet > 0U) {
+        --keypad.activeOctet;
+      }
+      auto &octet = keypad.addressOctets[keypad.activeOctet];
+      if (!octet.empty()) {
+        octet.pop_back();
+      }
+      keypad.replaceOctet = false;
+      synchronize_address_draft(keypad);
+    } else if (!keypad.stagedInput.empty()) {
+      keypad.stagedInput.pop_back();
     }
+    state.addHostDraft.validationMessage.clear();
   }
 
   bool normalize_add_host_inputs(const app::ClientState &state, std::string *normalizedAddress, uint16_t *parsedPort, std::string *errorMessage) {
@@ -1264,12 +1384,7 @@ namespace {
         request_host_pairing(state, *host, update);
         return true;
       case 1:
-        close_modal_and_mark_closed(state, update);
-        if (update != nullptr) {
-          update->requests.connectionTestRequested = true;
-          update->requests.connectionTestAddress = host->address;
-          update->requests.connectionTestPort = app::effective_host_port(host->port);
-        }
+        request_connection_test(state, host->address, host->port, update);
         return true;
       case 2:
         delete_selected_host(state, update);
@@ -1347,6 +1462,7 @@ namespace {
       case app::ModalId::support:
       case app::ModalId::host_details:
       case app::ModalId::app_details:
+      case app::ModalId::connection_test:
         close_modal_and_mark_closed(state, update);
         return true;
       case app::ModalId::log_viewer:
@@ -1367,6 +1483,10 @@ namespace {
   bool handle_modal_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
     if (!state.modal.active()) {
       return false;
+    }
+
+    if (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress) {
+      return true;
     }
 
     if (handle_log_viewer_modal_command(state, command, update)) {
@@ -1556,13 +1676,19 @@ namespace app {
   }
 
   void apply_connection_test_result(ClientState &state, bool success, std::string message) {
+    state.connectionTest.inProgress = false;
+    state.connectionTest.succeeded = success;
+    state.connectionTest.message = message;
     if (state.shell.activeScreen == ScreenId::add_host) {
       state.addHostDraft.connectionMessage = message;
       state.addHostDraft.lastConnectionSucceeded = success;
     }
-    if (!state.hosts.items.empty() && state.hosts.selectedHostIndex < state.hosts.items.size()) {
-      state.hosts.items[state.hosts.selectedHostIndex].reachability = success ? HostReachability::online : HostReachability::offline;
-    } else if (state.hosts.activeLoaded) {
+    for (auto &host : state.hosts.items) {
+      if (host.address == state.connectionTest.address && effective_host_port(host.port) == state.connectionTest.port) {
+        host.reachability = success ? HostReachability::online : HostReachability::offline;
+      }
+    }
+    if (state.hosts.activeLoaded && state.hosts.active.address == state.connectionTest.address && effective_host_port(state.hosts.active.port) == state.connectionTest.port) {
       state.hosts.active.reachability = success ? HostReachability::online : HostReachability::offline;
     }
     state.shell.statusMessage = std::move(message);
@@ -1951,8 +2077,13 @@ namespace app {
           return true;
         }
       case input::UiCommand::open_context_menu:
+        return true;
       case input::UiCommand::previous_page:
+        move_address_octet(state, -1);
+        return true;
       case input::UiCommand::next_page:
+        move_address_octet(state, 1);
+        return true;
       case input::UiCommand::fast_previous_page:
       case input::UiCommand::fast_next_page:
       case input::UiCommand::toggle_overlay:
@@ -2358,10 +2489,7 @@ namespace app {
       }
       state.addHostDraft.validationMessage.clear();
       state.addHostDraft.connectionMessage = "Testing connection to " + normalizedAddress + (parsedPort == 0 ? std::string {} : ":" + std::to_string(parsedPort)) + "...";
-      state.shell.statusMessage = state.addHostDraft.connectionMessage;
-      update->requests.connectionTestRequested = true;
-      update->requests.connectionTestAddress = normalizedAddress;
-      update->requests.connectionTestPort = effective_host_port(parsedPort);
+      request_connection_test(state, normalizedAddress, parsedPort, update);
       return;
     }
     if (activatedItemId == "save-host") {

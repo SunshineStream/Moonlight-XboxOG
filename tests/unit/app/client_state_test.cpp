@@ -860,8 +860,14 @@ namespace {
     EXPECT_EQ(update.requests.connectionTestAddress, test_support::kTestIpv4Addresses[test_support::kIpHostGridA]);
     EXPECT_EQ(update.requests.connectionTestPort, test_support::kTestPorts[test_support::kPortDefaultHost]);
     EXPECT_EQ(state.shell.statusMessage, "Testing connection to " + std::string(test_support::kTestIpv4Addresses[test_support::kIpHostGridA]) + ":48000...");
+    EXPECT_TRUE(update.navigation.modalOpened);
+    EXPECT_EQ(state.modal.id, app::ModalId::connection_test);
+    EXPECT_TRUE(state.connectionTest.inProgress);
   }
 
+  /**
+   * @brief Keep address edits isolated and replace the selected octet on new input.
+   */
   TEST(ClientStateTest, StagesCancelsDeletesAndAcceptsAddHostKeypadEdits) {
     app::ClientState state = app::create_initial_state();
 
@@ -875,10 +881,11 @@ namespace {
     EXPECT_EQ(state.addHostDraft.keypad.stagedInput, test_support::kTestIpv4Addresses[test_support::kIpHostGridA]);
 
     app::handle_command(state, input::UiCommand::activate);
-    EXPECT_EQ(state.addHostDraft.keypad.stagedInput, std::string(test_support::kTestIpv4Addresses[test_support::kIpHostGridA]) + "1");
+    EXPECT_EQ(state.addHostDraft.keypad.addressOctets[0], "1");
+    EXPECT_EQ(state.addHostDraft.keypad.addressOctets[3], "10");
 
     app::handle_command(state, input::UiCommand::delete_character);
-    EXPECT_EQ(state.addHostDraft.keypad.stagedInput, test_support::kTestIpv4Addresses[test_support::kIpHostGridA]);
+    EXPECT_TRUE(state.addHostDraft.keypad.addressOctets[0].empty());
 
     app::handle_command(state, input::UiCommand::back);
     EXPECT_FALSE(state.addHostDraft.keypad.visible);
@@ -887,12 +894,100 @@ namespace {
     app::handle_command(state, input::UiCommand::activate);
     EXPECT_TRUE(state.addHostDraft.keypad.visible);
     app::handle_command(state, input::UiCommand::activate);
-    EXPECT_EQ(state.addHostDraft.keypad.stagedInput, std::string(test_support::kTestIpv4Addresses[test_support::kIpHostGridA]) + "1");
+    const std::string editedAddress = "1.168.0.10";  // NOSONAR(cpp:S1313) deliberate edited IPv4 fixture.
+    EXPECT_EQ(state.addHostDraft.keypad.stagedInput, editedAddress);
     app::handle_command(state, input::UiCommand::confirm);
     EXPECT_FALSE(state.addHostDraft.keypad.visible);
-    EXPECT_EQ(state.addHostDraft.addressInput, std::string(test_support::kTestIpv4Addresses[test_support::kIpHostGridA]) + "1");
+    EXPECT_EQ(state.addHostDraft.addressInput, editedAddress);
   }
 
+  /**
+   * @brief Advance full IPv4 sections, edit earlier sections and enforce byte bounds.
+   */
+  TEST(ClientStateTest, AddressKeypadAdvancesAndSwitchesOctetsWithoutChangingKeyFocus) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::activate);
+    auto &keypad = state.addHostDraft.keypad;
+    app::handle_command(state, input::UiCommand::previous_page);
+    EXPECT_EQ(keypad.activeOctet, 0U);
+    for (int digit = 0; digit < 3; ++digit) {
+      app::handle_command(state, input::UiCommand::activate);
+    }
+    EXPECT_EQ(keypad.addressOctets[0], "111");
+    EXPECT_EQ(keypad.activeOctet, 1U);
+    app::handle_command(state, input::UiCommand::delete_character);
+    EXPECT_EQ(keypad.activeOctet, 0U);
+    EXPECT_EQ(keypad.addressOctets[0], "11");
+    app::handle_command(state, input::UiCommand::next_page);
+    keypad.selectedButtonIndex = 1U;
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::activate);
+    keypad.selectedButtonIndex = 7U;
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(keypad.addressOctets[1], "228");
+    EXPECT_EQ(keypad.activeOctet, 2U);
+    app::handle_command(state, input::UiCommand::previous_page);
+    EXPECT_EQ(keypad.selectedButtonIndex, 7U);
+    keypad.selectedButtonIndex = 1U;
+    app::handle_command(state, input::UiCommand::activate);
+    keypad.selectedButtonIndex = 4U;
+    app::handle_command(state, input::UiCommand::activate);
+    keypad.selectedButtonIndex = 5U;
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(keypad.addressOctets[1], "25");
+    EXPECT_EQ(keypad.activeOctet, 1U);
+    EXPECT_FALSE(state.addHostDraft.validationMessage.empty());
+    keypad.selectedButtonIndex = 4U;
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(keypad.addressOctets[1], "255");
+    EXPECT_TRUE(state.addHostDraft.validationMessage.empty());
+    app::handle_command(state, input::UiCommand::next_page);
+    EXPECT_EQ(keypad.activeOctet, 3U);
+    app::handle_command(state, input::UiCommand::next_page);
+    EXPECT_EQ(keypad.activeOctet, 3U);
+    keypad.selectedButtonIndex = 0U;
+    for (int digit = 0; digit < 4; ++digit) {
+      app::handle_command(state, input::UiCommand::activate);
+    }
+    EXPECT_EQ(keypad.addressOctets[3], "111");
+    EXPECT_EQ(keypad.activeOctet, 3U);
+    app::handle_command(state, input::UiCommand::next_page);
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(keypad.addressOctets[3], "111");
+  }
+
+  /**
+   * @brief Keep an erased address empty and preserve the optional port editing workflow.
+   */
+  TEST(ClientStateTest, EmptyAddressAndPortKeypadEditsRemainIndependent) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::delete_character);
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::delete_character);
+    EXPECT_TRUE(state.addHostDraft.keypad.stagedInput.empty());
+    app::handle_command(state, input::UiCommand::confirm);
+    EXPECT_TRUE(state.addHostDraft.addressInput.empty());
+    EXPECT_FALSE(state.menu.select_item_by_id("test-connection"));
+    ASSERT_TRUE(state.menu.select_item_by_id("edit-port"));
+    app::handle_command(state, input::UiCommand::activate);
+    for (const auto command : {input::UiCommand::previous_page, input::UiCommand::next_page, input::UiCommand::delete_character}) {
+      app::handle_command(state, command);
+    }
+    EXPECT_EQ(state.addHostDraft.keypad.activeOctet, 0U);
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::delete_character);
+    EXPECT_EQ(state.addHostDraft.keypad.stagedInput, "1");
+    app::handle_command(state, input::UiCommand::confirm);
+    EXPECT_EQ(state.addHostDraft.portInput, "1");
+  }
+
+  /**
+   * @brief Wrap numeric keypad focus within rows, including the single zero key.
+   */
   TEST(ClientStateTest, AddHostKeypadWrapsHorizontallyAcrossRowEdges) {
     app::ClientState state = app::create_initial_state();
 
@@ -907,14 +1002,17 @@ namespace {
     app::handle_command(state, input::UiCommand::move_left);
     EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 2U);
 
-    state.addHostDraft.keypad.selectedButtonIndex = 10U;
+    state.addHostDraft.keypad.selectedButtonIndex = 9U;
     app::handle_command(state, input::UiCommand::move_right);
     EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 9U);
 
     app::handle_command(state, input::UiCommand::move_left);
-    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 10U);
+    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 9U);
   }
 
+  /**
+   * @brief Wrap numeric keypad focus through its short final row.
+   */
   TEST(ClientStateTest, AddHostKeypadWrapsVerticallyAcrossTopAndBottomRows) {
     app::ClientState state = app::create_initial_state();
 
@@ -924,19 +1022,22 @@ namespace {
 
     state.addHostDraft.keypad.selectedButtonIndex = 1U;
     app::handle_command(state, input::UiCommand::move_up);
-    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 10U);
+    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 9U);
 
     app::handle_command(state, input::UiCommand::move_down);
-    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 1U);
+    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 0U);
 
     state.addHostDraft.keypad.selectedButtonIndex = 8U;
     app::handle_command(state, input::UiCommand::move_down);
-    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 10U);
+    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 9U);
 
     app::handle_command(state, input::UiCommand::move_down);
-    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 1U);
+    EXPECT_EQ(state.addHostDraft.keypad.selectedButtonIndex, 0U);
   }
 
+  /**
+   * @brief Complete the visible test and update only the endpoint that was tested.
+   */
   TEST(ClientStateTest, ApplyingConnectionTestResultsUpdatesTheVisibleDraftAndActiveHost) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::activate);
@@ -949,6 +1050,7 @@ namespace {
       app::PairingState::not_paired,
       app::HostReachability::unknown,
     };
+    state.connectionTest = {true, false, state.hosts.active.address, app::effective_host_port(state.hosts.active.port), {}};
 
     app::apply_connection_test_result(state, true, "Connected successfully");
 
@@ -956,6 +1058,26 @@ namespace {
     EXPECT_EQ(state.addHostDraft.connectionMessage, "Connected successfully");
     EXPECT_EQ(state.shell.statusMessage, "Connected successfully");
     EXPECT_EQ(state.hosts.active.reachability, app::HostReachability::online);
+    EXPECT_FALSE(state.connectionTest.inProgress);
+    EXPECT_TRUE(state.connectionTest.succeeded);
+    EXPECT_EQ(state.connectionTest.message, "Connected successfully");
+  }
+
+  /**
+   * @brief A manual add-host test must not change an unrelated saved host's status.
+   */
+  TEST(ClientStateTest, ConnectionTestResultsOnlyChangeMatchingEndpoints) {
+    auto state = app::create_initial_state();
+    app::replace_hosts(state, {
+                                {"Other PC", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired, app::HostReachability::online},
+                                {"Test PC", test_support::kTestIpv4Addresses[test_support::kIpHostGridA], 0, app::PairingState::paired, app::HostReachability::unknown},
+                              });
+    state.connectionTest = {true, false, state.hosts.items[1].address, app::DEFAULT_HOST_PORT, {}};
+    app::apply_connection_test_result(state, false, "Timed out");
+    EXPECT_EQ(state.hosts.items[0].reachability, app::HostReachability::online);
+    EXPECT_EQ(state.hosts.items[1].reachability, app::HostReachability::offline);
+    EXPECT_FALSE(state.connectionTest.inProgress);
+    EXPECT_EQ(state.connectionTest.message, "Timed out");
   }
 
   /**
@@ -986,6 +1108,9 @@ namespace {
     EXPECT_TRUE(state.hosts.activeLoaded);
   }
 
+  /**
+   * @brief Show connection progress from a host context menu and retain the result until dismissed.
+   */
   TEST(ClientStateTest, HostActionsModalCanRequestConnectionTestsAndOpenDetails) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
@@ -999,6 +1124,15 @@ namespace {
     EXPECT_TRUE(update.requests.connectionTestRequested);
     EXPECT_EQ(update.requests.connectionTestAddress, test_support::kTestIpv4Addresses[test_support::kIpOffice]);
     EXPECT_EQ(update.requests.connectionTestPort, test_support::kTestPorts[test_support::kPortDefaultHost]);
+    ASSERT_EQ(state.modal.id, app::ModalId::connection_test);
+    for (const auto command : {input::UiCommand::back, input::UiCommand::activate, input::UiCommand::confirm, input::UiCommand::move_down}) {
+      EXPECT_FALSE(app::handle_command(state, command).navigation.modalClosed);
+      EXPECT_EQ(state.modal.id, app::ModalId::connection_test);
+    }
+    app::apply_connection_test_result(state, false, "Connection timed out");
+    EXPECT_EQ(state.hosts.front().reachability, app::HostReachability::offline);
+    EXPECT_FALSE(state.connectionTest.succeeded);
+    EXPECT_TRUE(app::handle_command(state, input::UiCommand::back).navigation.modalClosed);
 
     app::handle_command(state, input::UiCommand::open_context_menu);
     app::handle_command(state, input::UiCommand::move_down);

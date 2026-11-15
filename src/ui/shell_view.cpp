@@ -158,7 +158,7 @@ namespace {
   std::vector<ui::ShellToolbarButton> toolbar_buttons(const app::ClientState &state) {
     return {
       {"settings", "Settings", "G", "icons\\settings.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 0U},
-      {"support", "Support", "?", "icons\\question-mark.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 1U},
+      {"support", "Support", "?", "icons\\circle-question-mark.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 1U},
       {"add-host", "Add Host", "+", "icons\\circle-plus.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 2U},
     };
   }
@@ -252,8 +252,14 @@ namespace {
     return "Logging";
   }
 
+  /**
+   * @brief Build a numeric keypad shared by IPv4 sections and optional port entry.
+   *
+   * @param state Current keypad selection.
+   * @return Digit keys with their focus state.
+   */
   std::vector<ui::ShellModalButton> keypad_buttons(const app::ClientState &state) {
-    const std::vector<std::string> labels = state.addHostDraft.activeField == app::AddHostField::address ? std::vector<std::string> {"1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0"} : std::vector<std::string> {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"};
+    const std::vector<std::string> labels {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"};
 
     std::vector<ui::ShellModalButton> buttons;
     buttons.reserve(labels.size());
@@ -275,7 +281,10 @@ namespace {
    * @return Concise guidance displayed above the keypad input.
    */
   std::vector<std::string> keypad_modal_lines(const app::ClientState &state) {
-    return {state.addHostDraft.activeField == app::AddHostField::address ? "Enter your PC's IPv4 address." : "Enter a custom port, or leave empty for 47989."};
+    if (!state.addHostDraft.validationMessage.empty()) {
+      return {state.addHostDraft.validationMessage};
+    }
+    return {state.addHostDraft.activeField == app::AddHostField::address ? "Enter your PC's IPv4 address. Three digits advance automatically." : "Enter a custom port, or leave empty for 47989."};
   }
 
   /**
@@ -558,13 +567,19 @@ namespace {
     };
   }
 
+  /**
+   * @brief Build app actions with explicit hidden and favorite checkbox states.
+   *
+   * @param state Current app and modal selection.
+   * @param viewModel Receives the modal action rows.
+   */
   void fill_app_actions_modal_view(const app::ClientState &state, ui::ShellViewModel *viewModel) {
     if (const app::HostAppRecord *appRecord = app::selected_app(state); appRecord != nullptr) {
       viewModel->modal.title = appRecord->name;
       viewModel->modal.actions = {
-        {"toggle-hidden-app", "Hide app", true, state.modal.selectedActionIndex == 0U, appRecord->hidden},
+        {"toggle-hidden-app", "Hide app", true, state.modal.selectedActionIndex == 0U, appRecord->hidden, {}, true},
         {"view-app-details", "View details", true, state.modal.selectedActionIndex == 1U, false},
-        {"create-shortcut", "Create shortcut", true, state.modal.selectedActionIndex == 2U, appRecord->favorite},
+        {"toggle-favorite", "Set favorite", true, state.modal.selectedActionIndex == 2U, appRecord->favorite, {}, true},
       };
     }
   }
@@ -606,6 +621,12 @@ namespace {
     };
   }
 
+  /**
+   * @brief Build the active dialog, including connection-test progress and diagnostics.
+   *
+   * @param state Current reducer-owned modal state.
+   * @param viewModel Receives render-ready dialog content.
+   */
   void fill_modal_view(const app::ClientState &state, ui::ShellViewModel *viewModel) {
     if (!state.modal.active()) {
       return;
@@ -634,11 +655,22 @@ namespace {
       case app::ModalId::confirmation:
         fill_confirmation_modal_view(state, viewModel);
         return;
+      case app::ModalId::connection_test:
+        viewModel->modal.busy = state.connectionTest.inProgress;
+        viewModel->modal.title = state.connectionTest.inProgress ? "Testing connection" : (state.connectionTest.succeeded ? "Connection successful" : "Connection failed");
+        viewModel->modal.lines = {state.connectionTest.address + ":" + std::to_string(state.connectionTest.port), state.connectionTest.message};
+        return;
       case app::ModalId::none:
         return;
     }
   }
 
+  /**
+   * @brief Build controller hints, including original Xbox section-navigation buttons.
+   *
+   * @param state Current screen, dialog and input field.
+   * @return Actions displayed within the page or active input dialog.
+   */
   std::vector<ui::ShellFooterAction> footer_actions(const app::ClientState &state) {
     switch (state.shell.activeScreen) {
       case app::ScreenId::home:
@@ -671,12 +703,17 @@ namespace {
         }
       case app::ScreenId::add_host:
         if (state.addHostDraft.keypad.visible) {
-          return {
+          std::vector<ui::ShellFooterAction> actions {
             {"enter", "Enter Key", "icons\\button-a.svg", {}, true},
             {"delete", "Delete", "icons\\button-x.svg", {}, false},
             {"cancel", "Cancel", "icons\\button-b.svg", {}, false},
             {"accept", "Accept", "icons\\button-start.svg", {}, false},
           };
+          if (state.addHostDraft.activeField == app::AddHostField::address) {
+            actions.push_back({"previous-section", "Previous section", "icons\\button-lb.svg", {}, false});
+            actions.push_back({"next-section", "Next section", "icons\\button-rb.svg", {}, false});
+          }
+          return actions;
         }
         return {
           {"select", "Select", "icons\\button-a.svg", {}, true},
@@ -817,6 +854,9 @@ namespace ui {
     if (viewModel.keypad.visible) {
       viewModel.keypad.lines = keypad_modal_lines(state);
       viewModel.keypad.value = keypad_value(state);
+      viewModel.keypad.segmentedAddress = state.addHostDraft.activeField == app::AddHostField::address;
+      viewModel.keypad.addressOctets = state.addHostDraft.keypad.addressOctets;
+      viewModel.keypad.activeOctet = state.addHostDraft.keypad.activeOctet;
       viewModel.keypad.footerActions = viewModel.frame.footerActions;
       viewModel.frame.footerActions.clear();
       viewModel.keypad.buttons = keypad_buttons(state);

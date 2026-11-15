@@ -5,6 +5,7 @@
 #pragma once
 
 // standard includes
+#include <array>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -54,6 +55,7 @@ namespace app {
     app_details,  ///< App detail sheet for the selected app.
     confirmation,  ///< Destructive-action confirmation dialog.
     log_viewer,  ///< Dedicated log viewer modal.
+    connection_test,  ///< Progress and result of a manual connection test.
   };
 
   /**
@@ -107,6 +109,20 @@ namespace app {
     bool visible;  ///< True when the keypad modal is currently shown.
     std::size_t selectedButtonIndex;  ///< Zero-based selection inside the keypad button grid.
     std::string stagedInput;  ///< Draft text currently assembled inside the keypad modal.
+    std::array<std::string, 4> addressOctets {};  ///< Independently editable IPv4 sections.
+    std::size_t activeOctet = 0U;  ///< IPv4 section receiving keypad digits.
+    bool replaceOctet = true;  ///< Replace the selected section when its first digit is entered.
+  };
+
+  /**
+   * @brief Progress and result retained by the manual connection-test dialog.
+   */
+  struct ConnectionTestState {
+    bool inProgress = false;  ///< True while the background test is running.
+    bool succeeded = false;  ///< Whether the completed test reached the host.
+    std::string address;  ///< Endpoint address being tested.
+    uint16_t port = 0;  ///< Endpoint port being tested.
+    std::string message;  ///< Pending guidance or completed diagnostic result.
   };
 
   /**
@@ -339,6 +355,7 @@ namespace app {
     ui::MenuModel menu;  ///< Primary vertical menu model for the active screen.
     ui::MenuModel detailMenu;  ///< Secondary detail or actions menu.
     AddHostDraft addHostDraft;  ///< Draft state for the add-host workflow.
+    ConnectionTestState connectionTest;  ///< Manual test progress and result.
     PairingDraft pairingDraft;  ///< Draft state for the active pairing workflow.
     ModalState modal;  ///< Context modal currently stacked over the shell.
     SettingsState settings;  ///< Settings, log viewer, and saved-file workflow state.
@@ -475,7 +492,7 @@ namespace app {
   std::string current_pairing_pin(const ClientState &state);
 
   /**
-   * @brief Apply the result of a host connection test to the current shell state.
+   * @brief Complete the connection-test dialog and update reachability for the tested endpoint.
    *
    * @param state Mutable app state.
    * @param success Whether the test succeeded.

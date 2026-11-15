@@ -140,7 +140,7 @@ namespace {
     EXPECT_EQ(viewModel.frame.pageTitle, "Your PCs");
     ASSERT_EQ(viewModel.content.toolbarButtons.size(), 3U);
     EXPECT_EQ(viewModel.content.toolbarButtons[0].iconAssetPath, "icons\\settings.svg");
-    EXPECT_EQ(viewModel.content.toolbarButtons[1].iconAssetPath, "icons\\question-mark.svg");
+    EXPECT_EQ(viewModel.content.toolbarButtons[1].iconAssetPath, "icons\\circle-question-mark.svg");
     EXPECT_TRUE(viewModel.content.toolbarButtons[2].selected);
     EXPECT_EQ(viewModel.content.toolbarButtons[2].label, "Add Host");
     EXPECT_EQ(viewModel.content.toolbarButtons[2].iconAssetPath, "icons\\circle-plus.svg");
@@ -327,20 +327,101 @@ namespace {
     EXPECT_TRUE(viewModel.keypad.visible);
     EXPECT_EQ(viewModel.keypad.title, "Address Keypad");
     ASSERT_EQ(viewModel.keypad.lines.size(), 1U);
-    EXPECT_EQ(viewModel.keypad.lines[0], "Enter your PC's IPv4 address.");
+    EXPECT_EQ(viewModel.keypad.lines[0], "Enter your PC's IPv4 address. Three digits advance automatically.");
+    EXPECT_TRUE(viewModel.keypad.segmentedAddress);
+    EXPECT_EQ(viewModel.keypad.activeOctet, 0U);
+    EXPECT_EQ(viewModel.keypad.addressOctets, (std::array<std::string, 4> {}));
     EXPECT_TRUE(viewModel.keypad.value.empty());
     EXPECT_TRUE(viewModel.frame.footerActions.empty());
-    ASSERT_EQ(viewModel.keypad.footerActions.size(), 4U);
+    ASSERT_EQ(viewModel.keypad.footerActions.size(), 6U);
     EXPECT_EQ(viewModel.keypad.footerActions[0].label, "Enter Key");
     EXPECT_EQ(viewModel.keypad.footerActions[1].label, "Delete");
     EXPECT_EQ(viewModel.keypad.footerActions[2].label, "Cancel");
     EXPECT_EQ(viewModel.keypad.footerActions[3].label, "Accept");
-    ASSERT_EQ(viewModel.keypad.buttons.size(), 11U);
+    EXPECT_EQ(viewModel.keypad.footerActions[4].label, "Previous section");
+    EXPECT_EQ(viewModel.keypad.footerActions[4].iconAssetPath, "icons\\button-lb.svg");
+    EXPECT_EQ(viewModel.keypad.footerActions[5].label, "Next section");
+    EXPECT_EQ(viewModel.keypad.footerActions[5].iconAssetPath, "icons\\button-rb.svg");
+    ASSERT_EQ(viewModel.keypad.buttons.size(), 10U);
     EXPECT_EQ(viewModel.keypad.columnCount, 3U);
     EXPECT_EQ(viewModel.keypad.buttons[0].label, "1");
     EXPECT_TRUE(viewModel.keypad.buttons[0].selected);
-    EXPECT_EQ(viewModel.keypad.buttons[9].label, ".");
-    EXPECT_EQ(viewModel.keypad.buttons[10].label, "0");
+    EXPECT_EQ(viewModel.keypad.buttons[9].label, "0");
+  }
+
+  /**
+   * @brief Expose editable IPv4 sections, current focus and field validation to the dialog.
+   */
+  TEST(ShellViewTest, BuildsSegmentedAddressInputAndValidationFeedback) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpHostGridA];
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::next_page);
+    state.addHostDraft.validationMessage = "Each address section must be between 0 and 255.";
+    const auto view = ui::build_shell_view_model(state, {});
+    EXPECT_TRUE(view.keypad.segmentedAddress);
+    EXPECT_EQ(view.keypad.addressOctets, (std::array<std::string, 4> {"192", "168", "0", "10"}));
+    EXPECT_EQ(view.keypad.activeOctet, 1U);
+    ASSERT_EQ(view.keypad.lines.size(), 1U);
+    EXPECT_EQ(view.keypad.lines.front(), state.addHostDraft.validationMessage);
+  }
+
+  /**
+   * @brief Show immediate connection progress and retain success or failure diagnostics.
+   */
+  TEST(ShellViewTest, ConnectionTestModalShowsProgressAndResults) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::activate);
+    state.addHostDraft.addressInput = test_support::kTestIpv4Addresses[test_support::kIpHostGridA];
+    app::handle_command(state, input::UiCommand::none);
+    ASSERT_TRUE(state.menu.select_item_by_id("test-connection"));
+    app::handle_command(state, input::UiCommand::activate);
+    auto view = ui::build_shell_view_model(state, {});
+    ASSERT_TRUE(view.modal.visible);
+    EXPECT_TRUE(view.modal.busy);
+    EXPECT_EQ(view.modal.title, "Testing connection");
+    ASSERT_EQ(view.modal.lines.size(), 2U);
+    EXPECT_EQ(view.modal.lines[0], state.addHostDraft.addressInput + ":" + std::to_string(app::DEFAULT_HOST_PORT));
+    EXPECT_FALSE(view.modal.lines[1].empty());
+    EXPECT_FALSE(view.notification.visible);
+    for (const bool success : {true, false}) {
+      app::apply_connection_test_result(state, success, "Diagnostic result");
+      view = ui::build_shell_view_model(state, {});
+      EXPECT_TRUE(view.modal.visible);
+      EXPECT_FALSE(view.modal.busy);
+      EXPECT_EQ(view.modal.title, success ? "Connection successful" : "Connection failed");
+      EXPECT_EQ(view.modal.lines[1], "Diagnostic result");
+    }
+    app::handle_command(state, input::UiCommand::confirm);
+    EXPECT_FALSE(ui::build_shell_view_model(state, {}).modal.visible);
+  }
+
+  /**
+   * @brief Render both toggle states as checkboxes and describe favorites accurately.
+   */
+  TEST(ShellViewTest, AppActionsExposeRealCheckboxesAndSetFavoriteLabel) {
+    auto state = app::create_initial_state();
+    app::replace_hosts(state, {{"Office PC", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired}});
+    ASSERT_TRUE(app::begin_selected_host_app_browse(state, false));
+    state.hosts.active.apps = {{"Desktop", 1}};
+    state.modal.id = app::ModalId::app_actions;
+    auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.modal.actions.size(), 3U);
+    EXPECT_TRUE(view.modal.actions[0].checkable);
+    EXPECT_FALSE(view.modal.actions[0].checked);
+    EXPECT_FALSE(view.modal.actions[1].checkable);
+    EXPECT_TRUE(view.modal.actions[2].checkable);
+    EXPECT_FALSE(view.modal.actions[2].checked);
+    EXPECT_EQ(view.modal.actions[2].label, "Set favorite");
+    EXPECT_EQ(view.modal.actions[2].id, "toggle-favorite");
+    state.modal.selectedActionIndex = 2U;
+    EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.hostsChanged);
+    app::handle_command(state, input::UiCommand::open_context_menu);
+    view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.modal.actions.size(), 3U);
+    EXPECT_TRUE(view.modal.actions[2].checked);
+    EXPECT_EQ(view.modal.actions[2].label, "Set favorite");
   }
 
   TEST(ShellViewTest, BuildsTheAppsPageForASelectedPairedHost) {

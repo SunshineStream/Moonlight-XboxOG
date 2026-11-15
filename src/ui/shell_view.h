@@ -65,6 +65,7 @@ namespace ui {
     bool selected = false;  ///< True when the row currently has focus.
     bool checked = false;  ///< True when the row represents an enabled option.
     std::string iconAssetPath;  ///< Optional icon displayed to the left of a menu label.
+    bool checkable = false;  ///< Draw a checkbox for both checked and unchecked toggle values.
   };
 
   /**
@@ -148,6 +149,7 @@ namespace ui {
    */
   struct ShellModalView {
     bool visible = false;  ///< True when a modal dialog should be rendered.
+    bool busy = false;  ///< Show progress instead of dismissal controls while work is pending.
     std::string title;  ///< Modal dialog title.
     std::vector<std::string> lines;  ///< Modal dialog body lines.
     std::vector<ShellActionRow> actions;  ///< Modal action rows.
@@ -172,6 +174,9 @@ namespace ui {
     bool visible = false;  ///< True when the keypad modal should be rendered.
     std::string title;  ///< Title shown at the top of the keypad modal.
     std::string value;  ///< Staged input displayed in the keypad text field.
+    bool segmentedAddress = false;  ///< Render four IPv4 sections with fixed period separators.
+    std::array<std::string, 4> addressOctets {};  ///< Draft digits displayed in each IPv4 section.
+    std::size_t activeOctet = 0U;  ///< Highlighted IPv4 section.
     std::vector<std::string> lines;  ///< Instruction and draft lines shown in the keypad modal.
     std::vector<ShellModalButton> buttons;  ///< Buttons rendered inside the keypad modal.
     std::size_t columnCount = 0U;  ///< Number of columns used to lay out keypad buttons.

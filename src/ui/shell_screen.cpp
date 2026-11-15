@@ -1575,8 +1575,20 @@ namespace {
         render_asset_icon(renderer, assetCache, row.iconAssetPath, {labelX, rowRect.y + (rowRect.h - iconSize) / 2, iconSize, iconSize});
         labelX += iconSize + 10;
       }
-      const std::string label = row.checked ? "[x] " + row.label : row.label;
-      if (const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}; !render_text_line_simple(renderer, font, label, color, labelX, rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2, rowRect.x + rowRect.w - labelX - 12)) {
+      const int checkboxSize = row.checkable ? std::min(22, rowRect.h - 16) : 0;
+      if (row.checkable) {
+        const SDL_Rect checkbox {rowRect.x + rowRect.w - checkboxSize - 14, rowRect.y + (rowRect.h - checkboxSize) / 2, checkboxSize, checkboxSize};
+        if (row.checked) {
+          fill_rounded_rect(renderer, checkbox, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, 4);
+          for (int stroke = 0; stroke < 2; ++stroke) {
+            draw_line(renderer, checkbox.x + checkboxSize / 4, checkbox.y + checkboxSize / 2 + stroke, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
+            draw_line(renderer, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, checkbox.x + checkboxSize * 3 / 4, checkbox.y + checkboxSize / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
+          }
+        } else {
+          draw_rect(renderer, checkbox, MUTED_RED, MUTED_GREEN, MUTED_BLUE);
+        }
+      }
+      if (const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}; !render_text_line_simple(renderer, font, row.label, color, labelX, rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2, rowRect.x + rowRect.w - labelX - 12 - (row.checkable ? checkboxSize + 16 : 0))) {
         return false;
       }
 
@@ -2607,6 +2619,19 @@ namespace {
     std::vector<std::unique_ptr<PairingAttemptState>> retiredAttempts;
   };
 
+  /**
+   * @brief Own a manual connection probe without sharing mutable app state with its worker.
+   */
+  struct ConnectionTestTaskState {
+    SDL_Thread *thread = nullptr;  ///< Joinable connection-test worker.
+    std::atomic<bool> completed = false;  ///< Publishes the worker's completed result.
+    std::string address;  ///< Immutable endpoint copied before starting the worker.
+    uint16_t port = 0;  ///< Effective endpoint port.
+    bool success = false;  ///< Result published by the worker.
+    std::string message;  ///< Diagnostic text published by the worker.
+    network::HostPairingServerInfo serverInfo {};  ///< Metadata returned by the host.
+  };
+
   struct AppListTaskState {
     SDL_Thread *thread = nullptr;
     std::atomic<bool> completed = false;
@@ -2914,39 +2939,62 @@ namespace {
     logging::info("pairing", "Cancelled the in-flight pairing attempt after leaving the pairing screen");
   }
 
-  void test_host_connection_if_requested(app::ClientState &state, const app::AppUpdate &update) {
-    if (!update.requests.connectionTestRequested) {
-      return;
-    }
-
-    const std::string address = update.requests.connectionTestAddress;
-    const uint16_t port = update.requests.connectionTestPort == 0 ? app::DEFAULT_HOST_PORT : update.requests.connectionTestPort;
-
-    if (address.empty()) {
-      app::apply_connection_test_result(state, false, "Connection test failed because the host address is invalid");
-      logging::warn("hosts", state.shell.statusMessage);
-      return;
-    }
-
+  /**
+   * @brief Probe an endpoint off the render thread and publish its complete result.
+   *
+   * @param context Connection task whose lifetime extends through the thread join.
+   * @return Zero after publishing the probe result.
+   */
+  int run_connection_test_task(void *context) {  // NOSONAR(cpp:S5008) SDL_CreateThread requires void* callback signature
+    auto *task = static_cast<ConnectionTestTaskState *>(context);
     network::PairingIdentity clientIdentity {};
     const network::PairingIdentity *clientIdentityPointer = try_load_saved_pairing_identity(&clientIdentity) ? &clientIdentity : nullptr;
+    task->success = test_tcp_host_connection(task->address, task->port, clientIdentityPointer, &task->message, &task->serverInfo);
+    task->completed.store(true);
+    return 0;
+  }
 
-    std::string resultMessage;
-    network::HostPairingServerInfo serverInfo {};
-    const bool success = test_tcp_host_connection(address, port, clientIdentityPointer, &resultMessage, &serverInfo);
-    if (success) {
-      apply_server_info_to_host(state, address, port, serverInfo);
-    } else {
-      for (app::HostRecord &host : state.hosts.items) {
-        if (host.address == address && app::effective_host_port(host.port) == port) {
-          host.reachability = app::HostReachability::offline;
-          host.manualAddress = address;
-          break;
-        }
-      }
+  /**
+   * @brief Start a manual probe after the reducer has opened its progress dialog.
+   *
+   * @param state Client state receiving thread-start failures.
+   * @param update Requested endpoint to test.
+   * @param task Worker storage owned by the shell runtime.
+   */
+  void test_host_connection_if_requested(app::ClientState &state, const app::AppUpdate &update, ConnectionTestTaskState *task) {
+    if (!update.requests.connectionTestRequested || task == nullptr || task->thread != nullptr) {
+      return;
     }
-    app::apply_connection_test_result(state, success, resultMessage);
-    logging::log(success ? logging::LogLevel::info : logging::LogLevel::warning, "hosts", resultMessage);
+    task->address = update.requests.connectionTestAddress;
+    task->port = app::effective_host_port(update.requests.connectionTestPort);
+    task->success = false;
+    task->message.clear();
+    task->serverInfo = {};
+    task->completed.store(false);
+    task->thread = SDL_CreateThreadWithStackSize(run_connection_test_task, "test-host", PAIRING_THREAD_STACK_SIZE, task);
+    if (task->thread == nullptr) {
+      app::apply_connection_test_result(state, false, "Unable to start the connection test. Please try again.");
+      logging::warn("hosts", SDL_GetError());
+    }
+  }
+
+  /**
+   * @brief Join a completed manual probe and update the dialog and matching host.
+   *
+   * @param state Client state receiving the completed result.
+   * @param task Worker storage owned by the shell runtime.
+   */
+  void finish_connection_test_if_ready(app::ClientState &state, ConnectionTestTaskState *task) {
+    if (task == nullptr || task->thread == nullptr || !task->completed.load()) {
+      return;
+    }
+    SDL_WaitThread(task->thread, nullptr);
+    task->thread = nullptr;
+    if (task->success) {
+      apply_server_info_to_host(state, task->address, task->port, task->serverInfo);
+    }
+    app::apply_connection_test_result(state, task->success, task->message);
+    logging::log(task->success ? logging::LogLevel::info : logging::LogLevel::warning, "hosts", task->message);
     if (state.hosts.dirty) {
       persist_hosts(state);
     }
@@ -3534,7 +3582,7 @@ namespace {
   }
 
   /**
-   * @brief Render settings with scrollable options and bounded contextual help.
+   * @brief Render the selected setting's contextual help above its scrollable options.
    *
    * @param renderer Active shell renderer.
    * @param bodyFont Font for options.
@@ -3556,14 +3604,8 @@ namespace {
     const int headerHeight = TTF_FontLineSkip(smallFont) + 8;
     const int rowHeight = std::max(34, TTF_FontLineSkip(bodyFont) + 12);
     const int innerHeight = bodyPanel.h - panelPadding * 2;
-    const int optionsHeight = std::max(rowHeight, (innerHeight - headerHeight) / 2);
-    const SDL_Rect optionsRect {bodyPanel.x + panelPadding, bodyPanel.y + panelPadding + headerHeight, innerWidth, optionsHeight};
-    const int descriptionY = optionsRect.y + optionsRect.h + 12;
-    const SDL_Rect descriptionRect {bodyPanel.x + panelPadding, descriptionY, innerWidth, std::max(1, bodyPanel.y + bodyPanel.h - panelPadding - descriptionY)};
-    if (!render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth) || !render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, optionsRect, rowHeight, nullptr, viewModel.content.rightPanelActive)) {
-      return false;
-    }
-    draw_line(renderer, descriptionRect.x, descriptionRect.y - 6, descriptionRect.x + descriptionRect.w, descriptionRect.y - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
+    const int descriptionHeight = std::min(innerHeight / 2, measure_body_lines_height(smallFont, {viewModel.content.selectedMenuRowLabel, viewModel.content.selectedMenuRowDescription}, innerWidth, 6));
+    const SDL_Rect descriptionRect {bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth, descriptionHeight};
     // SDL 2.0.9's software command queue starts each flush without a viewport.
     // A standalone SDL_RenderSetClipRect() after a text texture flush can assert
     // in SW_RunCommandQueue. Crop text textures instead of changing render clips.
@@ -3573,7 +3615,10 @@ namespace {
       const int helpY = descriptionRect.y + labelHeight + 6;
       success = render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowDescription, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {descriptionRect.x, helpY, innerWidth, descriptionRect.y + descriptionRect.h - helpY});
     }
-    return success;
+    const int optionsHeaderY = descriptionRect.y + descriptionRect.h + 20;
+    draw_line(renderer, descriptionRect.x, optionsHeaderY - 10, descriptionRect.x + descriptionRect.w, optionsHeaderY - 10, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
+    const SDL_Rect optionsRect {descriptionRect.x, optionsHeaderY + headerHeight, innerWidth, std::max(1, bodyPanel.y + bodyPanel.h - panelPadding - optionsHeaderY - headerHeight)};
+    return success && render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, descriptionRect.x, optionsHeaderY, innerWidth) && render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, optionsRect, rowHeight, nullptr, viewModel.content.rightPanelActive);
   }
 
   /**
@@ -3675,7 +3720,7 @@ namespace {
   }
 
   /**
-   * @brief Render a content-sized dialog with actions contained by its opaque surface.
+   * @brief Render a content-sized dialog with contained actions or pending-work feedback.
    *
    * @param renderer Active renderer.
    * @param titleFont Dialog heading font.
@@ -3720,11 +3765,14 @@ namespace {
     const std::vector<ui::ShellFooterAction> defaultActions = modal.actions.empty() ?
                                                                 std::vector<ui::ShellFooterAction> {{"close", "Close", "icons\\button-b.svg", {}, false}} :
                                                                 std::vector<ui::ShellFooterAction> {{"select", "Select", "icons\\button-a.svg", {}, true}, {"back", "Back", "icons\\button-b.svg", {}, false}};
+    if (modal.busy) {
+      return render_text_line_simple(renderer, smallFont, "Please wait...", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, bounds.x + padding, footerY + 8, innerWidth);
+    }
     return render_footer_actions(renderer, smallFont, assetCache, modal.footerActions.empty() ? defaultActions : modal.footerActions, {bounds.x + padding - 6, footerY, innerWidth + 12, footerHeight});
   }
 
   /**
-   * @brief Render an input dialog with a separate value field, rounded keys and in-dialog controls.
+   * @brief Render numeric entry with segmented IPv4 fields, rounded keys and contained controls.
    *
    * @param renderer Active renderer.
    * @param bodyFont Heading, input and key font.
@@ -3746,7 +3794,8 @@ namespace {
     const int titleHeight = TTF_FontLineSkip(bodyFont) + 14;
     const int hintHeight = keypad_modal_text_height(renderer, smallFont, viewModel, innerWidth, cache);
     const int valueHeight = TTF_FontLineSkip(bodyFont) + 20;
-    const int footerHeight = std::max(38, TTF_FontLineSkip(smallFont) + 18);
+    const int footerRowHeight = std::max(38, TTF_FontLineSkip(smallFont) + 18);
+    const int footerHeight = footerRowHeight * (viewModel.keypad.segmentedAddress ? 2 : 1);
     const int preferredKeyHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 18);
     const int desiredHeight = padding * 2 + 12 + titleHeight + hintHeight + valueHeight + 20 + rows * (preferredKeyHeight + gap) + footerHeight;
     const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, desiredHeight));
@@ -3764,10 +3813,26 @@ namespace {
       cursorY += drawnHeight + 6;
     }
     const SDL_Rect valueRect {bounds.x + padding, cursorY + 2, innerWidth, valueHeight};
-    fill_rounded_rect(renderer, valueRect, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF}, 6);
-    const bool emptyValue = viewModel.keypad.value.empty();
-    if (!render_text_line_simple(renderer, bodyFont, emptyValue ? "192.168.0.10" : viewModel.keypad.value, emptyValue ? SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF} : SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, valueRect.x + 12, valueRect.y + 8, valueRect.w - 24)) {
-      return false;
+    if (viewModel.keypad.segmentedAddress) {
+      const int separatorWidth = 18;
+      const int octetWidth = (valueRect.w - separatorWidth * 3) / 4;
+      for (std::size_t index = 0; index < viewModel.keypad.addressOctets.size(); ++index) {
+        const SDL_Rect octetRect {valueRect.x + static_cast<int>(index) * (octetWidth + separatorWidth), valueRect.y, octetWidth, valueRect.h};
+        render_card_surface(renderer, octetRect, index == viewModel.keypad.activeOctet);
+        const auto &digits = viewModel.keypad.addressOctets[index];
+        const SDL_Color color = digits.empty() ? SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF} : SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
+        if (!render_text_centered_simple(renderer, bodyFont, digits.empty() ? "___" : digits, color, octetRect)) {
+          return false;
+        }
+        if (index < 3U && !render_text_centered_simple(renderer, bodyFont, ".", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {octetRect.x + octetRect.w, valueRect.y, separatorWidth, valueRect.h})) {
+          return false;
+        }
+      }
+    } else {
+      fill_rounded_rect(renderer, valueRect, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF}, 6);
+      if (!render_text_line_simple(renderer, bodyFont, viewModel.keypad.value, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, valueRect.x + 12, valueRect.y + 8, valueRect.w - 24)) {
+        return false;
+      }
     }
     const int keysY = valueRect.y + valueRect.h + 12;
     const int footerY = bounds.y + bounds.h - padding - footerHeight;
@@ -3788,7 +3853,13 @@ namespace {
       }
     }
     draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
-    return render_footer_actions(renderer, smallFont, assetCache, viewModel.keypad.footerActions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerHeight});
+    const auto &actions = viewModel.keypad.footerActions;
+    if (viewModel.keypad.segmentedAddress && actions.size() > 4U) {
+      const std::vector<ui::ShellFooterAction> editingActions(actions.begin(), actions.begin() + 4);
+      const std::vector<ui::ShellFooterAction> sectionActions(actions.begin() + 4, actions.end());
+      return render_footer_actions(renderer, smallFont, assetCache, editingActions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerRowHeight}) && render_footer_actions(renderer, smallFont, assetCache, sectionActions, {bounds.x + padding - 12, footerY + footerRowHeight, innerWidth + 24, footerRowHeight});
+    }
+    return render_footer_actions(renderer, smallFont, assetCache, actions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerHeight});
   }
 
   /**
@@ -4368,6 +4439,7 @@ namespace {
     Uint32 nextHostDiscoveryTick = 0;  ///< Next scheduled host auto-discovery time.
     Uint32 nextHostProbeTick = 0;  ///< Next scheduled host probe time.
     PairingTaskState pairingTask {};  ///< Background pairing workflow state.
+    ConnectionTestTaskState connectionTestTask {};  ///< Background manual connection test.
     AppListTaskState appListTask {};  ///< Background app-list fetch state.
     AppArtTaskState appArtTask {};  ///< Background box-art download state.
     HostDiscoveryTaskState hostDiscoveryTask {};  ///< Background host auto-discovery state.
@@ -4586,6 +4658,7 @@ namespace {
     }
 
     finish_pairing_task_if_ready(state, &runtime->pairingTask);
+    finish_connection_test_if_ready(state, &runtime->connectionTestTask);
     finish_app_list_task_if_ready(state, &runtime->appListTask);
     finish_app_art_task_if_ready(state, &runtime->appArtTask, &resources->coverArtTextureCache);
     finish_host_discovery_task_if_ready(state, &runtime->hostDiscoveryTask, &runtime->nextHostProbeTick);
@@ -4717,7 +4790,7 @@ namespace {
     log_app_update(state, update);
     show_log_file_if_requested(state, update);
     cancel_pairing_if_requested(state, update, &runtime->pairingTask);
-    test_host_connection_if_requested(state, update);
+    test_host_connection_if_requested(state, update, &runtime->connectionTestTask);
     browse_host_apps_if_requested(state, update);
     pair_host_if_requested(state, update, &runtime->pairingTask);
     delete_host_data_if_requested(state, update, &resources->coverArtTextureCache);
@@ -4809,6 +4882,8 @@ namespace {
     }
 
     wait_for_thread(runtime->appListTask.thread);
+    wait_for_thread(runtime->connectionTestTask.thread);
+    runtime->connectionTestTask.thread = nullptr;
     wait_for_thread(runtime->appArtTask.thread);
     wait_for_thread(runtime->hostDiscoveryTask.thread);
     for (const std::unique_ptr<HostProbeTaskState::ProbeWorkerState> &worker : runtime->hostProbeTask.workers) {
