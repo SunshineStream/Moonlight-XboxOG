@@ -2,32 +2,88 @@
  * @file tests/unit/ui/shell_view_test.cpp
  * @brief Verifies the shell view renderer and layout helpers.
  */
-// test header include
-#include "src/ui/shell_view.h"
+// test includes
+#include "tests/support/network_test_constants.h"
+
+#include <lizardbyte/common/testing.h>
 
 // standard includes
 #include <string>
 #include <vector>
 
-// lib inclues
-#include <lizardbyte/common/testing.h>
-
-// test includes
-#include "tests/support/network_test_constants.h"
+// local includes
+#include "src/ui/shell_view.h"
 
 namespace {
 
+  /**
+   * @brief Successful collection loading stays quiet while failures remain visible.
+   */
+  TEST(ShellViewTest, KeepsRoutineCollectionLoadingOutOfNotifications) {
+    app::ClientState state = app::create_initial_state();
+    for (const char *message : {"Loaded 0 saved host(s)", "Loaded 2 saved host(s)", "Loaded 4 app(s)"}) {
+      state.shell.statusMessage = message;
+      EXPECT_FALSE(ui::build_shell_view_model(state, {}).notification.visible);
+    }
+    state.shell.statusMessage = "Could not load saved hosts";
+    EXPECT_TRUE(ui::build_shell_view_model(state, {}).notification.visible);
+    state.shell.statusMessage = "Loaded host data contains invalid entries";
+    EXPECT_TRUE(ui::build_shell_view_model(state, {}).notification.visible);
+  }
+
+  /**
+   * @brief Count only visible library entries and handle empty, hidden and unpaired collections.
+   */
+  TEST(ShellViewTest, DescribesTheVisibleLibraryInThePageSubtitle) {
+    app::ClientState state = app::create_initial_state();
+    state.shell.activeScreen = app::ScreenId::apps;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Pair your PC to browse its library.");
+    state.hosts.activeLoaded = true;
+    state.hosts.active.pairingState = app::PairingState::paired;
+    state.hosts.active.appListState = app::HostAppListState::ready;
+    state.hosts.active.apps = {{"Desktop", 1}, {"Hidden game", 2}};
+    state.hosts.active.apps[1].hidden = true;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "1 app  /  Ready to stream");
+    state.apps.showHiddenApps = true;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "2 apps  /  Including hidden apps");
+    state.hosts.active.apps.clear();
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "0 apps  /  Including hidden apps");
+    state.hosts.active.pairingState = app::PairingState::not_paired;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Pair your PC to browse its library.");
+  }
+
+  /**
+   * @brief Give each task a short contextual subtitle, including the empty landing page.
+   */
+  TEST(ShellViewTest, GivesEveryTaskAContextualSubtitle) {
+    app::ClientState state = app::create_initial_state();
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Your games. Your PC. On your Xbox.");
+    state.shell.activeScreen = app::ScreenId::home;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Your games. Your PC. On your Xbox.");
+    state.shell.activeScreen = app::ScreenId::settings;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Make yourself at home.");
+    state.shell.activeScreen = app::ScreenId::add_host;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Connect to a PC on your network.");
+    state.shell.activeScreen = app::ScreenId::pair_host;
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "A secure connection for your next session.");
+  }
+
+  /**
+   * @brief Shows an inviting heading and actionable first-run host screen.
+   */
   TEST(ShellViewTest, BuildsHostsScreenContentFromTheInitialState) {
     const app::ClientState state = app::create_initial_state();
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
     EXPECT_EQ(viewModel.frame.title, "Moonlight");
-    EXPECT_TRUE(viewModel.frame.pageTitle.empty());
+    EXPECT_EQ(viewModel.frame.pageTitle, "Your PCs");
     ASSERT_EQ(viewModel.content.toolbarButtons.size(), 3U);
+    EXPECT_EQ(viewModel.content.toolbarButtons[0].iconAssetPath, "icons\\settings.svg");
+    EXPECT_EQ(viewModel.content.toolbarButtons[1].iconAssetPath, "icons\\life-buoy.svg");
     EXPECT_TRUE(viewModel.content.toolbarButtons[2].selected);
     EXPECT_EQ(viewModel.content.toolbarButtons[2].label, "Add Host");
-    EXPECT_EQ(viewModel.content.toolbarButtons[2].iconAssetPath, "icons\\add-host.svg");
+    EXPECT_EQ(viewModel.content.toolbarButtons[2].iconAssetPath, "icons\\circle-plus.svg");
     ASSERT_FALSE(viewModel.content.bodyLines.empty());
     EXPECT_EQ(viewModel.content.bodyLines.front(), "No PCs have been added yet.");
     ASSERT_GE(viewModel.content.bodyLines.size(), 3U);
@@ -41,6 +97,9 @@ namespace {
     EXPECT_FALSE(viewModel.overlay.visible);
   }
 
+  /**
+   * @brief Preserves host status, focus and concise collection context.
+   */
   TEST(ShellViewTest, ShowsSavedHostsAsTiles) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
@@ -52,18 +111,17 @@ namespace {
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
-    EXPECT_TRUE(viewModel.frame.pageTitle.empty());
+    EXPECT_EQ(viewModel.frame.pageTitle, "Your PCs");
     EXPECT_EQ(viewModel.content.hostColumnCount, 3U);
     ASSERT_EQ(viewModel.content.hostTiles.size(), 2U);
     EXPECT_EQ(viewModel.content.hostTiles[0].displayName, "Living Room PC");
     EXPECT_EQ(viewModel.content.hostTiles[0].statusLabel, "Offline");
-    EXPECT_EQ(viewModel.content.hostTiles[0].iconAssetPath, "icons\\host-monitor-offline.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[0].iconAssetPath, "icons\\monitor-off.svg");
     EXPECT_EQ(viewModel.content.hostTiles[1].displayName, "Office PC");
     EXPECT_EQ(viewModel.content.hostTiles[1].statusLabel, "Online");
-    EXPECT_EQ(viewModel.content.hostTiles[1].iconAssetPath, "icons\\host-monitor-online.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[1].iconAssetPath, "icons\\monitor-check.svg");
     EXPECT_TRUE(viewModel.content.hostTiles[1].selected);
-    ASSERT_GE(viewModel.content.bodyLines.size(), 2U);
-    EXPECT_EQ(viewModel.content.bodyLines[1], "Press Y on a controller, or I on a keyboard, for host actions.");
+    EXPECT_EQ(viewModel.frame.subtitle, "Choose a PC to start playing.");
   }
 
   TEST(ShellViewTest, HidesHostMenuFooterActionWhenToolbarIsSelected) {
@@ -80,6 +138,9 @@ namespace {
     EXPECT_EQ(viewModel.frame.footerActions[1].label, "Exit");
   }
 
+  /**
+   * @brief Shows manual connection guidance alongside keypad validation.
+   */
   TEST(ShellViewTest, ShowsKeypadBasedHostEntryInstructionsAndValidation) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::activate);
@@ -94,7 +155,7 @@ namespace {
 
     EXPECT_EQ(viewModel.frame.pageTitle, "Add Host");
     ASSERT_GE(viewModel.content.bodyLines.size(), 5U);
-    EXPECT_EQ(viewModel.content.bodyLines[0], "Manual host entry with a keypad modal.");
+    EXPECT_EQ(viewModel.content.bodyLines[0], "Enter your PC's address to get connected.");
     EXPECT_EQ(viewModel.content.bodyLines[1], "Address: " + std::string(test_support::kTestIpv4Addresses[test_support::kIpHostGridA]));
     EXPECT_EQ(viewModel.content.bodyLines[2], "Port: 48000");
     EXPECT_EQ(viewModel.content.bodyLines[3], "Press A to edit either field with the keypad modal.");
@@ -269,7 +330,10 @@ namespace {
     EXPECT_EQ(viewModel.content.bodyLines.front(), "This host is not paired yet. Return and select it to begin pairing.");
   }
 
-  TEST(ShellViewTest, SuppressesTransientAppsLoadingTextAndNotifications) {
+  /**
+   * @brief Show inline loading feedback without raising a transient notification.
+   */
+  TEST(ShellViewTest, ShowsInlineLibraryLoadingWithoutNotifications) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
                                 {"Office PC", test_support::kTestIpv4Addresses[test_support::kIpOffice], test_support::kTestPorts[test_support::kPortDefaultHost], app::PairingState::paired, app::HostReachability::online},
@@ -279,7 +343,9 @@ namespace {
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
-    EXPECT_TRUE(viewModel.content.bodyLines.empty());
+    EXPECT_EQ(viewModel.frame.subtitle, "Refreshing your library...");
+    ASSERT_EQ(viewModel.content.bodyLines.size(), 2U);
+    EXPECT_EQ(viewModel.content.bodyLines.front(), "Loading your apps...");
     EXPECT_FALSE(viewModel.notification.visible);
   }
 

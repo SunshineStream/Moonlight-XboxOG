@@ -21,6 +21,21 @@
 ![Hosts Screen](./docs/images/screenshots/02-hosts.png)
 ![Apps Screen](./docs/images/screenshots/03-apps.png)
 
+The interface takes its compact navigation and PC cards from Moonlight Qt, with a library designed
+for a controller and a television. Select a PC to pair or open its apps. Game covers have separate
+captions, and a blue focus ring shows which card will open. Running apps carry a **PLAYING** badge.
+Missing artwork uses Lucide desktop or gamepad placeholders.
+Use the D-pad or left stick to navigate, **A** to select, **B** to go back and **Y** for host or app
+actions. Move up from the first PC row to reach Settings, Support and Add Host.
+
+The layout scales with the output resolution and leaves a five-percent inset for television overscan.
+Large libraries scroll to keep the selected game visible. Settings use a category list alongside
+options and help for the selected item.
+
+Navigation and PC status icons use [Lucide](https://lucide.dev/). The Xbox build fetches a pinned static
+release, verifies its SHA-256 hash and packages only the required SVGs and their license on the ISO.
+No network connection or JavaScript runtime is needed to display the icons on the console.
+
 
 ## Streaming controls and statistics
 

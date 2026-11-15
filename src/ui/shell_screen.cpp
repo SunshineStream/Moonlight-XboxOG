@@ -45,6 +45,7 @@
 #include "src/startup/saved_files.h"
 #include "src/streaming/session.h"
 #include "src/ui/host_probe_result_queue.h"
+#include "src/ui/shell_layout.h"
 #include "src/ui/shell_view.h"
 
 namespace {
@@ -55,18 +56,18 @@ namespace {
   constexpr Uint32 HOST_PROBE_REFRESH_INTERVAL_MILLISECONDS = 10000U;
   constexpr Uint32 APP_LIST_REFRESH_INTERVAL_MILLISECONDS = 30000U;
 
-  constexpr Uint8 BACKGROUND_RED = 0x10;
+  constexpr Uint8 BACKGROUND_RED = 0x0D;
   constexpr Uint8 BACKGROUND_GREEN = 0x12;
-  constexpr Uint8 BACKGROUND_BLUE = 0x16;
-  constexpr Uint8 PANEL_RED = 0x24;
-  constexpr Uint8 PANEL_GREEN = 0x25;
-  constexpr Uint8 PANEL_BLUE = 0x27;
-  constexpr Uint8 PANEL_ALT_RED = 0x1C;
-  constexpr Uint8 PANEL_ALT_GREEN = 0x1D;
-  constexpr Uint8 PANEL_ALT_BLUE = 0x20;
-  constexpr Uint8 ACCENT_RED = 0x00;
-  constexpr Uint8 ACCENT_GREEN = 0xF3;
-  constexpr Uint8 ACCENT_BLUE = 0xD4;
+  constexpr Uint8 BACKGROUND_BLUE = 0x1D;
+  constexpr Uint8 PANEL_RED = 0x1C;
+  constexpr Uint8 PANEL_GREEN = 0x28;
+  constexpr Uint8 PANEL_BLUE = 0x3D;
+  constexpr Uint8 PANEL_ALT_RED = 0x15;
+  constexpr Uint8 PANEL_ALT_GREEN = 0x1E;
+  constexpr Uint8 PANEL_ALT_BLUE = 0x2E;
+  constexpr Uint8 ACCENT_RED = 0x82;
+  constexpr Uint8 ACCENT_GREEN = 0xB4;
+  constexpr Uint8 ACCENT_BLUE = 0xFF;
   constexpr Uint8 TEXT_RED = 0xF2;
   constexpr Uint8 TEXT_GREEN = 0xF5;
   constexpr Uint8 TEXT_BLUE = 0xF8;
@@ -575,7 +576,7 @@ namespace {
     TTF_Font *labelFont,
     const ui::ShellAppTile &tile,
     const SDL_Rect &rect,
-    const AssetTextureCache *assetCache
+    AssetTextureCache *assetCache
   );
 
   SDL_Texture *load_cover_art_texture(SDL_Renderer *renderer, CoverArtTextureCache *cache, const std::string &cacheKey) {
@@ -686,6 +687,51 @@ namespace {
     SDL_RenderDrawRect(renderer, &rect);
   }
 
+  /**
+   * @brief Convert tested shell geometry to an SDL drawing rectangle.
+   *
+   * @param rect Rectangle in logical display coordinates.
+   * @return Equivalent SDL rectangle.
+   */
+  SDL_Rect sdl_rect(const ui::ShellRect &rect) {
+    return {rect.x, rect.y, rect.w, rect.h};
+  }
+
+  /**
+   * @brief Fill a modestly rounded surface using primitives supported by both SDL paths.
+   *
+   * @param renderer Active shell renderer.
+   * @param rect Surface bounds.
+   * @param color Surface color.
+   * @param radius Corner radius in logical pixels.
+   */
+  void fill_rounded_rect(SDL_Renderer *renderer, const SDL_Rect &rect, SDL_Color color, int radius = 8) {
+    radius = std::max(0, std::min(radius, std::min(rect.w, rect.h) / 2));
+    fill_rect(renderer, {rect.x, rect.y + radius, rect.w, rect.h - radius * 2}, color.r, color.g, color.b, color.a);
+    for (int y = 0; y < radius; ++y) {
+      const int dy = radius - y - 1;
+      const int inset = radius - static_cast<int>(std::sqrt(radius * radius - dy * dy));
+      fill_rect(renderer, {rect.x + inset, rect.y + y, rect.w - inset * 2, 1}, color.r, color.g, color.b, color.a);
+      fill_rect(renderer, {rect.x + inset, rect.y + rect.h - y - 1, rect.w - inset * 2, 1}, color.r, color.g, color.b, color.a);
+    }
+  }
+
+  /**
+   * @brief Draw a card with a substantial focus ring visible from a couch.
+   *
+   * @param renderer Active shell renderer.
+   * @param rect Card bounds.
+   * @param selected Whether the card has controller focus.
+   */
+  void render_card_surface(SDL_Renderer *renderer, const SDL_Rect &rect, bool selected) {
+    if (selected) {
+      fill_rounded_rect(renderer, rect, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF});
+      fill_rounded_rect(renderer, {rect.x + 3, rect.y + 3, rect.w - 6, rect.h - 6}, {PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xFF}, 5);
+    } else {
+      fill_rounded_rect(renderer, rect, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF});
+    }
+  }
+
   bool render_text_line(  // NOSONAR(cpp:S107) helper keeps the SDL text rendering callsite contract explicit
     SDL_Renderer *renderer,
     TTF_Font *font,
@@ -717,6 +763,43 @@ namespace {
     }
 
     return render_surface_line(renderer, surface, x, y, drawnHeight);
+  }
+
+  /**
+   * @brief Draw wrapped text cropped to a panel using the texture source rectangle.
+   *
+   * @param renderer Active shell renderer.
+   * @param font Text font.
+   * @param text Text to wrap within the panel.
+   * @param color Foreground color.
+   * @param rect Maximum text bounds.
+   * @param drawnHeight Receives the visible text height when requested.
+   * @return True when the visible text rendered, or the bounds contain no visible text.
+   */
+  bool render_bounded_text(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Color color, const SDL_Rect &rect, int *drawnHeight = nullptr) {
+    if (drawnHeight != nullptr) {
+      *drawnHeight = 0;
+    }
+    if (rect.w <= 0 || rect.h <= 0 || text.empty()) {
+      return true;
+    }
+    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(font, sanitize_text_for_render(text).c_str(), color, static_cast<Uint32>(rect.w));
+    if (surface == nullptr) {
+      return false;
+    }
+    const SDL_Rect source {0, 0, surface->w, std::min(surface->h, rect.h)};
+    const SDL_Rect destination {rect.x, rect.y, source.w, source.h};
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+    if (texture == nullptr) {
+      return false;
+    }
+    const bool success = SDL_RenderCopy(renderer, texture, &source, &destination) == 0;
+    destroy_texture(texture);
+    if (drawnHeight != nullptr) {
+      *drawnHeight = source.h;
+    }
+    return success;
   }
 
   std::string fit_single_line_text(TTF_Font *font, const std::string &text, int maxWidth) {
@@ -1136,48 +1219,35 @@ namespace {
     return render_texture_fit(renderer, texture, rect);
   }
 
+  /**
+   * @brief Render a calm Lucide placeholder when host artwork is unavailable.
+   *
+   * @param renderer Active shell renderer.
+   * @param labelFont Font used if the bundled placeholder icon cannot be loaded.
+   * @param tile Application name used for placeholder selection and tint.
+   * @param rect Portrait cover bounds.
+   * @param assetCache Cache for bundled Lucide textures.
+   * @return True when the placeholder icon or fallback label rendered.
+   */
   bool render_default_app_cover(
     SDL_Renderer *renderer,
     TTF_Font *labelFont,
     const ui::ShellAppTile &tile,
     const SDL_Rect &rect,
-    const AssetTextureCache *assetCache
+    AssetTextureCache *assetCache
   ) {
-    (void) assetCache;
     const SDL_Color seedColor = placeholder_color(tile.name);
-    fill_rect(renderer, rect, seedColor.r / 2, seedColor.g / 2, seedColor.b / 2, 0xFF);
-    fill_rect(renderer, {rect.x + std::max(4, rect.w / 18), rect.y, std::max(6, rect.w / 14), rect.h}, seedColor.r, seedColor.g, seedColor.b, 0xFF);
-
-    const SDL_Rect innerRect {
-      rect.x + std::max(10, rect.w / 10),
-      rect.y + std::max(10, rect.h / 12),
-      std::max(1, rect.w - std::max(20, rect.w / 5)),
-      std::max(1, rect.h - std::max(20, rect.h / 6)),
-    };
-    fill_rect(renderer, innerRect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xD8);
-
-    const int logoSize = std::max(28, std::min(innerRect.w - 18, (innerRect.h * 2) / 5));
-    const SDL_Rect logoRect {
-      innerRect.x + std::max(0, (innerRect.w - logoSize) / 2),
-      innerRect.y + std::max(8, innerRect.h / 9),
-      logoSize,
-      logoSize,
-    };
-    render_text_centered_simple(renderer, labelFont, app_monogram(tile), {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, logoRect);
-
-    render_text_centered_simple(
-      renderer,
-      labelFont,
-      "Moonlight",
-      {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xD8},
-      {
-        innerRect.x + 8,
-        innerRect.y + innerRect.h - std::max(40, innerRect.h / 5),
-        std::max(1, innerRect.w - 16),
-        std::max(20, innerRect.h / 8),
-      }
-    );
-    return true;
+    fill_rect(renderer, rect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE);
+    // A subdued tint distinguishes missing covers without imitating game artwork.
+    fill_rect(renderer, rect, seedColor.r, seedColor.g, seedColor.b, 0x24);
+    fill_rect(renderer, {rect.x, rect.y + rect.h - 3, rect.w, 3}, seedColor.r, seedColor.g, seedColor.b);
+    const int iconSize = std::max(24, rect.w / 2);
+    const SDL_Rect icon {rect.x + (rect.w - iconSize) / 2, rect.y + (rect.h - iconSize) / 2, iconSize, iconSize};
+    const std::string iconPath = tile.name == "Desktop" ? "icons\\monitor.svg" : "icons\\gamepad-2.svg";
+    if (render_asset_icon(renderer, assetCache, iconPath, icon)) {
+      return true;
+    }
+    return render_text_centered_simple(renderer, labelFont, app_monogram(tile), {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, icon);
   }
 
   void draw_line(SDL_Renderer *renderer, int x1, int y1, int x2, int y2, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha = 0xFF) {  // NOSONAR(cpp:S107) low-level draw helper intentionally mirrors SDL primitive arguments
@@ -1185,13 +1255,24 @@ namespace {
     SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
   }
 
+  /**
+   * @brief Render unobscured cover art with a focus ring and optional status badge.
+   *
+   * @param renderer Active shell renderer.
+   * @param labelFont Font for badges and artwork fallback.
+   * @param tile Application metadata.
+   * @param rect Portrait cover bounds, excluding its caption.
+   * @param textureCache Cached host cover art.
+   * @param assetCache Cached bundled artwork.
+   * @return True when the cover and badge rendered successfully.
+   */
   bool render_app_cover(
     SDL_Renderer *renderer,
     TTF_Font *labelFont,
     const ui::ShellAppTile &tile,
     const SDL_Rect &rect,
     CoverArtTextureCache *textureCache,
-    const AssetTextureCache *assetCache
+    AssetTextureCache *assetCache
   ) {
     fill_rect(renderer, rect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF);
     if (SDL_Texture *texture = tile.boxArtCached ? load_cover_art_texture(renderer, textureCache, tile.boxArtCacheKey) : nullptr; texture != nullptr) {
@@ -1204,25 +1285,21 @@ namespace {
       }
     }
 
-    const int overlayTextWidth = std::max(1, rect.w - 16);
-    const int overlayHeight = std::max(28, (TTF_FontLineSkip(labelFont) * 2) + 8);
-    const SDL_Rect overlayRect {rect.x, rect.y + rect.h - overlayHeight, rect.w, overlayHeight};
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    fill_rect(renderer, overlayRect, 0x00, 0x00, 0x00, 0x96);
-    render_text_line_simple(
-      renderer,
-      labelFont,
-      truncate_text_for_render(tile.name, 72U),
-      {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF},
-      overlayRect.x + 8,
-      overlayRect.y + std::max(4, (overlayHeight - TTF_FontLineSkip(labelFont)) / 2),
-      overlayTextWidth
-    );
-
+    // Captions live below the artwork; never cover game titles baked into the image.
     if (tile.selected) {
-      draw_rect(renderer, rect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
-    } else {
-      draw_rect(renderer, rect, TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0x28);
+      for (int inset = 1; inset <= 3; ++inset) {
+        draw_rect(renderer, {rect.x - inset, rect.y - inset, rect.w + inset * 2, rect.h + inset * 2}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
+      }
+    }
+    const std::string badge = tile.running ? "PLAYING" : tile.badgeLabel;
+    if (!badge.empty()) {
+      const int badgeHeight = TTF_FontLineSkip(labelFont) + 8;
+      const int badgeWidth = std::min(rect.w - 12, static_cast<int>(badge.size()) * std::max(7, TTF_FontHeight(labelFont) / 2) + 16);
+      const SDL_Rect badgeRect {rect.x + 6, rect.y + 6, badgeWidth, badgeHeight};
+      fill_rounded_rect(renderer, badgeRect, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xEF}, 4);
+      if (!render_text_centered_simple(renderer, labelFont, badge, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, badgeRect)) {
+        return false;
+      }
     }
     return true;
   }
@@ -1405,6 +1482,16 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Draw scrollable action rows with a filled selection and focus rail.
+   *
+   * @param renderer Active shell renderer.
+   * @param font Font for action labels.
+   * @param rows Actions and their focus state.
+   * @param rect Available list bounds.
+   * @param rowHeight Height of an action row.
+   * @return True when visible labels rendered successfully.
+   */
   bool render_action_rows(
     SDL_Renderer *renderer,
     TTF_Font *font,
@@ -1448,8 +1535,8 @@ namespace {
       const ui::ShellActionRow &row = rows[index];
       const SDL_Rect rowRect {rect.x, y, contentWidth, rowHeight};
       if (row.selected) {
-        fill_rect(renderer, rowRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0x55);
-        draw_rect(renderer, rowRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
+        fill_rounded_rect(renderer, rowRect, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0x28}, 5);
+        fill_rect(renderer, {rowRect.x, rowRect.y + 7, 3, rowRect.h - 14}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
       }
 
       const std::string label = row.checked ? "[x] " + row.label : row.label;
@@ -1473,6 +1560,17 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Render a compact navigation card with a Lucide icon and visible focus.
+   *
+   * @param renderer Active shell renderer.
+   * @param font Fallback glyph font.
+   * @param smallFont Font for the action label.
+   * @param assetCache Cached SVG textures.
+   * @param button Navigation action and focus state.
+   * @param buttonRect Available button bounds.
+   * @return True when icon and label rendered successfully.
+   */
   bool render_toolbar_button(
     SDL_Renderer *renderer,
     TTF_Font *font,
@@ -1481,13 +1579,7 @@ namespace {
     const ui::ShellToolbarButton &button,
     const SDL_Rect &buttonRect
   ) {
-    if (button.selected) {
-      fill_rect(renderer, buttonRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0x55);
-      draw_rect(renderer, buttonRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
-    } else {
-      fill_rect(renderer, buttonRect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xC8);
-      draw_rect(renderer, buttonRect, TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0x50);
-    }
+    render_card_surface(renderer, buttonRect, button.selected);
 
     const int iconSize = std::max(18, buttonRect.h - 16);
     const SDL_Rect iconRect {buttonRect.x + 10, buttonRect.y + (buttonRect.h - iconSize) / 2, iconSize, iconSize};
@@ -1495,7 +1587,7 @@ namespace {
       return false;
     }
 
-    return render_text_line(renderer, smallFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, iconRect.x + iconRect.w + 8, buttonRect.y + std::max(6, (buttonRect.h - TTF_FontLineSkip(smallFont)) / 2), buttonRect.w - (iconRect.w + 26));
+    return render_text_line_simple(renderer, smallFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, iconRect.x + iconRect.w + 8, buttonRect.y + std::max(6, (buttonRect.h - TTF_FontLineSkip(smallFont)) / 2), buttonRect.w - (iconRect.w + 26));
   }
 
   struct FooterActionChipLayout {
@@ -1638,32 +1730,6 @@ namespace {
     }
 
     return true;
-  }
-
-  struct GridViewport {
-    int totalRowCount = 0;
-    int visibleRowCount = 0;
-    int startRow = 0;
-    int scrollbarWidth = 0;
-  };
-
-  GridViewport calculate_grid_viewport(std::size_t itemCount, std::size_t columnCount, std::size_t selectedIndex, int availableHeight, int preferredRowHeight, int tileGap) {
-    GridViewport viewport {};
-    if (itemCount == 0U || columnCount == 0U || availableHeight <= 0) {
-      return viewport;
-    }
-
-    viewport.totalRowCount = static_cast<int>((itemCount + columnCount - 1U) / columnCount);
-    viewport.visibleRowCount = std::max(1, (availableHeight + tileGap) / std::max(1, preferredRowHeight + tileGap));
-    viewport.visibleRowCount = std::min(viewport.visibleRowCount, viewport.totalRowCount);
-    const auto selectedRow = static_cast<int>(std::min(selectedIndex, itemCount - 1U) / columnCount);
-    viewport.startRow = std::clamp(selectedRow + 1 - viewport.visibleRowCount, 0, viewport.totalRowCount - viewport.visibleRowCount);
-    viewport.scrollbarWidth = viewport.totalRowCount > viewport.visibleRowCount ? 10 : 0;
-    return viewport;
-  }
-
-  void render_grid_scrollbar(SDL_Renderer *renderer, const SDL_Rect &trackRect, const GridViewport &viewport) {
-    render_vertical_scrollbar(renderer, trackRect, viewport.totalRowCount, viewport.visibleRowCount, viewport.startRow);
   }
 
   std::size_t selected_host_tile_index(const std::vector<ui::ShellHostTile> &tiles) {
@@ -3411,6 +3477,17 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Render settings with scrollable options and bounded contextual help.
+   *
+   * @param renderer Active shell renderer.
+   * @param bodyFont Font for options.
+   * @param smallFont Font for contextual help.
+   * @param viewModel Selected settings and explanation.
+   * @param bodyPanel Available settings surface.
+   * @param panelPadding Padding inside the surface.
+   * @return True when options and help rendered successfully.
+   */
   bool render_settings_detail_panel(
     SDL_Renderer *renderer,
     TTF_Font *bodyFont,
@@ -3419,97 +3496,112 @@ namespace {
     const SDL_Rect &bodyPanel,
     int panelPadding
   ) {
-    const int optionsHeaderY = bodyPanel.y + panelPadding;
-    const int optionsTopY = optionsHeaderY + 28;
-    const int descriptionGap = 16;
-    const int descriptionHeaderHeight = std::max(26, TTF_FontLineSkip(smallFont));
-    const int minimumDescriptionHeight = std::max(96, (TTF_FontLineSkip(smallFont) * 3) + descriptionHeaderHeight + 20);
-    const int availableOptionsHeight = bodyPanel.h - ((panelPadding * 2) + 28 + descriptionGap + descriptionHeaderHeight + minimumDescriptionHeight);
-    const int optionsHeight = std::max(std::max(120, bodyPanel.h / 2), availableOptionsHeight);
-    const SDL_Rect optionsRect {bodyPanel.x + panelPadding, optionsTopY, bodyPanel.w - (panelPadding * 2), std::max(96, optionsHeight)};
-    const int descriptionTopY = optionsRect.y + optionsRect.h + descriptionGap;
-    const SDL_Rect descriptionRect {
-      bodyPanel.x + panelPadding,
-      descriptionTopY,
-      bodyPanel.w - (panelPadding * 2),
-      std::max(72, bodyPanel.y + bodyPanel.h - panelPadding - descriptionTopY)
-    };
-
-    if (!render_text_line_simple(renderer, smallFont, "Options", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, bodyPanel.x + panelPadding, optionsHeaderY, bodyPanel.w - (panelPadding * 2))) {
+    const int innerWidth = bodyPanel.w - panelPadding * 2;
+    const int headerHeight = TTF_FontLineSkip(smallFont) + 8;
+    const int rowHeight = std::max(34, TTF_FontLineSkip(bodyFont) + 12);
+    const int innerHeight = bodyPanel.h - panelPadding * 2;
+    const int optionsHeight = std::max(rowHeight, (innerHeight - headerHeight) / 2);
+    const SDL_Rect optionsRect {bodyPanel.x + panelPadding, bodyPanel.y + panelPadding + headerHeight, innerWidth, optionsHeight};
+    const int descriptionY = optionsRect.y + optionsRect.h + 12;
+    const SDL_Rect descriptionRect {bodyPanel.x + panelPadding, descriptionY, innerWidth, std::max(1, bodyPanel.y + bodyPanel.h - panelPadding - descriptionY)};
+    if (!render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth) || !render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, optionsRect, rowHeight)) {
       return false;
     }
-    if (!render_action_rows(
-          renderer,
-          bodyFont,
-          viewModel.content.detailMenuRows,
-          optionsRect,
-          std::max(34, TTF_FontLineSkip(bodyFont) + 12)
-        )) {
-      return false;
+    draw_line(renderer, descriptionRect.x, descriptionRect.y - 6, descriptionRect.x + descriptionRect.w, descriptionRect.y - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
+    // SDL 2.0.9's software command queue starts each flush without a viewport.
+    // A standalone SDL_RenderSetClipRect() after a text texture flush can assert
+    // in SW_RunCommandQueue. Crop text textures instead of changing render clips.
+    int labelHeight = 0;
+    bool success = render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, descriptionRect, &labelHeight);
+    if (success) {
+      const int helpY = descriptionRect.y + labelHeight + 6;
+      success = render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowDescription, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {descriptionRect.x, helpY, innerWidth, descriptionRect.y + descriptionRect.h - helpY});
     }
-
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    fill_rect(renderer, descriptionRect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0x88);
-    draw_rect(renderer, descriptionRect, TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0x40);
-
-    if (!render_text_line_simple(renderer, smallFont, "Description", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, descriptionRect.x + 10, descriptionRect.y + 8, descriptionRect.w - 20)) {
-      return false;
-    }
-
-    int descriptionY = descriptionRect.y + descriptionHeaderHeight + 10;
-    if (!viewModel.content.selectedMenuRowLabel.empty()) {
-      int drawnHeight = 0;
-      if (!render_text_line(renderer, bodyFont, viewModel.content.selectedMenuRowLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, descriptionRect.x + 10, descriptionY, descriptionRect.w - 20, &drawnHeight)) {
-        return false;
-      }
-      descriptionY += drawnHeight + 6;
-    }
-
-    const std::string descriptionText = viewModel.content.selectedMenuRowDescription.empty() ? std::string("No description is available for the selected setting.") : viewModel.content.selectedMenuRowDescription;
-    return render_text_line(renderer, smallFont, descriptionText, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, descriptionRect.x + 10, descriptionY, descriptionRect.w - 20);
+    return success;
   }
 
+  /**
+   * @brief Render portrait covers and separate captions in a scrolling library.
+   *
+   * @param renderer Active shell renderer.
+   * @param smallFont Font for captions and badges.
+   * @param viewModel Current library content.
+   * @param gridRect Available grid bounds.
+   * @param textureCache Cached host artwork.
+   * @param assetCache Cached bundled artwork.
+   * @return True when every visible tile rendered successfully.
+   */
   bool render_app_tiles_grid(
     SDL_Renderer *renderer,
     TTF_Font *smallFont,
     const ui::ShellViewModel &viewModel,
     const SDL_Rect &gridRect,
     CoverArtTextureCache *textureCache,
-    const AssetTextureCache *assetCache
+    AssetTextureCache *assetCache
   ) {
-    const int columnCount = std::max(1, static_cast<int>(viewModel.content.appColumnCount));
-    const int tileGap = 16;
-    const int gridPadding = 10;
-    const GridViewport viewport = calculate_grid_viewport(viewModel.content.appTiles.size(), viewModel.content.appColumnCount, selected_app_tile_index(viewModel.content.appTiles), std::max(1, gridRect.h - (gridPadding * 2)), 220, tileGap);
-    const int scrollbarGap = viewport.scrollbarWidth > 0 ? 12 : 0;
-    const int gridInnerWidth = std::max(1, gridRect.w - (gridPadding * 2) - viewport.scrollbarWidth - scrollbarGap);
-    const int cellWidth = std::max(1, (gridInnerWidth - (tileGap * (columnCount - 1))) / columnCount);
-    const int cellHeight = std::max(1, (gridRect.h - (gridPadding * 2) - (tileGap * std::max(0, viewport.visibleRowCount - 1))) / std::max(1, viewport.visibleRowCount));
-    const int tileWidth = std::max(1, std::min(cellWidth, (cellHeight * 2) / 3));
-    const int tileHeight = std::max(1, std::min(cellHeight, (tileWidth * 3) / 2));
-    const std::size_t startIndex = static_cast<std::size_t>(viewport.startRow) * viewModel.content.appColumnCount;
-    const std::size_t endIndex = std::min(viewModel.content.appTiles.size(), static_cast<std::size_t>(viewport.startRow + viewport.visibleRowCount) * viewModel.content.appColumnCount);
-
-    for (std::size_t index = startIndex; index < endIndex; ++index) {
-      const int row = static_cast<int>(index / viewModel.content.appColumnCount) - viewport.startRow;
-      const auto column = static_cast<int>(index % viewModel.content.appColumnCount);
-      const SDL_Rect tileRect {
-        gridRect.x + gridPadding + (column * (cellWidth + tileGap)) + std::max(0, (cellWidth - tileWidth) / 2),
-        gridRect.y + gridPadding + (row * (cellHeight + tileGap)) + std::max(0, (cellHeight - tileHeight) / 2),
-        tileWidth,
-        tileHeight,
-      };
-      if (!render_app_cover(renderer, smallFont, viewModel.content.appTiles[index], tileRect, textureCache, assetCache)) {
+    const int gap = std::max(14, gridRect.w / 50);
+    const int columns = std::max(1, static_cast<int>(viewModel.content.appColumnCount));
+    const int captionHeight = TTF_FontLineSkip(smallFont) + 14;
+    const int preferredHeight = ((gridRect.w - gap * (columns - 1)) / columns) * 3 / 2 + captionHeight;
+    const ui::ShellRect bounds {gridRect.x + 4, gridRect.y + 4, gridRect.w - 8, gridRect.h - 8};
+    const auto grid = ui::calculate_shell_grid(bounds, viewModel.content.appTiles.size(), viewModel.content.appColumnCount, selected_app_tile_index(viewModel.content.appTiles), preferredHeight, gap);
+    const std::size_t first = static_cast<std::size_t>(grid.startRow * grid.columns);
+    const std::size_t end = std::min(viewModel.content.appTiles.size(), static_cast<std::size_t>((grid.startRow + grid.visibleRows) * grid.columns));
+    for (std::size_t index = first; index < end; ++index) {
+      const SDL_Rect cell = sdl_rect(ui::shell_grid_cell(bounds, grid, index));
+      const int coverHeight = std::max(1, cell.h - captionHeight);
+      const int coverWidth = std::min(cell.w, coverHeight * 2 / 3);
+      const SDL_Rect cover {cell.x + (cell.w - coverWidth) / 2, cell.y, coverWidth, coverHeight};
+      const auto &tile = viewModel.content.appTiles[index];
+      if (!render_app_cover(renderer, smallFont, tile, cover, textureCache, assetCache) || !render_text_centered_simple(renderer, smallFont, tile.name, tile.selected ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {cell.x, cell.y + coverHeight + 8, cell.w, captionHeight - 8})) {
         return false;
       }
     }
+    if (grid.scrollbarWidth > 0) {
+      render_vertical_scrollbar(renderer, {gridRect.x + gridRect.w - grid.scrollbarWidth, gridRect.y, grid.scrollbarWidth, gridRect.h}, grid.totalRows, grid.visibleRows, grid.startRow);
+    }
+    return true;
+  }
 
-    if (viewport.scrollbarWidth > 0) {
-      render_grid_scrollbar(
-        renderer,
-        {gridRect.x + gridRect.w - viewport.scrollbarWidth, gridRect.y + gridPadding, viewport.scrollbarWidth, std::max(1, gridRect.h - (gridPadding * 2))},
-        viewport
-      );
+  /**
+   * @brief Render PC cards with compact monitor artwork and explicit connection state.
+   *
+   * @param renderer Active shell renderer.
+   * @param bodyFont Font for host names.
+   * @param smallFont Font for connection labels.
+   * @param assetCache Cached bundled icons.
+   * @param viewModel Current host collection.
+   * @param gridRect Available content bounds.
+   * @return True when all visible cards rendered successfully.
+   */
+  bool render_host_tiles_grid(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &gridRect) {
+    const int gap = std::max(14, gridRect.w / 45);
+    const int preferredHeight = std::min(gridRect.h, gridRect.w / 3);
+    const ui::ShellRect bounds {gridRect.x, gridRect.y, gridRect.w, gridRect.h};
+    const auto grid = ui::calculate_shell_grid(bounds, viewModel.content.hostTiles.size(), viewModel.content.hostColumnCount, selected_host_tile_index(viewModel.content.hostTiles), preferredHeight, gap);
+    const std::size_t first = static_cast<std::size_t>(grid.startRow * grid.columns);
+    const std::size_t end = std::min(viewModel.content.hostTiles.size(), static_cast<std::size_t>((grid.startRow + grid.visibleRows) * grid.columns));
+    for (std::size_t index = first; index < end; ++index) {
+      const SDL_Rect card = sdl_rect(ui::shell_grid_cell(bounds, grid, index));
+      const auto &tile = viewModel.content.hostTiles[index];
+      render_card_surface(renderer, card, tile.selected);
+      const int nameHeight = TTF_FontLineSkip(bodyFont);
+      const int statusHeight = TTF_FontLineSkip(smallFont);
+      const int nameY = card.y + card.h - nameHeight - statusHeight - 24;
+      const int iconSize = std::max(24, std::min(card.w / 2, nameY - card.y - 28));
+      const SDL_Rect icon {card.x + (card.w - iconSize) / 2, card.y + std::max(12, (nameY - card.y - iconSize) / 2), iconSize, iconSize};
+      render_asset_icon(renderer, assetCache, tile.iconAssetPath, icon);
+      if (!render_text_centered_simple(renderer, bodyFont, tile.displayName, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, {card.x + 12, nameY, card.w - 24, nameHeight})) {
+        return false;
+      }
+      const bool online = tile.reachability == app::HostReachability::online;
+      const SDL_Color statusColor = online ? SDL_Color {0x79, 0xDB, 0xB0, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
+      if (!render_text_centered_simple(renderer, smallFont, tile.statusLabel, statusColor, {card.x + 12, nameY + nameHeight + 6, card.w - 24, statusHeight})) {
+        return false;
+      }
+    }
+    if (grid.scrollbarWidth > 0) {
+      render_vertical_scrollbar(renderer, {gridRect.x + gridRect.w - grid.scrollbarWidth, gridRect.y, grid.scrollbarWidth, gridRect.h}, grid.totalRows, grid.visibleRows, grid.startRow);
     }
     return true;
   }
@@ -3525,6 +3617,21 @@ namespace {
     );
   }
 
+  /**
+   * @brief Compose a television-safe shell frame from compact navigation and page content.
+   *
+   * @param renderer Active SDL renderer, including the software fallback.
+   * @param videoMode Output resolution and pixel aspect information.
+   * @param encoderSettings Encoder flags used for widescreen correction.
+   * @param titleFont Page heading font.
+   * @param bodyFont Primary label font.
+   * @param smallFont Supporting text font.
+   * @param viewModel Render-ready page and modal state.
+   * @param textureCache Cached host artwork.
+   * @param assetCache Cached SVG icons.
+   * @param keypadModalLayoutCache Reusable keypad layout and text textures.
+   * @return True when the complete frame was presented successfully.
+   */
   bool draw_shell(  // NOSONAR(cpp:S107) one-frame shell rendering keeps layout dependencies explicit
     SDL_Renderer *renderer,
     const VIDEO_MODE &videoMode,
@@ -3549,160 +3656,67 @@ namespace {
 
     SDL_RenderSetScale(renderer, 1.0f, 1.0f);
 
-    const int outerMargin = std::max(18, screenHeight / 24);
-    const int panelGap = std::max(14, screenWidth / 48);
-    const int headerHeight = std::max(76, screenHeight / 8);
-    const int footerHeight = std::max(46, screenHeight / 11);
-    const SDL_Rect headerRect {outerMargin, outerMargin, screenWidth - (outerMargin * 2), headerHeight};
-    const SDL_Rect contentRect {outerMargin, outerMargin + headerHeight + 10, screenWidth - (outerMargin * 2), screenHeight - ((outerMargin * 2) + headerHeight + footerHeight + 20)};
-    const SDL_Rect footerRect {outerMargin, screenHeight - outerMargin - footerHeight, screenWidth - (outerMargin * 2), footerHeight};
+    const ui::ShellLayout layout = ui::calculate_shell_layout(screenWidth, screenHeight);
+    const int outerMargin = layout.navigation.x;
+    const int panelGap = layout.gap;
+    const SDL_Rect headerRect = sdl_rect(layout.navigation);
+    const SDL_Rect contentRect = sdl_rect(layout.content);
+    const SDL_Rect footerRect = sdl_rect(layout.footer);
 
     SDL_SetRenderDrawColor(renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
-    if (SDL_RenderClear(renderer) != 0) {
+    if (SDL_RenderClear(renderer) != 0 || SDL_RenderSetScale(renderer, horizontalScale, 1.0f) != 0) {
       return false;
     }
 
-    if (SDL_RenderSetScale(renderer, horizontalScale, 1.0f) != 0) {
+    const int logoSize = std::max(26, headerRect.h - 12);
+    const SDL_Rect logoRect {headerRect.x, headerRect.y + (headerRect.h - logoSize) / 2, logoSize, logoSize};
+    render_asset_icon(renderer, assetCache, "moonlight-logo.svg", logoRect);
+    const int brandWidth = headerRect.w / 3;
+    if (!render_text_line_simple(renderer, bodyFont, viewModel.frame.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, logoRect.x + logoSize + 10, headerRect.y + (headerRect.h - TTF_FontLineSkip(bodyFont)) / 2, brandWidth - logoSize - 10)) {
       return false;
     }
-
-    fill_rect(renderer, headerRect, PANEL_RED, PANEL_GREEN, PANEL_BLUE);
-    fill_rect(renderer, contentRect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE);
-    fill_rect(renderer, footerRect, PANEL_RED, PANEL_GREEN, PANEL_BLUE);
-    draw_line(renderer, headerRect.x, headerRect.y + headerRect.h - 1, headerRect.x + headerRect.w, headerRect.y + headerRect.h - 1, TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0x90);
-    draw_line(renderer, footerRect.x, footerRect.y, footerRect.x + footerRect.w, footerRect.y, TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0x90);
-
-    int titleTextX = headerRect.x + 16;
-    const int titleTextY = headerRect.y + 12;
-    int titleTextWidth = headerRect.w - 32;
-
-    if (assetCache != nullptr && titleFont != nullptr) {
-      const int targetLogoHeight = std::max(32, TTF_FontLineSkip(titleFont));
-      const SDL_Rect logoRect {
-        headerRect.x + 16,
-        headerRect.y + 10,
-        targetLogoHeight,
-        targetLogoHeight,
-      };
-      if (render_asset_icon(renderer, assetCache, "moonlight-logo.svg", logoRect)) {
-        titleTextX = logoRect.x + logoRect.w + 12;
-        titleTextWidth = (headerRect.w / 3) - (titleTextX - headerRect.x);
+    if (viewModel.frame.screen == app::ScreenId::hosts) {
+      const int buttonGap = std::max(6, layout.gap / 2);
+      const int buttonWidth = std::min(screenHeight / 5, (headerRect.w - brandWidth - buttonGap * 2) / 3);
+      int buttonX = headerRect.x + headerRect.w - buttonWidth * 3 - buttonGap * 2;
+      for (const auto &button : viewModel.content.toolbarButtons) {
+        if (!render_toolbar_button(renderer, bodyFont, smallFont, assetCache, button, {buttonX, headerRect.y, buttonWidth, headerRect.h})) {
+          return false;
+        }
+        buttonX += buttonWidth + buttonGap;
       }
     }
-
-    if (!render_text_line(renderer, titleFont, viewModel.frame.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, titleTextX, titleTextY, titleTextWidth)) {
+    if (!render_text_line_simple(renderer, titleFont, viewModel.frame.pageTitle, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.heading.x, layout.heading.y, layout.heading.w) || !render_text_line_simple(renderer, smallFont, viewModel.frame.subtitle, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.heading.x, layout.heading.y + TTF_FontLineSkip(titleFont) + 5, layout.heading.w)) {
       return false;
     }
-
-    const int pageTitleX = headerRect.x + (headerRect.w / 3);
-    const int pageTitleY = headerRect.y + 18;
-    if (const bool renderedPageTitle = viewModel.frame.screen == app::ScreenId::apps ? render_text_line_simple(renderer, bodyFont, viewModel.frame.pageTitle, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, pageTitleX, pageTitleY, headerRect.w / 3) : render_text_line(renderer, bodyFont, viewModel.frame.pageTitle, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, pageTitleX, pageTitleY, headerRect.w / 3); !viewModel.frame.pageTitle.empty() && !renderedPageTitle) {
-      return false;
-    }
+    draw_line(renderer, footerRect.x, footerRect.y - 6, footerRect.x + footerRect.w, footerRect.y - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
 
     if (viewModel.frame.screen == app::ScreenId::hosts) {
-      const int buttonWidth = std::max(132, headerRect.w / 7);
-      const int buttonHeight = std::max(40, headerRect.h / 2);
-      int buttonX = headerRect.x + headerRect.w - 16 - ((buttonWidth + 12) * static_cast<int>(viewModel.content.toolbarButtons.size()));
-      for (const ui::ShellToolbarButton &button : viewModel.content.toolbarButtons) {
-        if (const SDL_Rect buttonRect {buttonX, headerRect.y + 18, buttonWidth, buttonHeight}; !render_toolbar_button(renderer, bodyFont, smallFont, assetCache, button, buttonRect)) {
+      if (!viewModel.content.hostTiles.empty()) {
+        if (!render_host_tiles_grid(renderer, bodyFont, smallFont, assetCache, viewModel, contentRect)) {
           return false;
         }
-        buttonX += buttonWidth + 12;
-      }
-    }
-
-    int infoY = contentRect.y + 16;
-    if (viewModel.frame.screen == app::ScreenId::hosts) {
-      for (const std::string &line : viewModel.content.bodyLines) {
-        int drawnHeight = 0;
-        if (!render_text_line(renderer, smallFont, line, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, contentRect.x + 16, infoY, contentRect.w - 32, &drawnHeight)) {
+      } else {
+        const int iconSize = std::max(40, screenHeight / 8);
+        const SDL_Rect icon {contentRect.x + (contentRect.w - iconSize) / 2, contentRect.y + 8, iconSize, iconSize};
+        render_asset_icon(renderer, assetCache, "icons\\circle-plus.svg", icon);
+        const SDL_Rect messageRect {contentRect.x, icon.y + icon.h + 12, contentRect.w, contentRect.h - icon.h - 20};
+        if (!render_apps_empty_state(renderer, smallFont, viewModel, messageRect)) {
           return false;
         }
-        infoY += drawnHeight + 6;
-      }
-    }
-
-    if (viewModel.frame.screen == app::ScreenId::hosts) {
-      const int gridTop = infoY + 8;
-      const int gridHeight = std::max(1, (contentRect.y + contentRect.h - gridTop) - 12);
-      const int columnCount = std::max(1, static_cast<int>(viewModel.content.hostColumnCount));
-      const int tileGap = 16;
-      const SDL_Rect gridRect {contentRect.x + 16, gridTop, contentRect.w - 32, gridHeight};
-      const GridViewport viewport = calculate_grid_viewport(viewModel.content.hostTiles.size(), viewModel.content.hostColumnCount, selected_host_tile_index(viewModel.content.hostTiles), gridRect.h, 188, tileGap);
-      const int scrollbarGap = viewport.scrollbarWidth > 0 ? 12 : 0;
-      const int gridInnerWidth = std::max(1, gridRect.w - viewport.scrollbarWidth - scrollbarGap);
-      const int tileWidth = std::max(1, (gridInnerWidth - (tileGap * (columnCount - 1))) / columnCount);
-      const int tileHeight = std::max(1, (gridRect.h - (tileGap * std::max(0, viewport.visibleRowCount - 1))) / std::max(1, viewport.visibleRowCount));
-      const std::size_t startIndex = static_cast<std::size_t>(viewport.startRow) * viewModel.content.hostColumnCount;
-      const std::size_t endIndex = std::min(viewModel.content.hostTiles.size(), static_cast<std::size_t>(viewport.startRow + viewport.visibleRowCount) * viewModel.content.hostColumnCount);
-      for (std::size_t index = startIndex; index < endIndex; ++index) {
-        const int row = static_cast<int>(index / viewModel.content.hostColumnCount) - viewport.startRow;
-        const auto column = static_cast<int>(index % viewModel.content.hostColumnCount);
-        const SDL_Rect tileRect {
-          gridRect.x + (column * (tileWidth + tileGap)),
-          gridRect.y + (row * (tileHeight + tileGap)),
-          tileWidth,
-          tileHeight,
-        };
-        const ui::ShellHostTile &tile = viewModel.content.hostTiles[index];
-        const bool online = tile.reachability == app::HostReachability::online;
-        fill_rect(renderer, tileRect, online ? PANEL_RED + 8 : PANEL_RED, online ? PANEL_GREEN + 8 : PANEL_GREEN, online ? PANEL_BLUE + 8 : PANEL_BLUE);
-        draw_rect(renderer, tileRect, tile.selected ? ACCENT_RED : MUTED_RED, tile.selected ? ACCENT_GREEN : MUTED_GREEN, tile.selected ? ACCENT_BLUE : MUTED_BLUE);
-        const int statusHeight = std::max(20, tileRect.h / 8);
-        const int nameHeight = std::max(24, tileRect.h / 7);
-        const int textBlockHeight = statusHeight + nameHeight + 18;
-        const SDL_Rect hostIconRect {
-          tileRect.x + 12,
-          tileRect.y + 8,
-          tileRect.w - 24,
-          std::max(18, tileRect.h - textBlockHeight - 16),
-        };
-        if (!tile.iconAssetPath.empty()) {
-          render_asset_icon(renderer, assetCache, tile.iconAssetPath, hostIconRect);
-        }
-        if (const SDL_Rect nameRect {
-              tileRect.x + 8,
-              tileRect.y + tileRect.h - statusHeight - nameHeight - 10,
-              tileRect.w - 16,
-              nameHeight,
-            };
-            !render_text_centered_simple(renderer, bodyFont, tile.displayName, online ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, nameRect)) {
-          return false;
-        }
-        const SDL_Rect statusRect {
-          tileRect.x + 8,
-          tileRect.y + tileRect.h - statusHeight - 8,
-          tileRect.w - 16,
-          statusHeight,
-        };
-        if (!render_text_centered_simple(renderer, smallFont, tile.statusLabel, online ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, statusRect)) {
-          return false;
-        }
-      }
-
-      if (viewport.scrollbarWidth > 0) {
-        render_grid_scrollbar(renderer, {gridRect.x + gridRect.w - viewport.scrollbarWidth, gridRect.y, viewport.scrollbarWidth, gridRect.h}, viewport);
       }
     } else if (viewModel.frame.screen == app::ScreenId::apps) {
-      const SDL_Rect gridRect {
-        contentRect.x + 16,
-        contentRect.y + 16,
-        contentRect.w - 32,
-        contentRect.h - 28,
-      };
-
       if (!viewModel.content.appTiles.empty()) {
-        if (!render_app_tiles_grid(renderer, smallFont, viewModel, gridRect, textureCache, assetCache)) {
+        if (!render_app_tiles_grid(renderer, smallFont, viewModel, contentRect, textureCache, assetCache)) {
           return false;
         }
-      } else if (!viewModel.content.bodyLines.empty() && !render_apps_empty_state(renderer, smallFont, viewModel, gridRect)) {
+      } else if (!render_apps_empty_state(renderer, smallFont, viewModel, contentRect)) {
         return false;
       }
     } else {
       const bool settingsScreen = viewModel.frame.screen == app::ScreenId::settings;
       const bool hasDetailMenu = settingsScreen && !viewModel.content.detailMenuRows.empty();
-      const int panelInset = std::max(12, screenWidth / 96);
+      const int panelInset = 0;
       const int panelPadding = std::max(14, screenWidth / 96);
       const SDL_Rect panelArea {
         contentRect.x + panelInset,
@@ -3710,30 +3724,13 @@ namespace {
         std::max(1, contentRect.w - (panelInset * 2)),
         std::max(1, contentRect.h - (panelInset * 2)),
       };
-      const int menuPanelWidth = std::max(232, (panelArea.w * 31) / 100);
+      const int menuPanelWidth = (panelArea.w * 30) / 100;
       const SDL_Rect menuPanel {panelArea.x, panelArea.y, menuPanelWidth, panelArea.h};
       const SDL_Rect bodyPanel {panelArea.x + menuPanelWidth + panelGap, panelArea.y, panelArea.w - menuPanelWidth - panelGap, panelArea.h};
-      fill_rect(renderer, menuPanel, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xC8);
-      fill_rect(renderer, bodyPanel, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0x88);
-      draw_rect(
-        renderer,
-        menuPanel,
-        viewModel.content.leftPanelActive ? ACCENT_RED : TEXT_RED,
-        viewModel.content.leftPanelActive ? ACCENT_GREEN : TEXT_GREEN,
-        viewModel.content.leftPanelActive ? ACCENT_BLUE : TEXT_BLUE,
-        viewModel.content.leftPanelActive ? 0xD8 : 0x48
-      );
-      draw_rect(
-        renderer,
-        bodyPanel,
-        viewModel.content.rightPanelActive ? ACCENT_RED : TEXT_RED,
-        viewModel.content.rightPanelActive ? ACCENT_GREEN : TEXT_GREEN,
-        viewModel.content.rightPanelActive ? ACCENT_BLUE : TEXT_BLUE,
-        viewModel.content.rightPanelActive ? 0xD8 : 0x48
-      );
+      fill_rounded_rect(renderer, bodyPanel, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF});
+      // Focus belongs to the selected row, rather than an entire outlined pane.
 
       const SDL_Rect menuHeaderRect {menuPanel.x + panelPadding, menuPanel.y + panelPadding, menuPanel.w - (panelPadding * 2), std::max(34, TTF_FontLineSkip(smallFont) + 10)};
-      fill_rect(renderer, menuHeaderRect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xD8);
       if (!render_text_line_simple(renderer, smallFont, settingsScreen ? "Categories" : "Actions", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, menuHeaderRect.x + 10, menuHeaderRect.y + std::max(6, (menuHeaderRect.h - TTF_FontLineSkip(smallFont)) / 2), menuHeaderRect.w - 20)) {
         return false;
       }
@@ -4443,9 +4440,9 @@ namespace {
     SDL_RenderPresent(resources->renderer);
 
     const std::string fontPath = build_asset_path("fonts\\vegur-regular.ttf");
-    resources->titleFont = TTF_OpenFont(fontPath.c_str(), std::max(24, videoMode.height / 16));
-    resources->bodyFont = TTF_OpenFont(fontPath.c_str(), std::max(18, videoMode.height / 24));
-    resources->smallFont = TTF_OpenFont(fontPath.c_str(), std::max(14, videoMode.height / 34));
+    resources->titleFont = TTF_OpenFont(fontPath.c_str(), std::max(26, videoMode.height / 22));
+    resources->bodyFont = TTF_OpenFont(fontPath.c_str(), std::max(18, videoMode.height / 32));
+    resources->smallFont = TTF_OpenFont(fontPath.c_str(), std::max(14, videoMode.height / 42));
     if (resources->titleFont == nullptr || resources->bodyFont == nullptr || resources->smallFont == nullptr) {
       failure->category = "ttf";
       failure->message = std::string("Failed to load shell font from ") + fontPath + ": " + TTF_GetError();

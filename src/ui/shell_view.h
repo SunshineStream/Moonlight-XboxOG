@@ -102,6 +102,7 @@ namespace ui {
     app::ScreenId screen = app::ScreenId::hosts;  ///< Active screen being rendered.
     std::string title;  ///< Shell-wide title.
     std::string pageTitle;  ///< Primary page heading.
+    std::string subtitle;  ///< Concise page context, collection count, or loading state.
     std::string statusMessage;  ///< Status line shown near the footer.
     std::vector<ShellFooterAction> footerActions;  ///< Footer actions shown for the current screen.
   };

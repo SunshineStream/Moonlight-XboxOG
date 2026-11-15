@@ -33,6 +33,7 @@ find_package(NXDK_SDL2_TTF REQUIRED)
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -include:_automount_d_drive")
 
 file(MAKE_DIRECTORY "${XBOX_XBE_DIR}")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/lucide.cmake")
 
 # ensure assets are copied to the build directory for packaging into ISO
 add_custom_target(sync_xbe_assets ALL
@@ -42,7 +43,13 @@ add_custom_target(sync_xbe_assets ALL
         COMMAND "${CMAKE_COMMAND}" -E copy
             "${NXDK_DIR}/samples/sdl_ttf/vegur-regular.ttf"
             "${XBOX_XBE_DIR}/assets/fonts/vegur-regular.ttf"
+        COMMAND "${CMAKE_COMMAND}"
+            "-DLUCIDE_SOURCE_DIR=${MOONLIGHT_LUCIDE_SOURCE_DIR}"
+            "-DLUCIDE_ASSET_DIR=${XBOX_XBE_DIR}/assets"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage-lucide.cmake"
+        DEPENDS lucide_static
         COMMENT "Sync XBE assets"
+        VERBATIM
 )
 
 if(NOT CMAKE_BUILD_TYPE)

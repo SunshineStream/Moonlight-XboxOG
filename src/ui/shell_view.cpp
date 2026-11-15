@@ -30,8 +30,18 @@ namespace {
     return std::to_string((sizeBytes + (1024ULL * 1024ULL) - 1ULL) / (1024ULL * 1024ULL)) + " MB";
   }
 
+  /**
+   * @brief Keep routine loading messages from obscuring the library with a notification.
+   *
+   * @param state Current application state and status message.
+   * @return True for routine progress or successful collection loading.
+   */
   bool is_minor_status_message(const app::ClientState &state) {
     if (state.shell.statusMessage.empty()) {
+      return true;
+    }
+
+    if (starts_with(state.shell.statusMessage, "Loaded ") && (state.shell.statusMessage.find(" saved host(s)") != std::string::npos || state.shell.statusMessage.find(" app(s)") != std::string::npos)) {
       return true;
     }
 
@@ -48,11 +58,17 @@ namespace {
     return false;
   }
 
+  /**
+   * @brief Name the primary collection or task displayed below the brand strip.
+   *
+   * @param state Current application state.
+   * @return User-facing page heading.
+   */
   std::string page_title(const app::ClientState &state) {
     switch (state.shell.activeScreen) {
       case app::ScreenId::home:
       case app::ScreenId::hosts:
-        return {};
+        return "Your PCs";
       case app::ScreenId::apps:
         if (const app::HostRecord *host = app::apps_host(state); host != nullptr) {
           return host->displayName;
@@ -69,6 +85,41 @@ namespace {
     return "Hosts";
   }
 
+  /**
+   * @brief Summarize the current page without repeating controller hints.
+   *
+   * @param state Current shell state.
+   * @return Short supporting copy displayed beneath the page title.
+   */
+  std::string page_subtitle(const app::ClientState &state) {
+    switch (state.shell.activeScreen) {
+      case app::ScreenId::home:
+      case app::ScreenId::hosts:
+        return state.hosts.items.empty() ? "Your games. Your PC. On your Xbox." : "Choose a PC to start playing.";
+      case app::ScreenId::apps:
+        {
+          const app::HostRecord *host = app::apps_host(state);
+          if (host == nullptr || host->pairingState != app::PairingState::paired) {
+            return "Pair your PC to browse its library.";
+          }
+          if (host->appListState == app::HostAppListState::loading) {
+            return "Refreshing your library...";
+          }
+          const auto count = std::count_if(host->apps.begin(), host->apps.end(), [&state](const app::HostAppRecord &record) {
+            return state.apps.showHiddenApps || !record.hidden;
+          });
+          return std::to_string(count) + (count == 1 ? " app" : " apps") + "  /  " + (state.apps.showHiddenApps ? "Including hidden apps" : "Ready to stream");
+        }
+      case app::ScreenId::add_host:
+        return "Connect to a PC on your network.";
+      case app::ScreenId::pair_host:
+        return "A secure connection for your next session.";
+      case app::ScreenId::settings:
+        return "Make yourself at home.";
+    }
+    return {};
+  }
+
   std::string host_tile_status(const app::HostRecord &host) {
     if (host.reachability == app::HostReachability::unknown) {
       return "Checking...";
@@ -82,21 +133,33 @@ namespace {
     return "Online";
   }
 
+  /**
+   * @brief Select the packaged Lucide monitor icon for a PC's connection state.
+   *
+   * @param host Host whose reachability and pairing are displayed.
+   * @return SVG asset path staged by the Xbox build.
+   */
   std::string host_tile_icon(const app::HostRecord &host) {
     if (host.reachability == app::HostReachability::online && host.pairingState == app::PairingState::paired) {
-      return "icons\\host-monitor-online.svg";
+      return "icons\\monitor-check.svg";
     }
     if (host.reachability == app::HostReachability::online) {
-      return "icons\\host-monitor-pairing.svg";
+      return "icons\\monitor-dot.svg";
     }
-    return "icons\\host-monitor-offline.svg";
+    return "icons\\monitor-off.svg";
   }
 
+  /**
+   * @brief Build compact navigation actions with packaged Lucide icons.
+   *
+   * @param state Current toolbar focus state.
+   * @return Settings, support and manual connection buttons.
+   */
   std::vector<ui::ShellToolbarButton> toolbar_buttons(const app::ClientState &state) {
     return {
-      {"settings", "Settings", "G", "icons\\gear.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 0U},
-      {"support", "Support", "?", "icons\\support.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 1U},
-      {"add-host", "Add Host", "+", "icons\\add-host.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 2U},
+      {"settings", "Settings", "G", "icons\\settings.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 0U},
+      {"support", "Support", "?", "icons\\life-buoy.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 1U},
+      {"add-host", "Add Host", "+", "icons\\circle-plus.svg", state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::toolbar && state.hosts.selectedToolbarButtonIndex % 3U == 2U},
     };
   }
 
@@ -225,6 +288,12 @@ namespace {
     return lines;
   }
 
+  /**
+   * @brief Provide first-run connection guidance for an empty PC collection.
+   *
+   * @param state Current application state.
+   * @return Connection guidance or a short collection description.
+   */
   std::vector<std::string> hosts_body_lines(const app::ClientState &state) {
     if (state.hosts.items.empty()) {
       return {
@@ -236,10 +305,15 @@ namespace {
 
     return {
       "Select a PC to pair or browse its apps.",
-      "Press Y on a controller, or I on a keyboard, for host actions.",
     };
   }
 
+  /**
+   * @brief Explain library loading, empty, unpaired and failed states inline.
+   *
+   * @param state Current application state.
+   * @return Supporting text when no library tiles can be displayed.
+   */
   std::vector<std::string> apps_body_lines(const app::ClientState &state) {
     const app::HostRecord *host = app::apps_host(state);
     if (host == nullptr) {
@@ -249,7 +323,7 @@ namespace {
       return {"This host is not paired yet. Return and select it to begin pairing."};
     }
     if (host->appListState == app::HostAppListState::loading) {
-      return {};
+      return {"Loading your apps...", "Your library will appear here shortly."};
     }
     if (host->appListState == app::HostAppListState::failed) {
       return {
@@ -263,9 +337,15 @@ namespace {
     return {};
   }
 
+  /**
+   * @brief Describe manual connection fields and their current validation state.
+   *
+   * @param state Current application state.
+   * @return Field values and connection guidance for manual PC entry.
+   */
   std::vector<std::string> add_host_body_lines(const app::ClientState &state) {
     std::vector<std::string> lines = {
-      "Manual host entry with a keypad modal.",
+      "Enter your PC's address to get connected.",
       std::string("Address: ") + app::current_add_host_address(state),
       std::string("Port: ") + (state.addHostDraft.portInput.empty() ? std::string("default (47989)") : state.addHostDraft.portInput),
       "Press A to edit either field with the keypad modal.",
@@ -677,6 +757,7 @@ namespace ui {
     viewModel.frame.screen = state.shell.activeScreen;
     viewModel.frame.title = "Moonlight";
     viewModel.frame.pageTitle = page_title(state);
+    viewModel.frame.subtitle = page_subtitle(state);
     viewModel.frame.statusMessage = state.shell.statusMessage;
     viewModel.notification.visible = screen_supports_notifications(state) && !state.shell.statusMessage.empty() && !is_minor_status_message(state) && !state.modal.active() && !(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible);
     if (viewModel.notification.visible) {
