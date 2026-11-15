@@ -35,6 +35,40 @@ namespace ui {
     return {x, layout.navigation.y, layout.content.x + layout.content.w - x, layout.footer.y - layout.gap - layout.navigation.y};
   }
 
+  ShellSettingsDetailLayout calculate_settings_detail_layout(ShellRect bounds, int lineHeight) {
+    if (bounds.w <= 0 || bounds.h <= 0 || lineHeight <= 0) {
+      return {};
+    }
+    const int helpHeight = std::min(bounds.h / 2, lineHeight * 5 + 6);
+    const int titleHeight = std::min(lineHeight, helpHeight);
+    const int descriptionY = bounds.y + std::min(helpHeight, titleHeight + 6);
+    const int headerY = bounds.y + std::min(bounds.h, helpHeight + 20);
+    const int headerHeight = std::min(lineHeight + 8, bounds.y + bounds.h - headerY);
+    const int optionsY = headerY + headerHeight;
+    return {
+      {bounds.x, bounds.y, bounds.w, titleHeight},
+      {bounds.x, descriptionY, bounds.w, bounds.y + helpHeight - descriptionY},
+      {bounds.x, headerY, bounds.w, headerHeight},
+      {bounds.x, optionsY, bounds.w, bounds.y + bounds.h - optionsY},
+    };
+  }
+
+  std::vector<ShellRect> calculate_keypad_columns(ShellRect bounds, std::size_t columnCount, int preferredWidth, int gap) {
+    if (bounds.w <= 0 || bounds.h <= 0 || columnCount == 0U || columnCount > static_cast<std::size_t>(bounds.w)) {
+      return {};
+    }
+    const int columns = static_cast<int>(columnCount);
+    const int spacing = columns == 1 ? 0 : std::clamp(gap, 0, (bounds.w - columns) / (columns - 1));
+    const int columnWidth = std::clamp(preferredWidth, 1, (bounds.w - spacing * (columns - 1)) / columns);
+    const int groupWidth = columnWidth * columns + spacing * (columns - 1);
+    const int startX = bounds.x + (bounds.w - groupWidth) / 2;
+    std::vector<ShellRect> result;
+    for (int column = 0; column < columns; ++column) {
+      result.push_back({startX + column * (columnWidth + spacing), bounds.y, columnWidth, bounds.h});
+    }
+    return result;
+  }
+
   ShellRect calculate_shell_dialog(int width, int height, int desiredWidth, int desiredHeight) {
     const int w = std::clamp(desiredWidth, 1, std::max(1, width - width / 10));
     const int h = std::clamp(desiredHeight, 1, std::max(1, height - height / 10));

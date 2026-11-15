@@ -45,8 +45,9 @@ actions. Move up from the first PC row to reach Settings, Support and Add Host.
 PCs use grayscale moon artwork inspired by One: a full moon for paired online PCs, a half moon for
 online PCs awaiting pairing, and a crescent for offline PCs. A separate orbit shows controller focus.
 
-Settings categories have icons and the detail panel extends beside the page heading, with help for
-the selected item above its options. Dialogs contain their controller actions. IPv4 entry has four
+Settings categories have icons and the detail panel extends beside the page heading, with a fixed help
+area above its options so changing values keeps the list in place. Dialogs contain their controller
+actions. Number pads use compact centered columns. IPv4 entry has four
 sections with fixed periods: three digits advance automatically, and **White / Black** move
 between sections. A new digit replaces a section after switching to it; **X** deletes the last digit.
 Connection, pairing and save actions appear after a host address has been entered. **Test Connection**

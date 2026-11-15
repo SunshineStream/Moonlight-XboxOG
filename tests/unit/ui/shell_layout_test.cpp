@@ -6,6 +6,7 @@
 #include <lizardbyte/common/testing.h>
 
 // standard includes
+#include <cstdlib>
 #include <limits>
 #include <utility>
 
@@ -13,6 +14,98 @@
 #include "src/ui/shell_layout.h"
 
 namespace {
+
+  /**
+   * @brief Keep settings rows anchored when headings or help wrap differently.
+   */
+  TEST(ShellLayoutTest, AnchorsSettingsOptionsIndependentlyOfTextWidth) {
+    for (const auto [width, height] : {std::pair {640, 480}, {1280, 720}, {1920, 1080}}) {
+      const auto shell = ui::calculate_shell_layout(width, height);
+      const auto panel = ui::calculate_settings_panel(shell);
+      const int padding = 14;
+      const ui::ShellRect interior {panel.x + padding, panel.y + padding, panel.w - padding * 2, panel.h - padding * 2};
+      const int lineHeight = height / 40;
+      const auto normal = ui::calculate_settings_detail_layout(interior, lineHeight);
+      auto narrower = interior;
+      narrower.w /= 2;
+      const auto wrapped = ui::calculate_settings_detail_layout(narrower, lineHeight);
+      EXPECT_EQ(normal.description.y, wrapped.description.y);
+      EXPECT_EQ(normal.description.h, wrapped.description.h);
+      EXPECT_EQ(normal.options.y, wrapped.options.y);
+      EXPECT_EQ(normal.options.h, wrapped.options.h);
+      EXPECT_GE(normal.description.h, lineHeight * 4);
+      EXPECT_GT(normal.description.y, normal.title.y + normal.title.h);
+      EXPECT_GT(normal.optionsHeader.y, normal.description.y + normal.description.h);
+      EXPECT_EQ(normal.options.y, normal.optionsHeader.y + normal.optionsHeader.h);
+      EXPECT_EQ(normal.options.y + normal.options.h, interior.y + interior.h);
+      EXPECT_GE(normal.options.h, interior.h / 3);
+    }
+  }
+
+  /**
+   * @brief Bound settings regions in tiny panels and reject unusable layout inputs.
+   */
+  TEST(ShellLayoutTest, BoundsSettingsHelpInSmallAreas) {
+    const auto compact = ui::calculate_settings_detail_layout({10, 20, 50, 30}, 20);
+    for (const auto rect : {compact.title, compact.description, compact.optionsHeader, compact.options}) {
+      EXPECT_GE(rect.y, 20);
+      EXPECT_GE(rect.h, 0);
+      EXPECT_LE(rect.y + rect.h, 50);
+    }
+    EXPECT_EQ(ui::calculate_settings_detail_layout({0, 0, 0, 100}, 16).options.h, 0);
+    EXPECT_EQ(ui::calculate_settings_detail_layout({0, 0, 100, 0}, 16).options.h, 0);
+    EXPECT_EQ(ui::calculate_settings_detail_layout({0, 0, 100, 100}, 0).options.h, 0);
+  }
+
+  /**
+   * @brief Numeric key and IPv4 columns stay compact and centered at SD and HD sizes.
+   */
+  TEST(ShellLayoutTest, CentersCompactNumericColumnsWithinWideDialogs) {
+    for (const int width : {476, 684}) {
+      for (const std::size_t count : {3U, 4U}) {
+        const ui::ShellRect bounds {30, 70, width, 40};
+        const int gap = count == 4U ? 18 : 8;
+        const auto columns = ui::calculate_keypad_columns(bounds, count, 80, gap);
+        ASSERT_EQ(columns.size(), count);
+        EXPECT_GT(columns.front().x, bounds.x);
+        const int right = columns.back().x + columns.back().w;
+        EXPECT_LE(std::abs((columns.front().x - bounds.x) - (bounds.x + bounds.w - right)), 1);
+        for (std::size_t index = 0; index < columns.size(); ++index) {
+          EXPECT_EQ(columns[index].w, 80);
+          EXPECT_EQ(columns[index].y, bounds.y);
+          EXPECT_EQ(columns[index].h, bounds.h);
+          if (index > 0U) {
+            EXPECT_EQ(columns[index].x - columns[index - 1U].x - columns[index - 1U].w, gap);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Compact columns shrink to fit without negative spacing or zero-width keys.
+   */
+  TEST(ShellLayoutTest, FitsNumericColumnsIntoNarrowAreas) {
+    const auto narrow = ui::calculate_keypad_columns({5, 10, 100, 30}, 3U, 80, 8);
+    ASSERT_EQ(narrow.size(), 3U);
+    EXPECT_EQ(narrow.front().x, 5);
+    EXPECT_EQ(narrow.back().x + narrow.back().w, 105);
+    EXPECT_EQ(narrow.front().w, 28);
+    const auto crowded = ui::calculate_keypad_columns({0, 0, 4, 10}, 3U, 50, 18);
+    ASSERT_EQ(crowded.size(), 3U);
+    EXPECT_EQ(crowded.front().w, 1);
+    const auto single = ui::calculate_keypad_columns({0, 0, 100, 10}, 1U, 20, 18);
+    ASSERT_EQ(single.size(), 1U);
+    EXPECT_EQ(single.front().x, 40);
+    const auto minimum = ui::calculate_keypad_columns({0, 0, 100, 10}, 3U, 0, -10);
+    ASSERT_EQ(minimum.size(), 3U);
+    EXPECT_EQ(minimum.front().w, 1);
+    EXPECT_EQ(minimum[1].x, minimum[0].x + 1);
+    EXPECT_TRUE(ui::calculate_keypad_columns({0, 0, 0, 10}, 3U, 80, 8).empty());
+    EXPECT_TRUE(ui::calculate_keypad_columns({0, 0, 100, 0}, 3U, 80, 8).empty());
+    EXPECT_TRUE(ui::calculate_keypad_columns({0, 0, 100, 10}, 0U, 80, 8).empty());
+    EXPECT_TRUE(ui::calculate_keypad_columns({0, 0, 2, 10}, 3U, 80, 8).empty());
+  }
 
   /**
    * @brief Fit concurrent cards above the footer without overlapping on SD or HD output.

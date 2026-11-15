@@ -35,6 +35,16 @@ namespace ui {
   };
 
   /**
+   * @brief Stable settings help and options regions independent of the selected value's glyphs.
+   */
+  struct ShellSettingsDetailLayout {
+    ShellRect title;  ///< Single-line selected setting or category title.
+    ShellRect description;  ///< Reserved contextual help area.
+    ShellRect optionsHeader;  ///< Options heading below the help divider.
+    ShellRect options;  ///< Scrollable settings rows.
+  };
+
+  /**
    * @brief Visible rows in a grid that keeps the selected item on screen.
    */
   struct ShellGridLayout {
@@ -64,6 +74,26 @@ namespace ui {
    * @return Detail panel bounded by the top and footer safe margins.
    */
   ShellRect calculate_settings_panel(const ShellLayout &layout);
+
+  /**
+   * @brief Anchor settings options below a fixed font-based help area.
+   *
+   * @param bounds Padded interior of the settings panel.
+   * @param lineHeight Supporting font's line spacing.
+   * @return Stable title, help and options bounds; empty when the inputs are invalid.
+   */
+  ShellSettingsDetailLayout calculate_settings_detail_layout(ShellRect bounds, int lineHeight);
+
+  /**
+   * @brief Center compact numeric columns while preserving their size on wider dialogs.
+   *
+   * @param bounds Available input or keypad row area.
+   * @param columnCount Number of equal-width columns.
+   * @param preferredWidth Preferred width of each numeric field or key.
+   * @param gap Space between adjacent columns.
+   * @return Left-to-right column bounds; empty when the area cannot hold the columns.
+   */
+  std::vector<ShellRect> calculate_keypad_columns(ShellRect bounds, std::size_t columnCount, int preferredWidth, int gap);
 
   /**
    * @brief Center a dialog inside television-safe margins.

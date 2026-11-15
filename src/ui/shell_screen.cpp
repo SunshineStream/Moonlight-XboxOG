@@ -3728,7 +3728,7 @@ namespace {
   }
 
   /**
-   * @brief Render the selected setting's contextual help above its scrollable options.
+   * @brief Render settings in stable font-based regions so changing values cannot shift the options.
    *
    * @param renderer Active shell renderer.
    * @param bodyFont Font for options.
@@ -3747,24 +3747,18 @@ namespace {
     int panelPadding
   ) {
     const int innerWidth = bodyPanel.w - panelPadding * 2;
-    const int headerHeight = TTF_FontLineSkip(smallFont) + 8;
     const int rowHeight = std::max(34, TTF_FontLineSkip(bodyFont) + 12);
     const int innerHeight = bodyPanel.h - panelPadding * 2;
-    const int descriptionHeight = std::min(innerHeight / 2, measure_body_lines_height(smallFont, {viewModel.content.selectedMenuRowLabel, viewModel.content.selectedMenuRowDescription}, innerWidth, 6));
-    const SDL_Rect descriptionRect {bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth, descriptionHeight};
+    const auto layout = ui::calculate_settings_detail_layout({bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth, innerHeight}, TTF_FontLineSkip(smallFont));
     // SDL 2.0.9's software command queue starts each flush without a viewport.
     // A standalone SDL_RenderSetClipRect() after a text texture flush can assert
     // in SW_RunCommandQueue. Crop text textures instead of changing render clips.
-    int labelHeight = 0;
-    bool success = render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, descriptionRect, &labelHeight);
-    if (success) {
-      const int helpY = descriptionRect.y + labelHeight + 6;
-      success = render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowDescription, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {descriptionRect.x, helpY, innerWidth, descriptionRect.y + descriptionRect.h - helpY});
-    }
-    const int optionsHeaderY = descriptionRect.y + descriptionRect.h + 20;
-    draw_line(renderer, descriptionRect.x, optionsHeaderY - 10, descriptionRect.x + descriptionRect.w, optionsHeaderY - 10, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
-    const SDL_Rect optionsRect {descriptionRect.x, optionsHeaderY + headerHeight, innerWidth, std::max(1, bodyPanel.y + bodyPanel.h - panelPadding - optionsHeaderY - headerHeight)};
-    return success && render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, descriptionRect.x, optionsHeaderY, innerWidth) && render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, optionsRect, rowHeight, nullptr, viewModel.content.rightPanelActive);
+    // Legacy SDL_ttf derives surface height from the actual glyphs, so measured
+    // numeric values must not determine the help or option-row positions.
+    const bool success = render_text_line_simple(renderer, smallFont, viewModel.content.selectedMenuRowLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.title.x, layout.title.y, layout.title.w) &&
+                         render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowDescription, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, sdl_rect(layout.description));
+    draw_line(renderer, layout.optionsHeader.x, layout.optionsHeader.y - 10, layout.optionsHeader.x + layout.optionsHeader.w, layout.optionsHeader.y - 10, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
+    return success && render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.optionsHeader.x, layout.optionsHeader.y, layout.optionsHeader.w) && render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, sdl_rect(layout.options), rowHeight, nullptr, viewModel.content.rightPanelActive);
   }
 
   /**
@@ -3923,7 +3917,7 @@ namespace {
   }
 
   /**
-   * @brief Render numeric entry with segmented IPv4 fields, rounded keys and contained controls.
+   * @brief Render numeric entry with compact centered IPv4 sections and key columns.
    *
    * @param renderer Active renderer.
    * @param bodyFont Heading, input and key font.
@@ -3965,9 +3959,9 @@ namespace {
     const SDL_Rect valueRect {bounds.x + padding, cursorY + 2, innerWidth, valueHeight};
     if (viewModel.keypad.segmentedAddress) {
       const int separatorWidth = 18;
-      const int octetWidth = (valueRect.w - separatorWidth * 3) / 4;
+      const auto octets = ui::calculate_keypad_columns({valueRect.x, valueRect.y, valueRect.w, valueRect.h}, viewModel.keypad.addressOctets.size(), TTF_FontLineSkip(bodyFont) * 4, separatorWidth);
       for (std::size_t index = 0; index < viewModel.keypad.addressOctets.size(); ++index) {
-        const SDL_Rect octetRect {valueRect.x + static_cast<int>(index) * (octetWidth + separatorWidth), valueRect.y, octetWidth, valueRect.h};
+        const SDL_Rect octetRect = sdl_rect(octets[index]);
         render_card_surface(renderer, octetRect, index == viewModel.keypad.activeOctet);
         const auto &digits = viewModel.keypad.addressOctets[index];
         const SDL_Color color = digits.empty() ? SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF} : SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
@@ -3987,7 +3981,7 @@ namespace {
     const int keysY = valueRect.y + valueRect.h + 12;
     const int footerY = bounds.y + bounds.h - padding - footerHeight;
     const int keyHeight = std::max(1, (footerY - 12 - keysY - gap * (rows - 1)) / rows);
-    const int keyWidth = (innerWidth - gap * (columns - 1)) / columns;
+    const auto keyColumns = ui::calculate_keypad_columns({bounds.x + padding, keysY, innerWidth, keyHeight}, static_cast<std::size_t>(columns), TTF_FontLineSkip(bodyFont) * 5, gap);
     if (cache->buttonLabelTextures.size() > viewModel.keypad.buttons.size()) {
       for (std::size_t index = viewModel.keypad.buttons.size(); index < cache->buttonLabelTextures.size(); ++index) {
         clear_cached_text_texture(&cache->buttonLabelTextures[index]);
@@ -3995,7 +3989,8 @@ namespace {
     }
     cache->buttonLabelTextures.resize(viewModel.keypad.buttons.size());
     for (std::size_t index = 0; index < viewModel.keypad.buttons.size(); ++index) {
-      const SDL_Rect key {bounds.x + padding + static_cast<int>(index % columns) * (keyWidth + gap), keysY + static_cast<int>(index / columns) * (keyHeight + gap), keyWidth, keyHeight};
+      const auto &column = keyColumns[index % columns];
+      const SDL_Rect key {column.x, keysY + static_cast<int>(index / columns) * (keyHeight + gap), column.w, keyHeight};
       const auto &button = viewModel.keypad.buttons[index];
       render_card_surface(renderer, key, button.selected);
       if (!ensure_single_line_text_texture(renderer, bodyFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, key.w, &cache->buttonLabelTextures[index]) || !render_cached_centered_text_texture(renderer, cache->buttonLabelTextures[index], key)) {
