@@ -1607,6 +1607,8 @@ namespace app {
     state.settings.playAudioOnPc = false;
     state.settings.showPerformanceStats = false;
     state.settings.playAudioOnXbox = true;
+    state.settings.screenshotDirectory.clear();
+    state.settings.keyboardDockTop = false;
     state.settings.dirty = false;
     state.settings.savedFilesDirty = true;
     return state;

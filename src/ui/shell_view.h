@@ -77,6 +77,8 @@ namespace ui {
     std::string iconAssetPath;  ///< Primary icon asset path.
     std::string secondaryIconAssetPath;  ///< Optional secondary icon asset path.
     bool emphasized = false;  ///< True when the action should receive visual emphasis.
+    std::string keyLabel;  ///< Primary keyboard keycap label, replacing the primary controller icon.
+    std::string secondaryKeyLabel;  ///< Optional second keyboard keycap label.
   };
 
   /**

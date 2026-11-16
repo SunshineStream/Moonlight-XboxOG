@@ -269,7 +269,7 @@ namespace streaming {
     }
     if (failure.empty()) {
       if (overlay != nullptr) {
-        overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination);
+        overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination, frame.matrix);
       }
       __atomic_thread_fence(__ATOMIC_SEQ_CST);
       // Rotate memory buffers through overlay bank zero. xemu composes bank

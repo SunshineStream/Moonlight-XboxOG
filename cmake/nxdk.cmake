@@ -230,9 +230,35 @@ function(_moonlight_prepare_nxdk_tools nxdk_dir cxbe_path source_dir build_dir o
     )
 endfunction()
 
+# Install USB hooks into the owned SDK copy and fingerprint the resulting sources.
+function(_moonlight_prepare_usb_input_hooks nxdk_dir out_signature)
+    # The vendored SDL Xbox event pump is a stub. Install small hooks only in
+    # the owned SDK copy; the project adapter implements boot HID and SDL events.
+    file(READ "${MOONLIGHT_NXDK_DIR}/lib/sdl/SDL2/src/joystick/xbox/SDL_xboxjoystick.c" joystick_source)
+    string(CONCAT initialize_hook
+            "usbh_xid_init();\n"
+            "        extern void moonlight_usb_input_initialize(void);\n"
+            "        moonlight_usb_input_initialize();")
+    string(REPLACE "usbh_xid_init();" "${initialize_hook}"
+            joystick_source "${joystick_source}")
+    file(CONFIGURE OUTPUT "${nxdk_dir}/lib/sdl/SDL2/src/joystick/xbox/SDL_xboxjoystick.c"  # cmake-lint: disable=E1126
+            CONTENT "${joystick_source}" @ONLY)
+    file(READ "${MOONLIGHT_NXDK_DIR}/lib/sdl/SDL2/src/video/xbox/SDL_xbevents.c" events_source)
+    string(REPLACE "/* do nothing. */"
+            "extern void moonlight_usb_input_pump(void);\n    moonlight_usb_input_pump();"
+            events_source "${events_source}")
+    file(CONFIGURE OUTPUT "${nxdk_dir}/lib/sdl/SDL2/src/video/xbox/SDL_xbevents.c"  # cmake-lint: disable=E1126
+            CONTENT "${events_source}" @ONLY)
+    string(SHA256 signature "${joystick_source}\n${events_source}\nNXDK_USB_ENABLE_HID=y")
+
+    set(${out_signature} "${signature}" PARENT_SCOPE)
+endfunction()
+
 # Bootstrap the vendored nxdk outputs required by the host-first Moonlight build.
 function(moonlight_prepare_nxdk nxdk_dir state_dir)
     file(MAKE_DIRECTORY "${state_dir}")
+
+    _moonlight_prepare_usb_input_hooks("${nxdk_dir}" input_signature)
 
     file(READ "${nxdk_dir}/.moonlight-source.signature" nxdk_revision)
     set(signature_inputs
@@ -241,6 +267,7 @@ function(moonlight_prepare_nxdk nxdk_dir state_dir)
             "HOST_SYSTEM=${CMAKE_HOST_SYSTEM_NAME}"
             "NXDK_TOOLCHAIN=${nxdk_dir}/share/toolchain-nxdk.cmake"
             "NXDK_ENV_MODE=cmake-driver"
+            "USB_INPUT=${input_signature}"
     )
     list(JOIN signature_inputs "\n" signature_text)
     string(SHA256 signature "${signature_text}")
@@ -293,7 +320,7 @@ function(moonlight_prepare_nxdk nxdk_dir state_dir)
 
     if(need_prepare_libraries)
         message(STATUS "Preparing nxdk libraries at ${nxdk_dir}")
-        _moonlight_run_nxdk_make("${nxdk_dir}" "nxdk bootstrap" NXDK_ONLY=y -j4)
+        _moonlight_run_nxdk_make("${nxdk_dir}" "nxdk bootstrap" NXDK_ONLY=y NXDK_USB_ENABLE_HID=y -j4)
     else()
         message(STATUS "Using existing nxdk library outputs from ${nxdk_dir}")
     endif()

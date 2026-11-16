@@ -41,6 +41,12 @@ captions, and a blue focus ring shows which card will open. Running apps carry a
 Missing artwork uses Lucide desktop or gamepad placeholders.
 Use the D-pad or left stick to navigate, **A** to select, **B** to go back and **Y** for host or app
 actions. Move up from the first PC row to reach Settings, Support and Add Host.
+Keyboard arrows support held navigation with the same initial delay and repeat rate as the gamepad.
+Use **Enter** to select, **Esc** to go back, and **M** for host or app actions. Helper glyphs switch to
+keyboard keycaps when a key is pressed and return to controller glyphs when a button or deliberate
+stick movement is used. Small stick drift and device connection events do not change the helpers.
+On the hosts page, **Alt + F4** exits the client. **PgUp / PgDn** scroll the log viewer;
+hold **Shift** for faster scrolling. **Backspace** dismisses a notification or changes the log pane.
 
 PCs use grayscale moon artwork inspired by One: a full moon for paired online PCs, a half moon for
 online PCs awaiting pairing, and a crescent for offline PCs. A separate orbit shows controller focus.
@@ -78,9 +84,83 @@ Bitrates are displayed in Mbps. You can then adjust **Stream Bitrate** manually;
 until resolution or FPS changes again.
 These are starting values for image quality and bandwidth, not a guarantee of Xbox decoding performance.
 
-To quit a stream, press **Back/Select + Black + White (LB + RB)** together on any connected controller.
-The client displays **Stopping stream...**, then a stream summary. Release the buttons, then press a
-button to return to the menu.
+Press **Back/Select + Black + White (LB + RB)** together on any connected controller to open stream
+controls. Release the buttons, select a choice with either stick, then press **A** to choose it.
+**B** resumes playback. A USB keyboard can open the same menu with **Ctrl + Alt + Shift + Q**;
+use **Tab** to cycle through all choices, arrows to select the left wheel, **Enter** to choose, and
+**Esc** to go back. Opening local controls releases held host input. Center the sticks and release
+the buttons before resuming gameplay. The same shortcut returns to the wheels from the keyboard,
+logs or quit confirmation. Lucide icons identify each action, and either stick updates the highlight
+continuously as it moves. A translucent dark backdrop dims the live stream behind the wheels; the wheel sectors stay opaque
+for readability. Guide and Share use Xbox Series-style symbols.
+
+| Stick | Up       | Right      | Down       | Left                   |
+| ----- | -------- | ---------- | ---------- | ---------------------- |
+| Left  | Keyboard | Mouse mode | View logs  | Quit stream            |
+| Right | Guide    | Share      | Screenshot | Enable / disable stats |
+
+**Quit stream** asks for confirmation before disconnecting. The client displays **Stopping stream...**,
+then a stream summary. Release the buttons, then press a button to return to the library.
+The host application keeps running.
+
+The on-screen keyboard uses an Xbox One-style layout on a solid dark panel: a number row,
+QWERTY keys, a wide space bar, tall side controls, and an outlined focus key. Use **D-pad / left stick**
+to move, **A** to type, **X** for Backspace, **Y** for Space, and **Start** for host Enter.
+**Right stick click** applies Shift to the next key; **left stick click** toggles persistent Caps.
+**White / Black (LB / RB)** move the host text cursor left / right. **LT** cycles through letters,
+symbols, and PC keys. The symbols page groups numbers and punctuation; PC keys include F1–F12,
+navigation keys, Ctrl / Alt / Win toggles, and shortcuts for Copy, Paste, Cut, Undo, Redo, Select All,
+Alt+Tab, Alt+F4, Ctrl+Alt+Delete, Win+D, Win+E and Win+R. Focus a shortcut to see its full combination
+above the keys. Named shortcuts send their own modifier combination. **RT** moves the panel between
+the top and bottom edges; the placement is saved when the stream ends. **B** returns to the wheels.
+Leaving the keyboard clears held modifiers. Keys use the host's US keyboard layout.
+Controller shortcut icons retain the same colors as the main menus, with smaller glyphs inside keys.
+When using a physical keyboard, use **Tab** to change page, **Shift** for one-shot Shift, **Caps Lock**
+to toggle Caps, **F2** to move the panel, **Space / Backspace** to send those keys, and **Esc** to return.
+In the numeric address/port keypad, **Space** types the focused key and **Enter** accepts the field;
+**PgUp / PgDn** change the address section.
+
+Stream logs appear in a live side panel with severity colors and a scrollbar. Scroll upward to read
+older entries; return to the bottom to follow new entries. The disconnect dialog uses the same modal
+surface as the main menus, starts on **Cancel**, and leaves the host app running after disconnecting.
+Returning from the stream resets local keyboard/controller holds before library navigation resumes.
+
+Screenshots default to `E:\UDATA\<title-id>\screenshots` and omit local controls. Change
+`screenshot_directory` in the `[streaming]` section of Moonlight's `moonlight.toml` to use another writable
+folder; the folder is created when the first screenshot is saved. An empty value restores the default.
+Use a TOML literal string for Xbox paths, for example `screenshot_directory = 'F:\Screenshots'`.
+The same section stores `keyboard_dock_top = false` (bottom) or `true` (top).
+
+Mouse mode uses the invoking controller's **left stick** for movement and **A / B** for left / right
+clicks. That controller's gameplay input stays suppressed until mouse mode is disabled through the menu;
+other gamepads continue to work. Physical keyboard and mouse input can be used alongside virtual input.
+
+Up to four gamepads are sent as separate controllers to Sunshine. Disconnecting a controller releases
+its slot without renumbering the remaining players. Newly connected pads reuse free slots.
+Standard USB boot keyboards and three-button boot mice are supported through Xbox-to-USB adapters
+attached to the controller ports. Devices must support HID boot protocol; report-only devices and
+nonstandard gaming-device reports are not supported. Boot mouse wheel and extra buttons are not
+decoded. When SDL supplies wheel or extra mouse button events, they are forwarded to the host.
+USB disconnects release held keys and mouse buttons. Console USB compatibility and host controller
+creation should be checked with the actual devices and Sunshine configuration in use.
+
+For xemu, open its Monitor with **~** and enter `device_add usb-kbd,id=kbd` or
+`device_add usb-mouse,id=mouse` to attach an emulated USB device to an available port.
+Remove them with `device_del kbd` and `device_del mouse`. See the
+[xemu keyboard setup guide](https://xemu.app/docs/keyboard/) for explicit controller-port selection.
+
+When Sunshine and xemu run on the same PC, prevent Sunshine's virtual controllers from being attached
+to xemu. They can appear when streaming starts. If they are visible to xemu, disable automatic controller
+binding in **Input**, manually assign the physical controller, and remove any saved virtual-controller
+assignments. Leave keyboard/mouse ports unassigned. Otherwise xemu can attach a virtual gamepad to a
+port already occupied by a USB keyboard or mouse and exit with
+`usb_claim_port(): ... not found (in use?)`.
+
+**View logs** shows a snapshot of recent runtime entries; scroll with up/down and reopen it to refresh.
+**Guide** and **Share** send controller button presses to the host. Share behavior depends on the host's
+selected virtual controller and operating system. **Screenshot** saves the clean decoded frame as a BMP
+under the title's `E:\UDATA\` save directory and displays the saved path. Screenshots exclude local menus
+and statistics. Capture requires a decoded frame and writable save storage.
 
 Enable **Settings → Display → Performance Stats** for a live panel during playback and additional
 performance details in the summary. The panel works with GPU and software presentation, refreshes
@@ -89,6 +169,8 @@ decoded and rendered FPS, video bitrate, timing, frame drops, buffering and the 
 The stream header shows the requested FPS; the three FPS counters show measured rates.
 Network latency is round-trip time. Present measures CPU frame preparation and submission,
 including any scanout wait.
+The stream menu can toggle these statistics for the current session; the saved setting sets the
+initial state of the next session.
 
 Video decoding runs on the CPU. Optional experimental GPU presentation accelerates color conversion
 and scaling, with software fallback for unsupported frames or presentation failures. GPU

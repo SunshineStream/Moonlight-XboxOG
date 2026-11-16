@@ -20,8 +20,6 @@
 
 // nxdk includes
 #include <hal/debug.h>
-#include <nanosvg.h>
-#include <nanosvgrast.h>
 #include <SDL.h>
 #include <SDL_image.h>
 #include <SDL_ttf.h>
@@ -44,9 +42,12 @@
 #include "src/startup/host_storage.h"
 #include "src/startup/saved_files.h"
 #include "src/streaming/session.h"
+#include "src/ui/asset_path.h"
+#include "src/ui/dialog_surface.h"
 #include "src/ui/host_probe_result_queue.h"
 #include "src/ui/shell_layout.h"
 #include "src/ui/shell_view.h"
+#include "src/ui/svg_assets.h"
 
 namespace {
 
@@ -78,17 +79,15 @@ namespace {
   constexpr Sint16 LEFT_STICK_NAVIGATION_THRESHOLD = 16000;
   constexpr Sint16 LEFT_STICK_NAVIGATION_RELEASE_THRESHOLD = 12000;
   constexpr Uint32 EXIT_COMBO_HOLD_MILLISECONDS = 900U;
-  constexpr Uint32 CONTROLLER_NAVIGATION_INITIAL_REPEAT_MILLISECONDS = 150U;
-  constexpr Uint32 CONTROLLER_NAVIGATION_REPEAT_MILLISECONDS = 45U;
+  constexpr Uint32 CONTROLLER_NAVIGATION_INITIAL_REPEAT_MILLISECONDS = input::NAVIGATION_INITIAL_REPEAT_MILLISECONDS;
+  constexpr Uint32 CONTROLLER_NAVIGATION_REPEAT_MILLISECONDS = input::NAVIGATION_REPEAT_MILLISECONDS;
   constexpr Uint32 LOG_VIEWER_SCROLL_REPEAT_MILLISECONDS = 110U;
   constexpr Uint32 LOG_VIEWER_FAST_SCROLL_REPEAT_MILLISECONDS = 45U;
   constexpr int SHELL_EVENT_WAIT_TIMEOUT_MILLISECONDS = 2;
   constexpr std::size_t LOG_VIEWER_MAX_LOADED_LINES = 512U;
   constexpr std::size_t LOG_VIEWER_MAX_RENDER_CHARACTERS = 320U;
 
-  std::string build_asset_path(const char *relativePath) {
-    return std::string(DATA_PATH) + "assets" + PATH_SEP + relativePath;
-  }
+  using ui::build_asset_path;
 
   bool asset_path_uses_svg(const char *relativePath) {
     if (relativePath == nullptr) {
@@ -125,42 +124,10 @@ namespace {
   }
 
   /**
-   * @brief Calculate the largest integer size that fits inside a destination rectangle.
-   *
-   * @param sourceWidth Source asset width.
-   * @param sourceHeight Source asset height.
-   * @param maxWidth Maximum destination width.
-   * @param maxHeight Maximum destination height.
-   * @param fittedWidth Receives the fitted width.
-   * @param fittedHeight Receives the fitted height.
+   * @brief Normalize a loaded asset to the shell's blended ARGB texture format.
+   * @param surface Owned source surface, freed during normalization.
+   * @return Owned normalized surface, or nullptr on failure.
    */
-  void calculate_fitted_dimensions(double sourceWidth, double sourceHeight, int maxWidth, int maxHeight, int *fittedWidth, int *fittedHeight) {
-    if (fittedWidth != nullptr) {
-      *fittedWidth = 0;
-    }
-    if (fittedHeight != nullptr) {
-      *fittedHeight = 0;
-    }
-    if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || maxWidth <= 0 || maxHeight <= 0) {
-      return;
-    }
-
-    int targetWidth = maxWidth;
-    int targetHeight = maxHeight;
-    if ((sourceWidth * static_cast<double>(maxHeight)) > (sourceHeight * static_cast<double>(maxWidth))) {
-      targetHeight = std::max(1, static_cast<int>((sourceHeight * static_cast<double>(maxWidth)) / sourceWidth));
-    } else {
-      targetWidth = std::max(1, static_cast<int>((sourceWidth * static_cast<double>(maxHeight)) / sourceHeight));
-    }
-
-    if (fittedWidth != nullptr) {
-      *fittedWidth = targetWidth;
-    }
-    if (fittedHeight != nullptr) {
-      *fittedHeight = targetHeight;
-    }
-  }
-
   SDL_Surface *normalize_asset_surface(SDL_Surface *surface) {
     if (surface == nullptr) {
       return nullptr;
@@ -186,94 +153,6 @@ namespace {
   }
 
   SDL_Texture *load_texture_from_asset(SDL_Renderer *renderer, const char *relativePath, int maxWidth, int maxHeight);
-
-  /**
-   * @brief Load and rasterize an SVG asset so it matches the requested destination bounds.
-   *
-   * @param relativePath Asset path relative to `DATA_PATH/assets`.
-   * @param maxWidth Maximum raster width in pixels.
-   * @param maxHeight Maximum raster height in pixels.
-   * @return Rasterized 32-bit RGBA surface sized to fit within the destination bounds.
-   */
-  SDL_Surface *load_svg_surface_from_asset(const char *relativePath, int maxWidth, int maxHeight) {
-    if (!asset_path_uses_svg(relativePath) || maxWidth <= 0 || maxHeight <= 0) {
-      return nullptr;
-    }
-
-    const std::string assetPath = build_asset_path(relativePath);
-    SDL_RWops *rw = SDL_RWFromFile(assetPath.c_str(), "rb");
-    if (rw == nullptr) {
-      return nullptr;
-    }
-
-    size_t dataSize = 0U;
-    auto *data = static_cast<char *>(SDL_LoadFile_RW(rw, &dataSize, 1));
-    if (data == nullptr) {
-      return nullptr;
-    }
-
-    NSVGimage *image = nsvgParse(data, "px", 96.0f);
-    SDL_free(data);
-    if (image == nullptr) {
-      return nullptr;
-    }
-
-    int targetWidth = 0;
-    int targetHeight = 0;
-    calculate_fitted_dimensions(image->width, image->height, maxWidth, maxHeight, &targetWidth, &targetHeight);
-    if (targetWidth <= 0 || targetHeight <= 0) {
-      nsvgDelete(image);
-      return nullptr;
-    }
-
-    NSVGrasterizer *rasterizer = nsvgCreateRasterizer();
-    if (rasterizer == nullptr) {
-      nsvgDelete(image);
-      return nullptr;
-    }
-
-    SDL_Surface *surface = SDL_CreateRGBSurface(
-      SDL_SWSURFACE,
-      targetWidth,
-      targetHeight,
-      32,
-      0x000000FF,
-      0x0000FF00,
-      0x00FF0000,
-      0xFF000000
-    );
-    if (surface == nullptr) {
-      nsvgDeleteRasterizer(rasterizer);
-      nsvgDelete(image);
-      return nullptr;
-    }
-
-    const bool mustLockSurface = SDL_MUSTLOCK(surface) != 0;
-    if (mustLockSurface && SDL_LockSurface(surface) != 0) {
-      SDL_FreeSurface(surface);
-      nsvgDeleteRasterizer(rasterizer);
-      nsvgDelete(image);
-      return nullptr;
-    }
-
-    SDL_memset(surface->pixels, 0, static_cast<size_t>(surface->pitch) * static_cast<size_t>(surface->h));
-    const float rasterScale = std::min(static_cast<float>(targetWidth) / image->width, static_cast<float>(targetHeight) / image->height);
-    nsvgRasterize(rasterizer, image, 0.0f, 0.0f, rasterScale, static_cast<unsigned char *>(surface->pixels), surface->w, surface->h, surface->pitch);
-
-    if (mustLockSurface) {
-      SDL_UnlockSurface(surface);
-    }
-
-    nsvgDeleteRasterizer(rasterizer);
-    nsvgDelete(image);
-
-    if (SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_BLEND) != 0) {
-      SDL_FreeSurface(surface);
-      return nullptr;
-    }
-
-    return surface;
-  }
 
   SDL_Texture *create_texture_from_surface_with_scale_quality(SDL_Renderer *renderer, SDL_Surface *surface, const char *scaleQualityHint) {
     if (renderer == nullptr || surface == nullptr || scaleQualityHint == nullptr) {
@@ -366,6 +245,16 @@ namespace {
     std::vector<CachedTextTexture> lineTextures;  ///< Cached rendered body line textures.
     std::vector<CachedTextTexture> buttonLabelTextures;  ///< Cached rendered keypad button labels.
   };
+
+  /**
+   * @brief Measure wrapped input helper rows before laying out a modal.
+   * @param font Footer font.
+   * @param actions Input helper actions.
+   * @param width Footer width.
+   * @param compact Use compact spacing.
+   * @return Required footer height.
+   */
+  int measure_footer_actions_height(TTF_Font *font, const std::vector<ui::ShellFooterAction> &actions, int width, bool compact = false);
 
   bool render_footer_actions(
     SDL_Renderer *renderer,
@@ -635,7 +524,7 @@ namespace {
       return nullptr;
     }
 
-    SDL_Surface *surface = (maxWidth > 0 && maxHeight > 0 && asset_path_uses_svg(relativePath)) ? load_svg_surface_from_asset(relativePath, maxWidth, maxHeight) : nullptr;
+    SDL_Surface *surface = (maxWidth > 0 && maxHeight > 0 && asset_path_uses_svg(relativePath)) ? ui::load_svg_surface(build_asset_path(relativePath), maxWidth, maxHeight) : nullptr;
     if (surface == nullptr) {
       const std::string assetPath = build_asset_path(relativePath);
       surface = IMG_Load(assetPath.c_str());
@@ -777,9 +666,7 @@ namespace {
    * @param rect Dialog bounds.
    */
   void render_dialog_surface(SDL_Renderer *renderer, const SDL_Rect &rect) {
-    fill_rounded_rect(renderer, {rect.x + 5, rect.y + 7, rect.w, rect.h}, {0, 0, 0, 0x70}, 12);
-    fill_rounded_rect(renderer, rect, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF}, 12);
-    fill_rounded_rect(renderer, {rect.x + 20, rect.y + 16, 36, 3}, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, 1);
+    ui::draw_dialog_surface(renderer, rect);
   }
 
   bool render_text_line(  // NOSONAR(cpp:S107) helper keeps the SDL text rendering callsite contract explicit
@@ -1501,15 +1388,9 @@ namespace {
       return false;
     }
 
-    const int hintHeight = std::max(30, TTF_FontLineSkip(smallFont) + 10);
+    const int hintHeight = measure_footer_actions_height(smallFont, viewModel.modal.footerActions, modalRect.w - 36);
     const SDL_Rect hintRect {modalRect.x + 18, modalRect.y + 64 + pathHeight + 8, modalRect.w - 36, hintHeight};
-    if (const std::vector<ui::ShellFooterAction> logViewerActions = {
-          {"change-view", "Change View", "icons\\button-x.svg", "icons\\button-y.svg", false},
-          {"scroll", "Scroll", "icons\\button-lb.svg", "icons\\button-rb.svg", false},
-          {"fast-scroll", "Fast Scroll", "icons\\button-lt.svg", "icons\\button-rt.svg", false},
-          {"close", "Close", "icons\\button-a.svg", "icons\\button-b.svg", false},
-        };
-        !render_footer_actions(renderer, smallFont, assetCache, logViewerActions, hintRect)) {
+    if (!render_footer_actions(renderer, smallFont, assetCache, viewModel.modal.footerActions, hintRect)) {
       return false;
     }
 
@@ -1695,11 +1576,13 @@ namespace {
    */
   struct FooterActionChipLayout {
     int labelWidth = 0;  ///< Width of the action label.
-    int iconSize = 0;  ///< Square controller-glyph size.
-    int iconBlockWidth = 0;  ///< Combined width of the controller glyphs.
+    int iconSize = 0;  ///< Height of controller glyphs or keyboard keycaps.
+    int iconBlockWidth = 0;  ///< Combined input glyph width.
     int chipWidth = 0;  ///< Total width including content and padding.
     int horizontalPadding = 10;  ///< Inset at each horizontal edge.
     int iconLabelGap = 8;  ///< Space between the glyphs and action label.
+    int primaryIconWidth = 0;  ///< Primary glyph width, including wide keyboard labels.
+    int secondaryIconWidth = 0;  ///< Optional secondary glyph width.
   };
 
   int measure_footer_action_label_width(TTF_Font *font, const std::string &label) {
@@ -1720,50 +1603,76 @@ namespace {
    * @return Measured icon, label and button widths.
    */
   FooterActionChipLayout measure_footer_action_chip(TTF_Font *font, const ui::ShellFooterAction &action, int chipHeight, bool compact) {
-    const int iconCount = (action.iconAssetPath.empty() ? 0 : 1) + (action.secondaryIconAssetPath.empty() ? 0 : 1);
-    const int iconSize = (action.iconAssetPath.empty() && action.secondaryIconAssetPath.empty()) ? 0 : std::max(18, chipHeight - 14);
-    const int iconBlockWidth = iconCount == 0 ? 0 : (iconSize * iconCount) + ((iconCount - 1) * 4);
-    const int padding = compact ? 6 : 10;
-    const int labelGap = compact ? 4 : 8;
-    return {
-      measure_footer_action_label_width(font, action.label),
-      iconSize,
-      iconBlockWidth,
-      padding * 2 + iconBlockWidth + (iconBlockWidth > 0 ? labelGap : 0) + measure_footer_action_label_width(font, action.label),
-      padding,
-      labelGap,
-    };
+    FooterActionChipLayout layout;
+    const bool keyboard = !action.keyLabel.empty() || !action.secondaryKeyLabel.empty();
+    layout.iconSize = keyboard ? std::max(18, TTF_FontHeight(font) + 6) : std::max(18, chipHeight - 14);
+    layout.primaryIconWidth = !action.keyLabel.empty() ? measure_footer_action_label_width(font, action.keyLabel) + 12 : action.iconAssetPath.empty() ? 0 :
+                                                                                                                                                        layout.iconSize;
+    layout.secondaryIconWidth = !action.secondaryKeyLabel.empty() ? measure_footer_action_label_width(font, action.secondaryKeyLabel) + 12 : action.secondaryIconAssetPath.empty() ? 0 :
+                                                                                                                                                                                     layout.iconSize;
+    layout.iconBlockWidth = layout.primaryIconWidth + layout.secondaryIconWidth + (layout.primaryIconWidth > 0 && layout.secondaryIconWidth > 0 ? 4 : 0);
+    layout.horizontalPadding = compact ? 6 : 10;
+    layout.iconLabelGap = compact ? 4 : 8;
+    layout.labelWidth = measure_footer_action_label_width(font, action.label);
+    layout.chipWidth = layout.horizontalPadding * 2 + layout.iconBlockWidth + (layout.iconBlockWidth > 0 ? layout.iconLabelGap : 0) + layout.labelWidth;
+    return layout;
+  }
+
+  /**
+   * @brief Reserve enough footer rows to keep wide keyboard keycaps and every action visible.
+   * @param font Footer font.
+   * @param actions Ordered input hints.
+   * @param width Available footer width, including its horizontal inset.
+   * @param compact Use compact keypad spacing.
+   * @return Height including vertical padding and wrapped rows.
+   */
+  int measure_footer_actions_height(TTF_Font *font, const std::vector<ui::ShellFooterAction> &actions, int width, bool compact) {
+    const int chipHeight = std::max(30, TTF_FontLineSkip(font) + 12);
+    const int available = std::max(1, width - 32);
+    const int gap = compact ? 6 : 12;
+    int rows = 1;
+    int used = 0;
+    for (const auto &action : actions) {
+      const int chipWidth = std::min(available, measure_footer_action_chip(font, action, chipHeight, compact).chipWidth);
+      if (used != 0 && used + gap + chipWidth > available) {
+        ++rows;
+        used = 0;
+      }
+      used += (used == 0 ? 0 : gap) + chipWidth;
+    }
+    return rows * chipHeight + (rows - 1) * 6 + 16;
   }
 
   /**
    * @brief Draw controller glyphs using the same spacing as the measured action chip.
    *
    * @param renderer Active renderer.
+   * @param font Font for keyboard keycaps.
    * @param assetCache Cached controller icons.
-   * @param action Controller glyph paths.
+   * @param action Controller glyph paths or keyboard labels.
    * @param chipRect Action bounds.
    * @param layout Measured icon sizes and spacing.
    * @return Horizontal starting point for the action label.
    */
-  int render_footer_action_icons(SDL_Renderer *renderer, AssetTextureCache *assetCache, const ui::ShellFooterAction &action, const SDL_Rect &chipRect, const FooterActionChipLayout &layout) {
+  int render_footer_action_icons(SDL_Renderer *renderer, TTF_Font *font, AssetTextureCache *assetCache, const ui::ShellFooterAction &action, const SDL_Rect &chipRect, const FooterActionChipLayout &layout) {
     int contentX = chipRect.x + layout.horizontalPadding;
-    const int iconSize = layout.iconSize;
-    if (iconSize <= 0) {
-      return contentX;
-    }
-
-    const auto render_icon = [&](const std::string &assetPath) {
-      if (assetPath.empty()) {
+    const auto render_glyph = [&](const std::string &assetPath, const std::string &keyLabel, int width) {
+      if (width <= 0) {
         return;
       }
-      const SDL_Rect iconRect {contentX, chipRect.y + (chipRect.h - iconSize) / 2, iconSize, iconSize};
-      render_asset_icon(renderer, assetCache, assetPath, iconRect);
-      contentX += iconSize + 4;
+      const SDL_Rect rect {contentX, chipRect.y + (chipRect.h - layout.iconSize) / 2, width, layout.iconSize};
+      if (!keyLabel.empty()) {
+        fill_rounded_rect(renderer, rect, {0x2C, 0x32, 0x3B, 0xFF}, 3);
+        draw_rounded_rect_outline(renderer, rect, {0xB8, 0xC2, 0xD0, 0xFF}, 3);
+        render_text_centered_simple(renderer, font, keyLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, rect);
+      } else {
+        render_asset_icon(renderer, assetCache, assetPath, rect);
+      }
+      contentX += width + 4;
     };
-
-    render_icon(action.iconAssetPath);
-    render_icon(action.secondaryIconAssetPath);
-    return chipRect.x + layout.horizontalPadding + layout.iconBlockWidth + layout.iconLabelGap;
+    render_glyph(action.iconAssetPath, action.keyLabel, layout.primaryIconWidth);
+    render_glyph(action.secondaryIconAssetPath, action.secondaryKeyLabel, layout.secondaryIconWidth);
+    return chipRect.x + layout.horizontalPadding + layout.iconBlockWidth + (layout.iconBlockWidth > 0 ? layout.iconLabelGap : 0);
   }
 
   /**
@@ -1786,7 +1695,7 @@ namespace {
     const SDL_Rect &chipRect
   ) {
     fill_rounded_rect(renderer, chipRect, {PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xFF}, 6);
-    const int contentX = render_footer_action_icons(renderer, assetCache, action, chipRect, layout);
+    const int contentX = render_footer_action_icons(renderer, font, assetCache, action, chipRect, layout);
     return render_text_line(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, contentX, chipRect.y + std::max(6, (chipRect.h - TTF_FontLineSkip(font)) / 2), chipRect.w - (contentX - chipRect.x) - layout.horizontalPadding);
   }
 
@@ -1811,19 +1720,21 @@ namespace {
   ) {
     int cursorX = footerRect.x + 16;
     const int availableRight = footerRect.x + footerRect.w - 16;
-    const int chipHeight = std::max(30, footerRect.h - 18);
-    const int chipY = footerRect.y + (footerRect.h - chipHeight) / 2;
-
-    for (const ui::ShellFooterAction &action : actions) {
-      const FooterActionChipLayout layout = measure_footer_action_chip(font, action, chipHeight, compact);
-      if (cursorX + layout.chipWidth > availableRight) {
+    const int chipHeight = std::max(30, TTF_FontLineSkip(font) + 12);
+    int cursorY = footerRect.y + std::max(0, std::min(8, (footerRect.h - chipHeight) / 2));
+    for (const auto &action : actions) {
+      auto layout = measure_footer_action_chip(font, action, chipHeight, compact);
+      layout.chipWidth = std::min(layout.chipWidth, std::max(1, footerRect.w - 32));
+      if (cursorX + layout.chipWidth > availableRight && cursorX > footerRect.x + 16) {
+        cursorX = footerRect.x + 16;
+        cursorY += chipHeight + 6;
+      }
+      if (cursorY + chipHeight > footerRect.y + footerRect.h) {
         break;
       }
-
-      if (const SDL_Rect chipRect {cursorX, chipY, layout.chipWidth, chipHeight}; !render_footer_action_chip(renderer, font, assetCache, action, layout, chipRect)) {
+      if (!render_footer_action_chip(renderer, font, assetCache, action, layout, {cursorX, cursorY, layout.chipWidth, chipHeight})) {
         return false;
       }
-
       cursorX += layout.chipWidth + (compact ? 6 : 12);
     }
 
@@ -2019,11 +1930,7 @@ namespace {
   /**
    * @brief Tracks the repeat timing for one controller navigation direction.
    */
-  struct ControllerNavigationHoldState {
-    bool active = false;  ///< True while the direction remains held past activation.
-    Uint32 activatedTick = 0U;  ///< Tick count when the direction first became active.
-    Uint32 lastRepeatTick = 0U;  ///< Tick count when the last repeat command fired.
-  };
+  using input::ControllerNavigationHoldState;
 
   /**
    * @brief Clears the held-repeat bookkeeping for every controller navigation direction.
@@ -2395,6 +2302,11 @@ namespace {
     }
   }
 
+  /**
+   * @brief Snapshot persisted shell and stream preferences, including screenshot storage and OSK placement.
+   * @param state Current client state.
+   * @return Settings snapshot ready for TOML serialization.
+   */
   app::AppSettings persistent_settings_from_state(const app::ClientState &state) {
     return {
       state.settings.loggingLevel,
@@ -2407,6 +2319,8 @@ namespace {
       state.settings.playAudioOnPc,
       state.settings.showPerformanceStats,
       state.settings.playAudioOnXbox,
+      state.settings.screenshotDirectory,
+      state.settings.keyboardDockTop,
     };
   }
 
@@ -3939,7 +3853,7 @@ namespace {
     const int titleHeight = TTF_FontLineSkip(bodyFont) + 14;
     const int hintHeight = keypad_modal_text_height(renderer, smallFont, viewModel, innerWidth, cache);
     const int valueHeight = TTF_FontLineSkip(bodyFont) + 20;
-    const int footerHeight = std::max(38, TTF_FontLineSkip(smallFont) + 18);
+    const int footerHeight = measure_footer_actions_height(smallFont, viewModel.keypad.footerActions, innerWidth + 12, true);
     const int preferredKeyHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 18);
     const int desiredHeight = padding * 2 + 12 + titleHeight + hintHeight + valueHeight + 20 + rows * (preferredKeyHeight + gap) + footerHeight;
     const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, desiredHeight));
@@ -4200,7 +4114,7 @@ namespace {
         draw_rect(renderer, modalRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
         render_text_line_simple(renderer, bodyFont, "Log File", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 16, modalRect.w - 32);
         render_text_line_simple(renderer, smallFont, "The full log viewer could not be rendered safely.", {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54, modalRect.w - 32);
-        render_text_line_simple(renderer, smallFont, "Press B to close.", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_FontLineSkip(smallFont) + 8, modalRect.w - 32);
+        render_text_line_simple(renderer, smallFont, (viewModel.modal.footerActions.empty() || viewModel.modal.footerActions.back().keyLabel.empty() ? "Press B to close." : "Press Esc to close."), {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_FontLineSkip(smallFont) + 8, modalRect.w - 32);
       }
     } else if (viewModel.modal.visible) {
       if (!render_shell_dialog(renderer, titleFont, bodyFont, smallFont, assetCache, viewModel.modal, screenWidth, screenHeight)) {
@@ -4246,34 +4160,10 @@ namespace {
     }
   }
 
-  input::UiCommand translate_unrepeated_keydown(const SDL_KeyboardEvent &event) {
-    if (event.repeat != 0) {
-      return input::UiCommand::none;
-    }
-    return translate_keyboard_key(event.keysym.sym, event.keysym.mod);
-  }
-
-  struct ShellInputState {
-    bool leftTriggerPressed = false;
-    bool rightTriggerPressed = false;
-    bool leftShoulderPressed = false;
-    bool rightShoulderPressed = false;
-    bool controllerStartPressed = false;
-    bool controllerBackPressed = false;
-    bool controllerExitComboArmed = false;
-    bool controllerExitComboTriggered = false;
-    Uint32 controllerStartDownTick = 0U;
-    Uint32 controllerBackDownTick = 0U;
-    Uint32 leftShoulderRepeatTick = 0U;
-    Uint32 rightShoulderRepeatTick = 0U;
-    Uint32 leftTriggerRepeatTick = 0U;
-    Uint32 rightTriggerRepeatTick = 0U;
-    ControllerNavigationHoldState moveUpHoldState {};
-    ControllerNavigationHoldState moveDownHoldState {};
-    ControllerNavigationHoldState moveLeftHoldState {};
-    ControllerNavigationHoldState moveRightHoldState {};
-    bool controllerNavigationNeutralRequired = false;
-  };
+  /**
+   * @brief Retains controller and keyboard hold state between shell frames.
+   */
+  using input::ShellInputState;
 
   void reset_shell_input_state(ShellInputState *inputState) {
     if (inputState == nullptr) {
@@ -4281,6 +4171,19 @@ namespace {
     }
 
     *inputState = {};
+  }
+
+  /**
+   * @brief Switch contextual helpers and stop held navigation from the previous device.
+   * @param state Shell input device metadata.
+   * @param inputState Held input state to clear on a device switch.
+   * @param device Most recently used input device.
+   */
+  void set_shell_input_device(app::ClientState &state, ShellInputState *inputState, input::UiInputDevice device) {
+    if (state.shell.inputDevice != device) {
+      reset_shell_input_state(inputState);
+      state.shell.inputDevice = device;
+    }
   }
 
   void disarm_controller_exit_combo(ShellInputState *inputState) {
@@ -4318,7 +4221,7 @@ namespace {
     ShellInputState *inputState,
     const ProcessCommand &processCommand
   ) {
-    if (inputState == nullptr || state.modal.id != app::ModalId::log_viewer) {
+    if (inputState == nullptr || state.modal.id != app::ModalId::log_viewer || state.shell.inputDevice != input::UiInputDevice::gamepad) {
       return;
     }
 
@@ -4445,6 +4348,14 @@ namespace {
     return command;
   }
 
+  /**
+   * @brief Route device transitions and maintain the input source used by contextual helpers.
+   * @param state Reducer state and current input device.
+   * @param event SDL event to process.
+   * @param controller Owned primary controller reference.
+   * @param inputState Keyboard and controller hold timers.
+   * @return Initial command from the event, or none for lifecycle and release events.
+   */
   input::UiCommand handle_shell_event(
     app::ClientState &state,
     const SDL_Event &event,
@@ -4462,6 +4373,7 @@ namespace {
         handle_controller_device_removed(controller, event.cdevice, inputState);
         return input::UiCommand::none;
       case SDL_CONTROLLERBUTTONDOWN:
+        set_shell_input_device(state, inputState, input::UiInputDevice::gamepad);
         return handle_controller_button_down_event(event.cbutton, state, inputState);
       case SDL_CONTROLLERBUTTONUP:
         return handle_controller_button_up_event(event.cbutton, inputState);
@@ -4470,9 +4382,30 @@ namespace {
           return input::UiCommand::none;
         }
 
+        if (input::is_gamepad_ui_activity(event.caxis.value, event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)) {
+          set_shell_input_device(state, inputState, input::UiInputDevice::gamepad);
+        }
         return translate_trigger_axis(event.caxis, &inputState->leftTriggerPressed, &inputState->rightTriggerPressed);
       case SDL_KEYDOWN:
-        return translate_unrepeated_keydown(event.key);
+        if (event.key.repeat != 0 || inputState == nullptr) {
+          return input::UiCommand::none;
+        }
+        set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
+        if (event.key.keysym.sym == SDLK_F4 && (event.key.keysym.mod & KMOD_ALT) != 0 && hosts_screen_exit_combo_allowed(state) && !state.modal.active()) {
+          state.shell.shouldExit = true;
+          return input::UiCommand::none;
+        }
+        return inputState->keyboardNavigation.press(event.key.keysym.scancode, translate_keyboard_key(event.key.keysym.sym, event.key.keysym.mod), SDL_GetTicks());
+      case SDL_KEYUP:
+        if (inputState != nullptr) {
+          inputState->keyboardNavigation.release(event.key.keysym.scancode);
+        }
+        return input::UiCommand::none;
+      case SDL_WINDOWEVENT:
+        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+          reset_shell_input_state(inputState);
+        }
+        return input::UiCommand::none;
       default:
         return input::UiCommand::none;
     }
@@ -4753,6 +4686,7 @@ namespace {
       return;
     }
 
+    runtime->inputState.reset_after_stream();
     reset_pairing_task(&runtime->pairingTask);
     reset_app_list_task(&runtime->appListTask);
     reset_app_art_task(&runtime->appArtTask);
@@ -4902,6 +4836,9 @@ namespace {
     }
 
     initialize_shell_runtime(state, runtime);
+    app::AppUpdate settingsUpdate {};
+    settingsUpdate.persistence.settingsChanged = state.settings.dirty;
+    persist_settings_if_needed(state, settingsUpdate);
     if (streamStarted && state.hosts.activeLoaded) {
       state.hosts.active.appListState = app::HostAppListState::loading;
       state.hosts.active.appListStatusMessage = "Refreshing host apps after the stream session...";
@@ -4998,11 +4935,18 @@ namespace {
     start_shell_background_tasks_if_needed(state, runtime, SDL_GetTicks());
 
     update_exit_combo_hold(state, &runtime->inputState);
-    process_log_viewer_repeat_commands(state, SDL_GetTicks(), &runtime->inputState, processCommand);
-
+    const auto previousInputDevice = state.shell.inputDevice;
     bool skipPolledControllerNavigation = false;
     process_polled_shell_events(state, &resources->controller, &runtime->inputState, processCommand, &skipPolledControllerNavigation);
-    process_controller_navigation(resources->controller, &runtime->inputState, skipPolledControllerNavigation, processCommand);
+    if (state.shell.inputDevice == input::UiInputDevice::keyboard) {
+      processCommand(runtime->inputState.keyboardNavigation.poll(SDL_GetTicks()));
+    } else {
+      process_log_viewer_repeat_commands(state, SDL_GetTicks(), &runtime->inputState, processCommand);
+      process_controller_navigation(resources->controller, &runtime->inputState, skipPolledControllerNavigation, processCommand);
+    }
+    if (previousInputDevice != state.shell.inputDevice) {
+      runtime->keypadRedrawRequested = true;
+    }
 
     finish_shell_background_tasks(state, resources, runtime);
     start_shell_background_tasks_if_needed(state, runtime, SDL_GetTicks());

@@ -1,0 +1,126 @@
+/**
+ * @file src/input/ui_input.h
+ * @brief Shared UI navigation timing and keyboard hold tracking.
+ */
+#pragma once
+
+#include "src/input/navigation_input.h"
+
+#include <cstdint>
+#include <map>
+
+namespace input {
+  constexpr std::uint32_t NAVIGATION_INITIAL_REPEAT_MILLISECONDS = 150;  ///< Delay shared by keyboard and controller navigation.
+  constexpr std::uint32_t NAVIGATION_REPEAT_MILLISECONDS = 45;  ///< Interval shared by keyboard and controller navigation.
+
+  /**
+   * @brief Device whose intentional input most recently controlled the UI.
+   */
+  enum class UiInputDevice {
+    gamepad,  ///< Show controller button glyphs.
+    keyboard,  ///< Show keyboard keycaps.
+  };
+
+  /**
+   * @brief Decide whether analog input is deliberate enough to select controller hints.
+   * @param value SDL axis value.
+   * @param trigger True for a unipolar trigger; false for a signed stick axis.
+   * @return True outside the UI dead zone; neutral and small drift are ignored.
+   */
+  bool is_gamepad_ui_activity(short value, bool trigger);
+
+  /**
+   * @brief Classify commands that can repeat safely while a keyboard key remains held.
+   * @param command Mapped UI command.
+   * @return True for directional navigation and paging, never confirmation or toggles.
+   */
+  bool is_repeatable_ui_command(UiCommand command);
+
+  /**
+   * @brief Generates UI repeats from transitions, including USB keyboards without OS autorepeat.
+   */
+  class KeyboardNavigation {
+  public:
+    /**
+     * @brief Register an initial key press and issue its command exactly once.
+     * @param key Physical key identity, such as an SDL scancode.
+     * @param command Mapped command, or none for an unmapped key.
+     * @param now Monotonic millisecond tick count.
+     * @return Initial command, or none for duplicate presses and unmapped keys.
+     */
+    UiCommand press(int key, UiCommand command, std::uint32_t now);
+    /**
+     * @brief Stop repeating a released or disconnected key.
+     * @param key Physical key identity.
+     */
+    void release(int key);
+    /**
+     * @brief Repeat the most recently pressed navigation key when its timer is due.
+     * @param now Monotonic millisecond tick count, allowed to wrap.
+     * @return At most one repeat command; long stalls do not generate catch-up bursts.
+     */
+    UiCommand poll(std::uint32_t now);
+    /**
+     * @brief Clear held keys on focus loss, device changes or modal activation.
+     */
+    void reset();
+
+  private:
+    /**
+     * @brief One keyboard navigation hold.
+     */
+    struct HeldKey {
+      UiCommand command = UiCommand::none;  ///< Command associated with this physical key.
+      std::uint32_t pressedAt = 0;  ///< Initial press tick.
+      std::uint32_t repeatedAt = 0;  ///< Last emitted repeat tick.
+      std::uint64_t order = 0;  ///< Press order, independent of scancode ordering.
+    };
+
+    std::map<int, HeldKey> held_;  ///< Current mapped keys, including action keys that must not repeat.
+    std::uint64_t order_ = 0;  ///< Monotonic ordering within the current input lifetime.
+  };
+
+  /**
+   * @brief Repeat timing for one held controller direction.
+   */
+  struct ControllerNavigationHoldState {
+    bool active = false;  ///< Direction is held.
+    std::uint32_t activatedTick = 0;  ///< Initial activation tick.
+    std::uint32_t lastRepeatTick = 0;  ///< Last repeat tick.
+  };
+
+  /**
+   * @brief Shell input lifetime, separate from the stream's input ownership.
+   */
+  struct ShellInputState {
+    KeyboardNavigation keyboardNavigation;  ///< Keyboard repeat state.
+    bool leftTriggerPressed = false;  ///< Held-input or navigation latch.
+    bool rightTriggerPressed = false;  ///< Held-input or navigation latch.
+    bool leftShoulderPressed = false;  ///< Held-input or navigation latch.
+    bool rightShoulderPressed = false;  ///< Held-input or navigation latch.
+    bool controllerStartPressed = false;  ///< Held-input or navigation latch.
+    bool controllerBackPressed = false;  ///< Held-input or navigation latch.
+    bool controllerExitComboArmed = false;  ///< Held-input or navigation latch.
+    bool controllerExitComboTriggered = false;  ///< Held-input or navigation latch.
+    bool controllerNavigationNeutralRequired = false;  ///< Held-input or navigation latch.
+    std::uint32_t controllerStartDownTick = 0;  ///< Press or repeat tick for this input.
+    std::uint32_t controllerBackDownTick = 0;  ///< Press or repeat tick for this input.
+    std::uint32_t leftShoulderRepeatTick = 0;  ///< Press or repeat tick for this input.
+    std::uint32_t rightShoulderRepeatTick = 0;  ///< Press or repeat tick for this input.
+    std::uint32_t leftTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
+    std::uint32_t rightTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
+    ControllerNavigationHoldState moveUpHoldState {};  ///< Directional repeat state.
+    ControllerNavigationHoldState moveDownHoldState {};  ///< Directional repeat state.
+    ControllerNavigationHoldState moveLeftHoldState {};  ///< Directional repeat state.
+    ControllerNavigationHoldState moveRightHoldState {};  ///< Directional repeat state.
+
+    /**
+     * @brief Clear stale holds after streaming consumed their release events, then wait for neutral.
+     */
+    void reset_after_stream() {
+      *this = {};
+      controllerNavigationNeutralRequired = true;
+    }
+  };
+
+}  // namespace input

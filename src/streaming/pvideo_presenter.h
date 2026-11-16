@@ -49,7 +49,7 @@ namespace streaming {
      * @param destination Letterboxed output rectangle.
      * @param error Receives the reason acceleration could not be used.
      * @param sampling Optional crop used by the standalone prediction experiment.
-     * @param overlay Optional cached statistics bitmap, composited before GPU scanout.
+     * @param overlay Optional cached UI or statistics, composited using the frame's color matrix before GPU scanout.
      *
      * @return True after the overlay registers have accepted the new buffer.
      */

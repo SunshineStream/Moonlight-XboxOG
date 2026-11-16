@@ -31,6 +31,7 @@ extern "C" {
 
 // local includes
 #include "src/logging/logger.h"
+#include "src/platform/filesystem_utils.h"
 
 #ifdef NXDK
   #include <hal/video.h>
@@ -348,13 +349,71 @@ namespace streaming {
     return presenter_.active() ? "GPU" : (acceleration_.softwareFrames > 0 ? "Software" : "Waiting");
   }
 
-  void FfmpegStreamBackend::set_statistics_bitmap(int width, int height, std::vector<std::uint8_t> grayscale) {
-    statisticsOverlay_.set_bitmap(width, height, std::move(grayscale));
+  void FfmpegStreamBackend::set_statistics_bitmap(int width, int height, std::vector<std::uint8_t> grayscale, VideoOverlayPlacement placement, std::vector<std::uint8_t> opacity) {
+    statisticsOverlay_.set_bitmap(width, height, std::move(grayscale), placement, std::move(opacity));
+    invalidate_overlay_texture();
+  }
+
+  void FfmpegStreamBackend::set_color_overlay(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement) {
+    statisticsOverlay_.set_argb_bitmap(width, height, std::move(pixels), placement);
+    invalidate_overlay_texture();
+  }
+
+  void FfmpegStreamBackend::invalidate_overlay_texture() {
     statisticsBitmapChanged_ = statisticsTextureChanged_ = true;
     if (statisticsTexture_ != nullptr) {
       SDL_DestroyTexture(statisticsTexture_);
       statisticsTexture_ = nullptr;
     }
+  }
+
+  bool FfmpegStreamBackend::has_pending_overlay() const {
+    return statisticsBitmapChanged_;
+  }
+
+  void FfmpegStreamBackend::render_local_overlay(SDL_Renderer *renderer, int width, int height) {
+    render_sdl_statistics(renderer, {0, 0, width, height});
+  }
+
+  void FfmpegStreamBackend::local_overlay_size(int &width, int &height) const {
+    if (video_.renderFrame.width > 0 && video_.renderFrame.height > 0) {
+      const auto destination = build_letterboxed_destination(width, height, video_.renderFrame.width, video_.renderFrame.height);
+      width = destination.w;
+      height = destination.h;
+    }
+  }
+
+  bool FfmpegStreamBackend::save_screenshot(const std::string &path) {
+    // renderFrame belongs exclusively to the event thread and contains no composited UI.
+    const auto &frame = video_.renderFrame;
+    if (frame.width <= 0 || frame.height <= 0) {
+      logging::warn("stream", "Cannot take a screenshot before the first video frame is presented");
+      return false;
+    }
+    if (!platform::ensure_directory_exists(platform::parent_directory(path))) {
+      return false;
+    }
+    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, frame.width, frame.height, 24, SDL_PIXELFORMAT_BGR24);
+    if (surface == nullptr) {
+      return false;
+    }
+    SwsContext *conversion = sws_getContext(frame.width, frame.height, AV_PIX_FMT_YUV420P, frame.width, frame.height, AV_PIX_FMT_BGR24, SWS_POINT, nullptr, nullptr, nullptr);
+    bool saved = false;
+    if (conversion != nullptr) {
+      const int *coefficients = sws_getCoefficients(frame.matrix == VideoColorMatrix::bt709 ? SWS_CS_ITU709 : SWS_CS_ITU601);
+      sws_setColorspaceDetails(conversion, coefficients, frame.fullRange, coefficients, 1, 0, 1 << 16, 1 << 16);
+      const std::array<const std::uint8_t *, 4> source {frame.yPlane.data(), frame.uPlane.data(), frame.vPlane.data(), nullptr};
+      const std::array<int, 4> sourcePitch {frame.yPitch, frame.uPitch, frame.vPitch, 0};
+      std::array<std::uint8_t *, 4> destination {static_cast<std::uint8_t *>(surface->pixels), nullptr, nullptr, nullptr};
+      const std::array<int, 4> destinationPitch {surface->pitch, 0, 0, 0};
+      saved = sws_scale(conversion, source.data(), sourcePitch.data(), 0, frame.height, destination.data(), destinationPitch.data()) == frame.height && SDL_SaveBMP(surface, path.c_str()) == 0;
+      sws_freeContext(conversion);
+    }
+    SDL_FreeSurface(surface);
+    if (!saved) {
+      logging::warn("stream", "Failed to save screenshot: " + path);
+    }
+    return saved;
   }
 
   FfmpegStreamBackend::~FfmpegStreamBackend() {
@@ -598,6 +657,9 @@ namespace streaming {
     }
     if (statisticsTexture_ == nullptr) {
       statisticsTexture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+      if (statisticsTexture_ != nullptr) {
+        SDL_SetTextureBlendMode(statisticsTexture_, SDL_BLENDMODE_BLEND);
+      }
       statisticsTextureChanged_ = true;
     }
     if (statisticsTexture_ == nullptr) {
@@ -610,8 +672,10 @@ namespace streaming {
       }
       statisticsTextureChanged_ = false;
     }
-    const SDL_Rect panel {destination.x + VideoOverlay::MARGIN, destination.y + VideoOverlay::MARGIN, width, height};
-    SDL_RenderCopy(renderer, statisticsTexture_, nullptr, &panel);
+    const auto bounds = statisticsOverlay_.rectangle({destination.x, destination.y, destination.w, destination.h});
+    const SDL_Rect panel {bounds.x, bounds.y, bounds.width, bounds.height};
+    const SDL_Rect source {0, 0, bounds.width, bounds.height};
+    SDL_RenderCopy(renderer, statisticsTexture_, &source, &panel);
   }
 
   int FfmpegStreamBackend::setup_video_decoder(int videoFormat, int width, int height, int redrawRate, int drFlags) {

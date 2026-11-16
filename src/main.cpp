@@ -47,6 +47,8 @@ namespace {
     state.settings.playAudioOnPc = settings.playAudioOnPc;
     state.settings.showPerformanceStats = settings.showPerformanceStats;
     state.settings.playAudioOnXbox = settings.playAudioOnXbox;
+    state.settings.screenshotDirectory = settings.screenshotDirectory;
+    state.settings.keyboardDockTop = settings.keyboardDockTop;
     state.settings.dirty = false;
   }
 

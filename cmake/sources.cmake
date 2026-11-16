@@ -19,7 +19,10 @@ set(MOONLIGHT_TEST_EXCLUDED_SOURCES
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/ffmpeg_stream_backend.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/startup/memory_stats.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/session.cpp"
+        "${MOONLIGHT_SOURCE_ROOT}/src/streaming/stream_controls.cpp"
+        "${MOONLIGHT_SOURCE_ROOT}/src/platform/usb_input.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/ui/shell_screen.cpp"
+        "${MOONLIGHT_SOURCE_ROOT}/src/ui/svg_assets.cpp"
 )
 
 set(MOONLIGHT_HOST_TESTABLE_SOURCES ${MOONLIGHT_SOURCES})

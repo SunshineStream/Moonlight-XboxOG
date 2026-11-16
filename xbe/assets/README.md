@@ -15,3 +15,13 @@ crescent phases indicate online paired, online unpaired and offline PCs respecti
 rendered separately so selection remains independent of reachability.
 
 The Moonlight logo and controller button glyphs are separate bundled assets.
+The first-party left/right stick glyphs are also used by the stream wheels and on-screen keyboard.
+The shell and stream controls share the same asset-path resolver and SVG rasterizer. Bundled paths
+use Xbox backslashes throughout because the Xbox SDL file loader rejects forward slashes.
+
+Keyboard helper keycaps are drawn with SDL primitives and the bundled UI font rather than SVG text.
+Their measured widths adapt to labels such as Enter and Shift+PgUp, and crowded modal helpers wrap
+onto additional rows. The active input device chooses between these keycaps and the controller glyphs.
+
+Stream controls reuse the original colored controller button assets and SVG rasterizer. The stick,
+Guide and Share symbols are local vector assets; Lucide supplies the other stream action symbols.

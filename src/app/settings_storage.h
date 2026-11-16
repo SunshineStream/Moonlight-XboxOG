@@ -27,6 +27,8 @@ namespace app {
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
+    std::string screenshotDirectory;  ///< Screenshot folder; empty selects the title-scoped screenshots directory.
+    bool keyboardDockTop = false;  ///< Dock the stream keyboard to the top instead of the bottom.
   };
 
   /**

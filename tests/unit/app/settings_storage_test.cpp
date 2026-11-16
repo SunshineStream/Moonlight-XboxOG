@@ -2,18 +2,16 @@
  * @file tests/unit/app/settings_storage_test.cpp
  * @brief Verifies application settings persistence.
  */
-// test header include
-#include "src/app/settings_storage.h"
+// test includes
+#include <lizardbyte/common/testing.h>
 
 // standard includes
 #include <cstdio>
 #include <string>
 #include <string_view>
 
-// lib includes
-#include <lizardbyte/common/testing.h>
-
-// test includes
+// local includes
+#include "src/app/settings_storage.h"
 #include "tests/support/filesystem_test_utils.h"
 
 namespace {
@@ -247,3 +245,31 @@ namespace {
   }
 
 }  // namespace
+
+/**
+ * @brief Screenshot paths with backslashes, quotes and spaces survive TOML serialization with keyboard docking.
+ */
+TEST_F(SettingsStorageTest, PreservesScreenshotDirectoryAndKeyboardDocking) {
+  app::AppSettings settings;
+  settings.screenshotDirectory = "F:\\Screenshots\\Moonlight \"test\"";
+  settings.keyboardDockTop = true;
+  ASSERT_TRUE(app::save_app_settings(settings, settingsPath).success);
+  const auto loaded = app::load_app_settings(settingsPath);
+  EXPECT_TRUE(loaded.warnings.empty());
+  EXPECT_FALSE(loaded.cleanupRequired);
+  EXPECT_EQ(loaded.settings.screenshotDirectory, settings.screenshotDirectory);
+  EXPECT_TRUE(loaded.settings.keyboardDockTop);
+}
+
+/**
+ * @brief Missing settings preserve sensible defaults; malformed paths and docking types produce warnings.
+ */
+TEST_F(SettingsStorageTest, DefaultsInvalidScreenshotAndDockingSettings) {
+  write_text_file(settingsPath, "[streaming]\nscreenshot_directory = 42\nkeyboard_dock_top = 'yes'\n");
+  const auto loaded = app::load_app_settings(settingsPath);
+  EXPECT_TRUE(loaded.settings.screenshotDirectory.empty());
+  EXPECT_FALSE(loaded.settings.keyboardDockTop);
+  EXPECT_EQ(loaded.warnings.size(), 2);
+  write_text_file(settingsPath, "[streaming]\nscreenshot_directory = \"bad\\npath\"\n");
+  EXPECT_TRUE(app::load_app_settings(settingsPath).settings.screenshotDirectory.empty());
+}

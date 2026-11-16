@@ -97,9 +97,47 @@ namespace streaming {
      * @brief Replace the shared GPU/software statistics bitmap on the render thread.
      * @param width Bitmap width.
      * @param height Bitmap height.
-     * @param grayscale Packed grayscale pixels with an opaque background.
+     * @param grayscale Packed, unpremultiplied grayscale pixels.
+     * @param placement Panel anchor shared by GPU and software paths.
+     * @param opacity Optional per-pixel coverage; empty for opaque statistics.
      */
-    void set_statistics_bitmap(int width, int height, std::vector<std::uint8_t> grayscale);
+    void set_statistics_bitmap(int width, int height, std::vector<std::uint8_t> grayscale, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left, std::vector<std::uint8_t> opacity = {});
+    /**
+     * @brief Replace the same shared overlay with colored UI pixels on the render thread.
+     * @param width Bitmap width.
+     * @param height Bitmap height.
+     * @param pixels Straight ARGB bytes preserving the bundled assets' colors and opacity.
+     * @param placement Panel anchor shared by GPU and software paths.
+     */
+    void set_color_overlay(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left);
+
+    /**
+     * @brief Check whether an overlay change requires presenting an otherwise idle frame.
+     * @return True when the shared bitmap changed since the last presentation.
+     */
+    bool has_pending_overlay() const;
+
+    /**
+     * @brief Draw local controls before a stream has produced its first video frame.
+     * @param renderer SDL renderer.
+     * @param width Output width.
+     * @param height Output height.
+     */
+    void render_local_overlay(SDL_Renderer *renderer, int width, int height);
+
+    /**
+     * @brief Save the current clean decoded frame as a BMP, independently of presentation path.
+     * @param path Destination file under writable Moonlight storage.
+     * @return True when conversion and file writing succeed.
+     */
+    bool save_screenshot(const std::string &path);
+
+    /**
+     * @brief Resolve the video rectangle available to shared GPU/software controls.
+     * @param width Output width, replaced with the fitted video width.
+     * @param height Output height, replaced with the fitted video height.
+     */
+    void local_overlay_size(int &width, int &height) const;
 
     /**
      * @brief Render the latest decoded video frame to the supplied renderer.
@@ -236,6 +274,10 @@ namespace streaming {
      * @param destination Output video rectangle.
      */
     void render_sdl_statistics(SDL_Renderer *renderer, const SDL_Rect &destination);
+    /**
+     * @brief Mark either bitmap format changed and discard the previous SDL texture.
+     */
+    void invalidate_overlay_texture();
     /**
      * @brief Record a retrieved frame before any client discard.
      *

@@ -32,4 +32,11 @@ namespace startup {
    */
   std::string default_storage_path(std::string_view entryName);
 
+  /**
+   * @brief Build a screenshot filename beneath the configured folder or the title's screenshots folder.
+   * @param directory User-configured directory; empty selects the default.
+   * @param filename Screenshot basename.
+   * @return Joined path, preserving the directory's path separator convention.
+   */
+  std::string screenshot_storage_path(std::string_view directory, std::string_view filename);
 }  // namespace startup

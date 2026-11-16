@@ -45,4 +45,11 @@ namespace startup {
     return std::string(entryName);
   }
 
+  std::string screenshot_storage_path(std::string_view directory, std::string_view filename) {
+    std::string path = directory.empty() ? default_storage_path("screenshots") : std::string(directory);
+    if (path.back() != '/' && path.back() != '\\') {
+      path += path.find('\\') == std::string::npos ? '/' : '\\';
+    }
+    return path + std::string(filename);
+  }
 }  // namespace startup

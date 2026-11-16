@@ -1,10 +1,11 @@
 /**
  * @file src/streaming/video_overlay.cpp
- * @brief Converts a cached statistics bitmap for GPU scanout and software framebuffers.
+ * @brief Converts cached UI panels for GPU scanout and software framebuffers.
  */
 #include "src/streaming/video_overlay.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -19,24 +20,223 @@ namespace {
    * @param bytes Bytes per pixel.
    * @return True when every row fits its storage.
    */
-  bool valid_storage(std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, int bytes) {
+  bool valid_storage(const std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, int bytes) {
     return pixels != nullptr && width > 0 && height > 0 && bytes > 0 && pitch > 0 && static_cast<std::int64_t>(pitch) >= static_cast<std::int64_t>(width) * bytes &&
            capacity >= static_cast<std::uint64_t>(height - 1) * pitch + static_cast<std::uint64_t>(width) * bytes;
+  }
+
+  /**
+   * @brief Blend one component with exact transparent and opaque endpoints.
+   * @param background Existing component.
+   * @param foreground UI component.
+   * @param opacity UI coverage in the range 0 through 255.
+   * @return Rounded composite component.
+   */
+  std::uint8_t blend_byte(unsigned background, unsigned foreground, unsigned opacity) {
+    return static_cast<std::uint8_t>((foreground * opacity + background * (255 - opacity) + 127) / 255);
+  }
+
+  /**
+   * @brief Blend a grayscale pixel into a packed Xbox RGB framebuffer.
+   * @param pixel Writable destination pixel.
+   * @param bpp Validated RGB depth: 15, 16 or 32.
+   * @param foreground Straight foreground ARGB color.
+   * @param opacity Nonzero UI coverage.
+   */
+  void blend_rgb_pixel(std::uint8_t *pixel, int bpp, std::uint32_t foreground, unsigned opacity) {
+    std::uint32_t packed = 0;
+    const int bytes = bpp == 32 ? 4 : 2;
+    std::memcpy(&packed, pixel, bytes);
+    unsigned red = 0;
+    unsigned green = 0;
+    unsigned blue = 0;
+    if (bpp == 32) {
+      red = (packed >> 16) & 255;
+      green = (packed >> 8) & 255;
+      blue = packed & 255;
+    } else {
+      red = (packed >> (bpp == 16 ? 11 : 10)) & 31;
+      green = (packed >> 5) & (bpp == 16 ? 63 : 31);
+      blue = packed & 31;
+      red = (red << 3) | (red >> 2);
+      green = bpp == 16 ? (green << 2) | (green >> 4) : (green << 3) | (green >> 2);
+      blue = (blue << 3) | (blue >> 2);
+    }
+    red = blend_byte(red, (foreground >> 16) & 255, opacity);
+    green = blend_byte(green, (foreground >> 8) & 255, opacity);
+    blue = blend_byte(blue, foreground & 255, opacity);
+    if (bpp == 32) {
+      packed = 0xff000000U | (red << 16) | (green << 8) | blue;
+    } else if (bpp == 16) {
+      packed = ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3);
+    } else {
+      packed = 0x8000U | ((red >> 3) << 10) | ((green >> 3) << 5) | (blue >> 3);
+    }
+    std::memcpy(pixel, &packed, bytes);
+  }
+
+  /**
+   * @brief Encode an original UI color in the host video's limited-range YUV matrix.
+   * @param color Straight ARGB source pixel.
+   * @param matrix Validated BT.601 or BT.709 matrix.
+   * @return Luma, U and V components.
+   */
+  std::array<std::uint8_t, 3> rgb_to_yuv(std::uint32_t color, streaming::VideoColorMatrix matrix) {
+    const int red = (color >> 16) & 255;
+    const int green = (color >> 8) & 255;
+    const int blue = color & 255;
+    if (red == green && green == blue) {
+      return {static_cast<std::uint8_t>(16 + (red * 219 + 127) / 255), 128, 128};
+    }
+    // 16-bit fixed-point RGB-to-limited-YUV coefficients, using the same
+    // BT.601/709 primaries and 219/224 ranges as FFmpeg's colorspace conversion.
+    constexpr std::array<int, 9> bt601 {16829, 33039, 6416, -9714, -19071, 28784, 28784, -24103, -4681};
+    constexpr std::array<int, 9> bt709 {11966, 40254, 4064, -6596, -22189, 28784, 28784, -26145, -2639};
+    const auto &coefficients = matrix == streaming::VideoColorMatrix::bt709 ? bt709 : bt601;
+    std::array<std::uint8_t, 3> result {};
+    for (int component = 0; component < 3; ++component) {
+      const int offset = component == 0 ? 16 : 128;
+      const int value = offset * 65536 + coefficients[component * 3] * red + coefficients[component * 3 + 1] * green + coefficients[component * 3 + 2] * blue;
+      result[component] = std::clamp((value + 32768) / 65536, 0, 255);
+    }
+    return result;
   }
 }  // namespace
 
 namespace streaming {
-  void VideoOverlay::set_bitmap(int width, int height, std::vector<std::uint8_t> pixels) {
-    if (width <= 0 || height <= 0 || width > 2048 || height > 2048 || pixels.size() != static_cast<std::size_t>(width) * height) {
+  std::vector<std::uint8_t> extract_overlay_bitmap(const std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, bool opaqueBackground) {
+    if (!valid_storage(pixels, capacity, pitch, width, height, 4) || width > 2048 || height > 2048) {
+      return {};
+    }
+    std::vector<std::uint8_t> bitmap(static_cast<std::size_t>(width) * height * 4);
+    for (int row = 0; row < height; ++row) {
+      for (int column = 0; column < width; ++column) {
+        const auto *pixel = pixels + static_cast<std::size_t>(row) * pitch + column * 4;
+        const unsigned opacity = pixel[3];
+        const auto index = (static_cast<std::size_t>(row) * width + column) * 4;
+        bitmap[index + 3] = opacity;
+        if (opaqueBackground || opacity == 255) {
+          std::memcpy(bitmap.data() + index, pixel, 4);
+          // Legacy SDL blitters can round an opaque destination alpha to 254.
+          // The OSK is already composited onto its solid panel; keep it opaque.
+          bitmap[index + 3] = 255;
+          continue;
+        }
+        if (opacity == 0) {
+          continue;
+        }
+        for (int component = 0; component < 3; ++component) {
+          // SDL composites onto transparent black using premultiplied color.
+          // Undo that once, preserving each original SVG color for every path.
+          bitmap[index + component] = std::min(255U, (pixel[component] * 255 + opacity / 2) / opacity);
+        }
+      }
+    }
+    return bitmap;
+  }
+
+  bool rasterize_menu_wheel(std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, int centerX, int centerY, int radius, int selected) {
+    if (!valid_storage(pixels, capacity, pitch, width, height, 4) || width > 2048 || height > 2048 || centerX < 0 || centerX >= width || centerY < 0 || centerY >= height || radius < 1 || radius > 2048) {
+      return false;
+    }
+    for (int row = std::max(0, centerY - radius); row <= std::min(height - 1, centerY + radius); ++row) {
+      const int y = row - centerY;
+      for (int column = std::max(0, centerX - radius); column <= std::min(width - 1, centerX + radius); ++column) {
+        const int x = column - centerX;
+        const int distance = x * x + y * y;
+        if (distance > radius * radius || distance < radius * radius / 9) {
+          continue;
+        }
+        const int sector = std::abs(y) >= std::abs(x) ? (y < 0 ? 0 : 2) : (x > 0 ? 1 : 3);
+        const std::uint32_t gray = std::abs(std::abs(x) - std::abs(y)) < 2 ? 110 : sector == selected ? 85 :
+                                                                                                        36;
+        const std::uint32_t color = 0xff000000U | gray * 0x010101U;
+        std::memcpy(pixels + static_cast<std::size_t>(row) * pitch + column * 4, &color, 4);
+      }
+    }
+    return true;
+  }
+
+  OverlayLabelLayout layout_overlay_label(int width, int height, const VideoRectangle &bounds, bool shrinkToFit) {
+    if (width <= 0 || height <= 0 || bounds.width <= 0 || bounds.height <= 0) {
+      return {};
+    }
+    OverlayLabelLayout layout {{0, 0, width, height}, bounds};
+    if (shrinkToFit) {
+      const double scale = std::min({1.0, static_cast<double>(std::max(1, bounds.width - 2)) / width, static_cast<double>(std::max(1, bounds.height - 2)) / height});
+      layout.destination.width = std::max(1, static_cast<int>(width * scale));
+      layout.destination.height = std::max(1, static_cast<int>(height * scale));
+    } else {
+      layout.source = {std::max(0, (width - bounds.width) / 2), std::max(0, (height - bounds.height) / 2), std::min(width, bounds.width), std::min(height, bounds.height)};
+      layout.destination.width = layout.source.width;
+      layout.destination.height = layout.source.height;
+    }
+    layout.destination.x += (bounds.width - layout.destination.width) / 2;
+    layout.destination.y += (bounds.height - layout.destination.height) / 2;
+    return layout;
+  }
+
+  void VideoOverlay::set_bitmap(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement, std::vector<std::uint8_t> opacity) {
+    if (width <= 0 || height <= 0 || width > 2048 || height > 2048 || pixels.size() != static_cast<std::size_t>(width) * height || (!opacity.empty() && opacity.size() != pixels.size())) {
       width = height = 0;
       pixels.clear();
+      opacity.clear();
     }
     width_ = width;
     height_ = height;
+    placement_ = placement;
     grayscale_ = std::move(pixels);
+    opacity_ = std::move(opacity);
+    std::vector<std::uint8_t>().swap(argb_);
+    opaque_ = opacity_.empty() || std::all_of(opacity_.begin(), opacity_.end(), [](std::uint8_t opacity) {
+                return opacity == 255;
+              });
+    invalidate_caches();
+  }
+
+  void VideoOverlay::set_argb_bitmap(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement) {
+    if (width <= 0 || height <= 0 || width > 2048 || height > 2048 || pixels.size() != static_cast<std::size_t>(width) * height * 4) {
+      set_bitmap(0, 0, {});
+      return;
+    }
+    width_ = width;
+    height_ = height;
+    placement_ = placement;
+    argb_ = std::move(pixels);
+    std::vector<std::uint8_t>().swap(grayscale_);
+    std::vector<std::uint8_t>().swap(opacity_);
+    opaque_ = true;
+    for (std::size_t index = 3; index < argb_.size(); index += 4) {
+      if (argb_[index] != 255) {
+        opaque_ = false;
+        break;
+      }
+    }
+    invalidate_caches();
+  }
+
+  std::uint32_t VideoOverlay::color_at(std::size_t index) const {
+    if (!argb_.empty()) {
+      std::uint32_t color = 0;
+      std::memcpy(&color, argb_.data() + index * 4, 4);
+      return color;
+    }
+    const std::uint32_t opacity = opacity_.empty() ? 255 : opacity_[index];
+    return (opacity << 24) | grayscale_[index] * 0x010101U;
+  }
+
+  void VideoOverlay::invalidate_caches() {
     rgb_.clear();
     rgbBpp_ = 0;
     yuy2_.clear();
+    yuy2Opacity_.clear();
+    if (width_ == 0) {
+      // Local menus must return their converted buffers to the 64 MiB console
+      // budget when dismissed, rather than retaining full-screen capacities.
+      std::vector<std::uint8_t>().swap(rgb_);
+      std::vector<std::uint8_t>().swap(yuy2_);
+      std::vector<std::uint8_t>().swap(yuy2Opacity_);
+    }
     frameWidth_ = 0;
   }
 
@@ -48,32 +248,51 @@ namespace streaming {
     return height_;
   }
 
+  VideoRectangle VideoOverlay::rectangle(const VideoRectangle &destination) const {
+    const bool docked = placement_ == VideoOverlayPlacement::dock_bottom || placement_ == VideoOverlayPlacement::dock_top;
+    const bool bottom = placement_ == VideoOverlayPlacement::bottom_center || placement_ == VideoOverlayPlacement::dock_bottom;
+    const bool centered = bottom || docked;
+    const int margin = docked || placement_ == VideoOverlayPlacement::full_screen ? 0 : MARGIN;
+    const int width = std::min(width_, std::max(0, destination.width - margin * (centered ? 2 : 1)));
+    const int height = std::min(height_, std::max(0, destination.height - margin * (centered ? 2 : 1)));
+    if (width == 0 || height == 0) {
+      return {};
+    }
+    return {destination.x + (centered ? (destination.width - width) / 2 : margin), destination.y + (bottom ? destination.height - height - margin : margin), width, height};
+  }
+
   void VideoOverlay::prepare_rgb(int bpp) {
-    if (rgbBpp_ == bpp) {
+    if (rgbBpp_ == bpp || (bpp == 32 && !argb_.empty())) {
       return;
     }
     const int bytes = bpp == 32 ? 4 : 2;
-    rgb_.resize(grayscale_.size() * bytes);
-    for (std::size_t i = 0; i < grayscale_.size(); ++i) {
-      const std::uint32_t gray = grayscale_[i];
+    const auto count = static_cast<std::size_t>(width_) * height_;
+    rgb_.resize(count * bytes);
+    for (std::size_t i = 0; i < count; ++i) {
+      const auto color = color_at(i);
       if (bpp == 32) {
-        const std::uint32_t color = 0xff000000U | gray * 0x010101U;
         std::memcpy(rgb_.data() + i * 4, &color, 4);
       } else {
-        const auto color = static_cast<std::uint16_t>(bpp == 16 ? ((gray >> 3U) << 11U) | ((gray >> 2U) << 5U) | (gray >> 3U) : 0x8000U | ((gray >> 3U) << 10U) | ((gray >> 3U) << 5U) | (gray >> 3U));
-        std::memcpy(rgb_.data() + i * 2, &color, 2);
+        const auto red = (color >> 16) & 255;
+        const auto green = (color >> 8) & 255;
+        const auto blue = color & 255;
+        const auto packed = static_cast<std::uint16_t>(bpp == 16 ? ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3) : 0x8000U | ((red >> 3) << 10) | ((green >> 3) << 5) | (blue >> 3));
+        std::memcpy(rgb_.data() + i * 2, &packed, 2);
       }
     }
     rgbBpp_ = bpp;
   }
 
   const std::vector<std::uint8_t> &VideoOverlay::argb_pixels() {
+    if (!argb_.empty()) {
+      return argb_;
+    }
     prepare_rgb(32);
     return rgb_;
   }
 
   bool VideoOverlay::draw_rgb(std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, int bpp, const VideoRectangle &destination) {
-    if (grayscale_.empty()) {
+    if (width_ == 0) {
       return true;
     }
     const int bytes = bpp == 32 ? 4 : (bpp == 15 || bpp == 16 ? 2 : 0);
@@ -81,55 +300,120 @@ namespace streaming {
       return false;
     }
     prepare_rgb(bpp);
-    const int copyWidth = std::min(width_, destination.width - MARGIN);
-    const int copyHeight = std::min(height_, destination.height - MARGIN);
-    const std::size_t columnBytes = (static_cast<std::size_t>(destination.x) + MARGIN) * bytes;
-    const std::size_t copyBytes = static_cast<std::size_t>(copyWidth) * bytes;
-    for (int row = 0; row < copyHeight; ++row) {
-      const std::size_t framebufferRow = static_cast<std::size_t>(destination.y) + MARGIN + row;
-      std::memcpy(pixels + framebufferRow * pitch + columnBytes, rgb_.data() + static_cast<std::size_t>(row) * width_ * bytes, copyBytes);
+    const auto &converted = bpp == 32 && !argb_.empty() ? argb_ : rgb_;
+    const auto bounds = rectangle(destination);
+    const std::size_t columnBytes = static_cast<std::size_t>(bounds.x) * bytes;
+    const std::size_t copyBytes = static_cast<std::size_t>(bounds.width) * bytes;
+    for (int row = 0; row < bounds.height; ++row) {
+      const std::size_t framebufferRow = static_cast<std::size_t>(bounds.y) + row;
+      auto *destinationRow = pixels + framebufferRow * pitch + columnBytes;
+      const auto bitmapRow = static_cast<std::size_t>(row) * width_;
+      if (opaque_) {
+        std::memcpy(destinationRow, converted.data() + bitmapRow * bytes, copyBytes);
+      } else {
+        for (int column = 0; column < bounds.width; ++column) {
+          const auto index = bitmapRow + column;
+          const auto color = color_at(index);
+          const auto opacity = color >> 24;
+          if (opacity == 255) {
+            std::memcpy(destinationRow + column * bytes, converted.data() + index * bytes, bytes);
+          } else if (opacity != 0) {
+            blend_rgb_pixel(destinationRow + column * bytes, bpp, color, opacity);
+          }
+        }
+      }
     }
     return true;
   }
 
-  bool VideoOverlay::draw_yuy2(std::uint8_t *pixels, std::size_t capacity, int pitch, int frameWidth, int frameHeight, const VideoRectangle &destination) {
-    if (grayscale_.empty()) {
+  bool VideoOverlay::draw_yuy2(std::uint8_t *pixels, std::size_t capacity, int pitch, int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix) {
+    if (width_ == 0) {
       return true;
     }
-    if (!valid_storage(pixels, capacity, pitch, frameWidth, frameHeight, 2) || (frameWidth & 1) != 0 || frameWidth > 2046 || frameHeight > 2047 || destination.width <= MARGIN || destination.height <= MARGIN) {
+    if (!valid_storage(pixels, capacity, pitch, frameWidth, frameHeight, 2) || (frameWidth & 1) != 0 || frameWidth > 2046 || frameHeight > 2047 || destination.width <= MARGIN || destination.height <= MARGIN || matrix == VideoColorMatrix::unsupported) {
       return false;
     }
-    if (frameWidth_ != frameWidth || frameHeight_ != frameHeight || outputWidth_ != destination.width || outputHeight_ != destination.height) {
+    if (frameWidth_ != frameWidth || frameHeight_ != frameHeight || outputWidth_ != destination.width || outputHeight_ != destination.height || matrix_ != matrix) {
+      matrix_ = matrix;
       frameWidth_ = frameWidth;
       frameHeight_ = frameHeight;
       outputWidth_ = destination.width;
       outputHeight_ = destination.height;
-      source_.x = ((MARGIN * frameWidth / destination.width) + 1) & ~1;
-      source_.y = MARGIN * frameHeight / destination.height;
-      const int visibleWidth = std::min(width_, destination.width - MARGIN);
-      const int visibleHeight = std::min(height_, destination.height - MARGIN);
+      const auto bounds = rectangle({0, 0, destination.width, destination.height});
+      if (bounds.width == 0 || bounds.height == 0) {
+        source_ = {};
+        return true;
+      }
+      source_.x = (static_cast<int>(static_cast<std::int64_t>(bounds.x) * frameWidth / destination.width) + 1) & ~1;
+      source_.y = static_cast<int>(static_cast<std::int64_t>(bounds.y) * frameHeight / destination.height);
+      const int visibleWidth = bounds.width;
+      const int visibleHeight = bounds.height;
       source_.width = std::min(frameWidth - source_.x, ((visibleWidth * frameWidth + destination.width - 1) / destination.width + 1) & ~1);
       source_.height = std::min(frameHeight - source_.y, (visibleHeight * frameHeight + destination.height - 1) / destination.height);
       if (source_.width <= 0 || source_.height <= 0) {
         return true;
       }
       yuy2_.resize(static_cast<std::size_t>(source_.width) * source_.height * 2);
+      if (!opaque_) {
+        yuy2Opacity_.resize(yuy2_.size() / 2);
+      }
       for (int row = 0; row < source_.height; ++row) {
         const int bitmapRow = std::min(visibleHeight - 1, row * visibleHeight / source_.height);
-        for (int column = 0; column < source_.width; ++column) {
-          const int bitmapColumn = std::min(visibleWidth - 1, column * visibleWidth / source_.width);
-          const auto gray = grayscale_[bitmapRow * width_ + bitmapColumn];
-          const std::size_t offset = (static_cast<std::size_t>(row) * source_.width + column) * 2;
-          yuy2_[offset] = static_cast<std::uint8_t>(16 + (gray * 219 + 127) / 255);
-          yuy2_[offset + 1] = 128;
+        for (int column = 0; column < source_.width; column += 2) {
+          const int firstColumn = std::min(visibleWidth - 1, column * visibleWidth / source_.width);
+          const int secondColumn = std::min(visibleWidth - 1, (column + 1) * visibleWidth / source_.width);
+          const auto firstColor = color_at(static_cast<std::size_t>(bitmapRow) * width_ + firstColumn);
+          const auto secondColor = color_at(static_cast<std::size_t>(bitmapRow) * width_ + secondColumn);
+          const auto first = rgb_to_yuv(firstColor, matrix);
+          const auto second = rgb_to_yuv(secondColor, matrix);
+          const unsigned firstAlpha = firstColor >> 24;
+          const unsigned secondAlpha = secondColor >> 24;
+          const unsigned coverage = firstAlpha + secondAlpha;
+          const auto offset = (static_cast<std::size_t>(row) * source_.width + column) * 2;
+          yuy2_[offset] = first[0];
+          yuy2_[offset + 2] = second[0];
+          // Weight shared chroma by coverage so a transparent colored pixel
+          // cannot tint its opaque neighbor or desaturate the host underneath.
+          yuy2_[offset + 1] = coverage == 0 ? 128 : (first[1] * firstAlpha + second[1] * secondAlpha + coverage / 2) / coverage;
+          yuy2_[offset + 3] = coverage == 0 ? 128 : (first[2] * firstAlpha + second[2] * secondAlpha + coverage / 2) / coverage;
+          if (!opaque_) {
+            yuy2Opacity_[offset / 2] = firstAlpha;
+            yuy2Opacity_[offset / 2 + 1] = secondAlpha;
+          }
         }
       }
     }
+
     if (source_.width <= 0 || source_.height <= 0) {
       return true;
     }
     for (int row = 0; row < source_.height; ++row) {
-      std::memcpy(pixels + static_cast<std::size_t>(source_.y + row) * pitch + source_.x * 2, yuy2_.data() + static_cast<std::size_t>(row) * source_.width * 2, source_.width * 2);
+      auto *destinationRow = pixels + static_cast<std::size_t>(source_.y + row) * pitch + source_.x * 2;
+      const auto rowOffset = static_cast<std::size_t>(row) * source_.width;
+      const auto *foreground = yuy2_.data() + rowOffset * 2;
+      if (opaque_) {
+        std::memcpy(destinationRow, foreground, source_.width * 2);
+      } else {
+        for (int column = 0; column < source_.width; column += 2) {
+          const unsigned left = yuy2Opacity_[rowOffset + column];
+          const unsigned right = yuy2Opacity_[rowOffset + column + 1];
+          if (left == 0 && right == 0) {
+            continue;
+          }
+          auto *pair = destinationRow + column * 2;
+          if (left == 255 && right == 255) {
+            std::memcpy(pair, foreground + column * 2, 4);
+            continue;
+          }
+          pair[0] = blend_byte(pair[0], foreground[column * 2], left);
+          pair[2] = blend_byte(pair[2], foreground[column * 2 + 2], right);
+          // A YUY2 pair shares chroma: average its two luma coverages rather
+          // than destroying the host color beside a transparent UI pixel.
+          const unsigned chroma = (left + right + 1) / 2;
+          pair[1] = blend_byte(pair[1], foreground[column * 2 + 1], chroma);
+          pair[3] = blend_byte(pair[3], foreground[column * 2 + 3], chroma);
+        }
+      }
     }
     return true;
   }

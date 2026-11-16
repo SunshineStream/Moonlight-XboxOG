@@ -18,6 +18,7 @@
 #include "src/app/host_records.h"
 #include "src/app/pairing_flow.h"
 #include "src/input/navigation_input.h"
+#include "src/input/ui_input.h"
 #include "src/logging/logger.h"
 #include "src/startup/saved_files.h"
 #include "src/ui/menu_model.h"
@@ -192,6 +193,7 @@ namespace app {
    */
   struct ShellState {
     ScreenId activeScreen = ScreenId::hosts;  ///< Screen currently shown by the shell.
+    input::UiInputDevice inputDevice = input::UiInputDevice::gamepad;  ///< Last intentional UI input, used for contextual helper glyphs.
     bool overlayVisible = false;  ///< True when the diagnostics overlay is visible.
     bool shouldExit = false;  ///< True when the application should terminate.
     std::size_t overlayScrollOffset = 0U;  ///< Scroll offset used by long overlay content.
@@ -363,6 +365,8 @@ namespace app {
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
+    std::string screenshotDirectory;  ///< Screenshot folder; empty selects the title-scoped screenshots directory.
+    bool keyboardDockTop = false;  ///< Dock the stream keyboard to the top instead of the bottom.
     bool dirty = false;  ///< True when persisted TOML-backed settings changed and should be saved.
     std::vector<startup::SavedFileEntry> savedFiles;  ///< Saved-file catalog shown on the reset settings page.
     bool savedFilesDirty = true;  ///< True when the saved-file catalog should be refreshed.

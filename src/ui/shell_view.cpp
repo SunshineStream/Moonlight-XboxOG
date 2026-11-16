@@ -705,6 +705,90 @@ namespace {
     return {};
   }
 
+  /**
+   * @brief Translate a bundled controller glyph to its working keyboard equivalent.
+   * @param icon Controller icon path.
+   * @return Keyboard keycap label, or an empty string for a non-controller icon.
+   */
+  std::string keyboard_hint_for_icon(const std::string &icon) {
+    if (icon == "icons\\button-a.svg" || icon == "icons\\button-start.svg") {
+      return "Enter";
+    }
+    if (icon == "icons\\button-b.svg" || icon == "icons\\button-select.svg") {
+      return "Esc";
+    }
+    if (icon == "icons\\button-x.svg") {
+      return "Bksp";
+    }
+    if (icon == "icons\\button-y.svg") {
+      return "M";
+    }
+    if (icon == "icons\\button-lb.svg") {
+      return "PgUp";
+    }
+    if (icon == "icons\\button-rb.svg") {
+      return "PgDn";
+    }
+    if (icon == "icons\\button-lt.svg") {
+      return "Shift+PgUp";
+    }
+    if (icon == "icons\\button-rt.svg") {
+      return "Shift+PgDn";
+    }
+    return {};
+  }
+
+  /**
+   * @brief Replace controller footer glyphs with scalable keyboard keycaps.
+   * @param actions Page, modal or notification actions.
+   */
+  void use_keyboard_hints(std::vector<ui::ShellFooterAction> &actions) {
+    for (auto &action : actions) {
+      action.keyLabel = keyboard_hint_for_icon(action.iconAssetPath);
+      action.secondaryKeyLabel = keyboard_hint_for_icon(action.secondaryIconAssetPath);
+      if (action.id == "exit") {
+        action.keyLabel = "Alt+F4";
+        action.secondaryKeyLabel.clear();
+      }
+      if (action.id == "enter") {
+        action.keyLabel = "Space";
+      }
+      if (action.keyLabel == action.secondaryKeyLabel) {
+        action.secondaryKeyLabel.clear();
+      }
+      if (!action.keyLabel.empty()) {
+        action.iconAssetPath.clear();
+      }
+      if (!action.secondaryKeyLabel.empty() || action.secondaryIconAssetPath == "icons\\button-start.svg") {
+        action.secondaryIconAssetPath.clear();
+      }
+    }
+  }
+
+  /**
+   * @brief Supply default modal actions and choose glyphs for the most recently used input device.
+   * @param state Source input device.
+   * @param viewModel Receives contextual helpers throughout the shell.
+   */
+  void fill_input_hints(const app::ClientState &state, ui::ShellViewModel &viewModel) {
+    if (viewModel.modal.visible && !viewModel.modal.busy && viewModel.modal.footerActions.empty()) {
+      if (viewModel.modal.actions.empty()) {
+        viewModel.modal.footerActions = {{"close", "Close", "icons\\button-b.svg", {}, false}};
+      } else {
+        viewModel.modal.footerActions = {{"select", "Select", "icons\\button-a.svg", {}, true}, {"back", "Back", "icons\\button-b.svg", {}, false}};
+      }
+    }
+    if (state.shell.inputDevice != input::UiInputDevice::keyboard) {
+      return;
+    }
+    use_keyboard_hints(viewModel.frame.footerActions);
+    use_keyboard_hints(viewModel.keypad.footerActions);
+    use_keyboard_hints(viewModel.modal.footerActions);
+    for (auto &notification : viewModel.notification.items) {
+      use_keyboard_hints(notification.actions);
+    }
+  }
+
 }  // namespace
 
 namespace ui {
@@ -835,6 +919,7 @@ namespace ui {
     }
 
     fill_modal_view(state, &viewModel);
+    fill_input_hints(state, viewModel);
 
     fill_view_model_overlay(state, logEntries, statsLines, &viewModel);
 
