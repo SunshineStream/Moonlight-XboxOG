@@ -15,6 +15,8 @@
 // local includes
 #include "src/app/stream_bitrate.h"
 #include "src/network/host_pairing.h"
+#include "src/platform/filesystem_utils.h"
+#include "src/startup/storage_paths.h"
 
 namespace {
 
@@ -536,6 +538,11 @@ namespace {
     return {};
   }
 
+  /**
+   * @brief Build the active settings options, including the screenshot destination picker.
+   * @param state Current screen and settings values.
+   * @return Selectable settings rows for the current category.
+   */
   std::vector<ui::MenuItem> build_detail_menu_for_state(const app::ClientState &state) {
     if (state.shell.activeScreen != app::ScreenId::settings) {
       return {};
@@ -586,6 +593,7 @@ namespace {
             "Show performance statistics during playback and after the stream ends.",
             true,
           },
+          {"screenshot-directory", "Screenshot Folder: " + (state.settings.screenshotDirectory.empty() ? std::string("Default") : state.settings.screenshotDirectory), "Choose or create a folder for stream screenshots. Default: " + startup::default_storage_path("screenshots"), true},
         };
       case app::SettingsCategory::input:
         return {
@@ -637,7 +645,14 @@ namespace {
     }
   }
 
+  /**
+   * @brief Close the active dialog and release staged picker data before streaming can begin.
+   * @param state Client state containing the dialog and any temporary folder listing.
+   */
   void close_modal(app::ClientState &state) {
+    if (state.modal.id == app::ModalId::directory_picker) {
+      state.directoryPicker = {};
+    }
     state.modal = {};
     reset_confirmation(state);
   }
@@ -713,6 +728,11 @@ namespace {
     state.settings.logViewerScrollOffset = state.settings.logViewerScrollOffset > step ? state.settings.logViewerScrollOffset - step : 0U;
   }
 
+  /**
+   * @brief Count available dialog rows, including directory entries and picker actions.
+   * @param state Current modal and staged folder list.
+   * @return Number of focusable action positions.
+   */
   std::size_t modal_action_count(const app::ClientState &state) {
     switch (state.modal.id) {
       case app::ModalId::host_actions:
@@ -721,6 +741,8 @@ namespace {
         return 3U;
       case app::ModalId::confirmation:
         return 2U;
+      case app::ModalId::directory_picker:
+        return state.directoryPicker.folders.size() + 4U;
       case app::ModalId::none:
       case app::ModalId::support:
       case app::ModalId::host_details:
@@ -1486,6 +1508,7 @@ namespace {
         close_modal_and_mark_closed(state, update);
         return true;
       case app::ModalId::log_viewer:
+      case app::ModalId::directory_picker:
         return true;
       case app::ModalId::confirmation:
         return handle_confirmation_modal_activation(state, update);
@@ -1500,12 +1523,129 @@ namespace {
     return false;
   }
 
+  /**
+   * @brief Keep folder browsing and local text editing separate from saved settings until acceptance.
+   * @param state Active client and picker state.
+   * @param command Controller or keyboard action.
+   * @param update Receives requested filesystem operations and persistence effects.
+   * @return True when the directory picker owns this command.
+   */
+  bool handle_directory_picker_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
+    if (state.modal.id != app::ModalId::directory_picker) {
+      return false;
+    }
+    auto &picker = state.directoryPicker;
+    if (picker.creating) {
+      auto &keyboard = picker.keyboard;
+      if (command == input::UiCommand::back) {
+        picker.creating = false;
+        picker.error.clear();
+      } else if (command == input::UiCommand::move_up || command == input::UiCommand::move_down || command == input::UiCommand::move_left || command == input::UiCommand::move_right) {
+        keyboard.navigate(command == input::UiCommand::move_left ? -1 : command == input::UiCommand::move_right ? 1 :
+                                                                                                                  0,
+                          command == input::UiCommand::move_up ? -1 : command == input::UiCommand::move_down ? 1 :
+                                                                                                               0);
+      } else if (command == input::UiCommand::previous_page || command == input::UiCommand::next_page) {
+        keyboard.keyboardLayout = keyboard.keyboardLayout == 0 ? 1 : 0;
+      } else if (command == input::UiCommand::open_context_menu) {
+        keyboard.toggle_shift();
+      } else if (command == input::UiCommand::delete_character) {
+        if (picker.caret > 0) {
+          picker.name.erase(--picker.caret, 1);
+        }
+      } else if (command == input::UiCommand::activate) {
+        const int index = keyboard.keyboard_cells()[keyboard.keyIndex].key;
+        if (index == input::StreamMenu::KEYBOARD_PAGE_KEY) {
+          keyboard.keyboardLayout = keyboard.keyboardLayout == 0 ? 1 : 0;
+        } else {
+          const int code = keyboard.keyboard_key();
+          if (code == 0x0D) {
+            return handle_directory_picker_command(state, input::UiCommand::confirm, update);
+          }
+          if (code == 0x08) {
+            return handle_directory_picker_command(state, input::UiCommand::delete_character, update);
+          }
+          if (code == 0x125 && picker.caret > 0) {
+            --picker.caret;
+          } else if (code == 0x127 && picker.caret < picker.name.size()) {
+            ++picker.caret;
+          } else if (code == 0x20) {
+            app::append_directory_name(state, " ");
+            keyboard.key_sent();
+          } else if (code > 0 && keyboard.key_label(keyboard.keyIndex).size() == 1) {
+            app::append_directory_name(state, keyboard.key_label(keyboard.keyIndex));
+            keyboard.key_sent();
+          }
+        }
+      } else if (command == input::UiCommand::confirm) {
+        if (platform::valid_directory_name(picker.name)) {
+          update->requests.directoryCreateRequested = true;
+        } else {
+          picker.error = "Use 1-42 characters, without reserved characters or a trailing space or period.";
+        }
+      }
+      return true;
+    }
+    if (command == input::UiCommand::back) {
+      close_modal_and_mark_closed(state, update);
+      return true;
+    }
+    if (command == input::UiCommand::move_up || command == input::UiCommand::move_down) {
+      move_modal_selection(state, command == input::UiCommand::move_up ? -1 : 1);
+      return true;
+    }
+    if (command == input::UiCommand::move_left || command == input::UiCommand::previous_page) {
+      state.modal.selectedActionIndex = 2;
+      command = input::UiCommand::activate;
+    }
+    if (command == input::UiCommand::open_context_menu) {
+      state.modal.selectedActionIndex = 0;
+      command = input::UiCommand::activate;
+    }
+    if (command != input::UiCommand::activate && command != input::UiCommand::confirm) {
+      return true;
+    }
+    const auto selected = state.modal.selectedActionIndex;
+    if (selected == 0 && picker.available && !picker.path.empty()) {
+      update->requests.directorySelectRequested = true;
+    } else if (selected == 1 && picker.available && !picker.path.empty()) {
+      picker.creating = true;
+      picker.name.clear();
+      picker.caret = 0;
+      picker.error.clear();
+      picker.keyboard.open(-1);
+      picker.keyboard.page = input::StreamMenuPage::keyboard;
+    } else if (selected == 2 && !picker.path.empty()) {
+      picker.path = platform::directory_parent(picker.path);
+      update->requests.directoryListRequested = true;
+      state.modal.selectedActionIndex = 0;
+    } else if (selected == 3) {
+      app::accept_screenshot_directory(state, *update, {});
+    } else if (selected >= 4 && selected - 4 < picker.folders.size()) {
+      picker.path = picker.folders[selected - 4];
+      update->requests.directoryListRequested = true;
+      state.modal.selectedActionIndex = 0;
+    }
+    return true;
+  }
+
+  /**
+   * @brief Route local dialog input before allowing the underlying screen to navigate.
+   * @param state Current dialog and shell state.
+   * @param command Abstract controller or keyboard input.
+   * @param update Receives modal lifecycle and requested operations.
+   * @return True when an active modal consumes the command.
+   */
   bool handle_modal_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
     if (!state.modal.active()) {
       return false;
     }
 
     if (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress) {
+      return true;
+    }
+
+    if (handle_directory_picker_command(state, command, update)) {
       return true;
     }
 
@@ -2158,7 +2298,7 @@ namespace app {
   }
 
   /**
-   * @brief Update settings inline without producing routine confirmation notifications.
+   * @brief Update settings inline or open the screenshot folder picker, emitting only required side effects.
    *
    * @param state Client state containing the settings menus.
    * @param detailUpdate Activated detail-menu update.
@@ -2236,6 +2376,14 @@ namespace app {
       update->persistence.settingsChanged = true;
       state.shell.statusMessage = std::string("Performance stats ") + (state.settings.showPerformanceStats ? "enabled" : "disabled");
       rebuild_menu(state, "toggle-show-performance-stats");
+      return;
+    }
+    if (detailUpdate.activatedItemId == "screenshot-directory") {
+      state.directoryPicker = {};
+      state.directoryPicker.path = state.settings.screenshotDirectory.empty() ? startup::default_storage_path("screenshots") : state.settings.screenshotDirectory;
+      open_modal(state, ModalId::directory_picker);
+      update->requests.directoryListRequested = true;
+      update->navigation.modalOpened = true;
       return;
     }
     if (detailUpdate.activatedItemId == "factory-reset") {
@@ -2601,6 +2749,33 @@ namespace app {
       set_screen(state, ScreenId::hosts);
       update->navigation.screenChanged = true;
     }
+  }
+
+  void append_directory_name(ClientState &state, std::string_view text) {
+    auto &picker = state.directoryPicker;
+    if (state.modal.id != ModalId::directory_picker || !picker.creating) {
+      return;
+    }
+    picker.caret = std::min(picker.caret, picker.name.size());
+    for (unsigned char character : text) {
+      if (picker.name.size() < 42 && character >= 32 && character < 127) {
+        picker.name.insert(picker.caret++, 1, static_cast<char>(character));
+      }
+    }
+    picker.error.clear();
+  }
+
+  void accept_screenshot_directory(ClientState &state, AppUpdate &update, const std::string &path) {
+    if (state.modal.id != ModalId::directory_picker) {
+      return;
+    }
+    if (state.settings.screenshotDirectory != path) {
+      state.settings.screenshotDirectory = path;
+      state.settings.dirty = true;
+      update.persistence.settingsChanged = true;
+    }
+    close_modal_and_mark_closed(state, &update);
+    rebuild_menu(state, "screenshot-directory");
   }
 
   AppUpdate handle_command(ClientState &state, input::UiCommand command) {

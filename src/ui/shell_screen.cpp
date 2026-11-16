@@ -28,6 +28,7 @@
 // local includes
 #include "src/app/settings_storage.h"
 #include "src/input/navigation_input.h"
+#include "src/input/stream_input.h"
 #include "src/logging/log_file.h"
 #include "src/logging/logger.h"
 #include "src/network/host_discovery.h"
@@ -2303,10 +2304,46 @@ namespace {
   }
 
   /**
+   * @brief Execute explicit folder-picker requests and accept only writable screenshot destinations.
+   * @param state Reducer state, including the staged picker directory and name.
+   * @param update Requests to execute and persistence flags to set on acceptance.
+   */
+  void process_directory_picker_requests(app::ClientState &state, app::AppUpdate &update) {
+    auto &picker = state.directoryPicker;
+    if (update.requests.directorySelectRequested) {
+      if (platform::directory_is_writable(picker.path, picker.error)) {
+        app::accept_screenshot_directory(state, update, picker.path);
+      }
+    }
+    if (update.requests.directoryCreateRequested && platform::create_child_directory(picker.path, picker.name, picker.error)) {
+      picker.path = platform::join_path(picker.path, picker.name);
+      picker.creating = false;
+      state.modal.selectedActionIndex = 0;
+      update.requests.directoryListRequested = true;
+    }
+    if (update.requests.directoryListRequested) {
+      auto listing = platform::list_directories(picker.path);
+      // A configured/default folder can have been removed, or may not have
+      // received its first screenshot yet. Start at its nearest existing parent.
+      while (update.navigation.modalOpened && !listing.error.empty() && !picker.path.empty()) {
+        picker.path = platform::directory_parent(picker.path);
+        listing = platform::list_directories(picker.path);
+      }
+      picker.folders = std::move(listing.paths);
+      picker.error = std::move(listing.error);
+      picker.available = picker.error.empty();
+      if (picker.path.empty()) {
+        state.modal.selectedActionIndex = picker.folders.empty() ? 3 : 4;
+      }
+    }
+  }
+
+  /**
    * @brief Snapshot persisted shell and stream preferences, including screenshot storage and OSK placement.
    * @param state Current client state.
    * @return Settings snapshot ready for TOML serialization.
    */
+
   app::AppSettings persistent_settings_from_state(const app::ClientState &state) {
     return {
       state.settings.loggingLevel,
@@ -3774,7 +3811,7 @@ namespace {
   }
 
   /**
-   * @brief Render a content-sized dialog with a status icon and contained actions or progress.
+   * @brief Render a content-sized dialog with persistent guidance, scrolling actions or progress.
    *
    * @param renderer Active renderer.
    * @param titleFont Dialog heading font.
@@ -3808,7 +3845,10 @@ namespace {
     }
     const int footerY = bounds.y + bounds.h - padding - footerHeight;
     int cursorY = bounds.y + padding + titleHeight + 10;
-    const int actionSpace = std::min(actionsHeight, std::max(0, footerY - cursorY - 12));
+    // Reserve the directory path / dialog guidance before sizing a scrolling
+    // action list, so a large folder cannot push its own breadcrumb offscreen.
+    const int availableHeight = std::max(0, footerY - cursorY - 12);
+    const int actionSpace = std::min(actionsHeight, std::max(0, availableHeight - std::min(textHeight, availableHeight / 3)));
     const int textBottom = footerY - actionSpace - 12;
     for (const auto &line : modal.lines) {
       int drawnHeight = 0;
@@ -3831,7 +3871,7 @@ namespace {
   }
 
   /**
-   * @brief Render numeric entry with compact centered IPv4 sections and key columns.
+   * @brief Render local numeric or text entry with cached labels and optional shared keyboard geometry.
    *
    * @param renderer Active renderer.
    * @param bodyFont Heading, input and key font.
@@ -3848,7 +3888,8 @@ namespace {
     const int dialogWidth = std::min(720, width * 4 / 5);
     const int innerWidth = dialogWidth - padding * 2;
     const int columns = std::max(1, static_cast<int>(viewModel.keypad.columnCount));
-    const int rows = std::max(1, static_cast<int>((viewModel.keypad.buttons.size() + columns - 1) / columns));
+    const bool keyboardGeometry = viewModel.keypad.rowCount != 0;
+    const int rows = keyboardGeometry ? static_cast<int>(viewModel.keypad.rowCount) : std::max(1, static_cast<int>((viewModel.keypad.buttons.size() + columns - 1) / columns));
     const int gap = 8;
     const int titleHeight = TTF_FontLineSkip(bodyFont) + 14;
     const int hintHeight = keypad_modal_text_height(renderer, smallFont, viewModel, innerWidth, cache);
@@ -3904,8 +3945,13 @@ namespace {
     cache->buttonLabelTextures.resize(viewModel.keypad.buttons.size());
     for (std::size_t index = 0; index < viewModel.keypad.buttons.size(); ++index) {
       const auto &column = keyColumns[index % columns];
-      const SDL_Rect key {column.x, keysY + static_cast<int>(index / columns) * (keyHeight + gap), column.w, keyHeight};
+      SDL_Rect key {column.x, keysY + static_cast<int>(index / columns) * (keyHeight + gap), column.w, keyHeight};
       const auto &button = viewModel.keypad.buttons[index];
+      if (keyboardGeometry) {
+        const int left = bounds.x + padding + button.column * innerWidth / columns;
+        const int right = bounds.x + padding + (button.column + button.width) * innerWidth / columns;
+        key = {left + 1, keysY + button.row * (keyHeight + gap), right - left - 3, button.height * (keyHeight + gap) - gap};
+      }
       render_card_surface(renderer, key, button.selected);
       if (!ensure_single_line_text_texture(renderer, bodyFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, key.w, &cache->buttonLabelTextures[index]) || !render_cached_centered_text_texture(renderer, cache->buttonLabelTextures[index], key)) {
         return false;
@@ -4395,6 +4441,26 @@ namespace {
           state.shell.shouldExit = true;
           return input::UiCommand::none;
         }
+        if (state.modal.id == app::ModalId::directory_picker && state.directoryPicker.creating && event.key.keysym.sym >= 32 && event.key.keysym.sym < 127 && (event.key.keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) == 0) {
+          const int code = input::keyboard_virtual_key(event.key.keysym.scancode);
+          if (code == 0x20) {
+            app::append_directory_name(state, " ");
+          } else {
+            for (std::size_t i = 0; i < 60; ++i) {
+              const auto &key = input::StreamMenu::KEYS[i];
+              if (key.code != code) {
+                continue;
+              }
+              const bool shifted = ((event.key.keysym.mod & KMOD_SHIFT) != 0) != (code >= 'A' && code <= 'Z' && (event.key.keysym.mod & KMOD_CAPS) != 0);
+              const std::string text = shifted ? key.shifted : key.label;
+              if (text.size() == 1) {
+                app::append_directory_name(state, text);
+              }
+              break;
+            }
+          }
+          return input::UiCommand::none;
+        }
         return inputState->keyboardNavigation.press(event.key.keysym.scancode, translate_keyboard_key(event.key.keysym.sym, event.key.keysym.mod), SDL_GetTicks());
       case SDL_KEYUP:
         if (inputState != nullptr) {
@@ -4873,7 +4939,8 @@ namespace {
     runtime->keypadRedrawRequested = true;
 
     const app::ScreenId previousScreen = state.shell.activeScreen;
-    const app::AppUpdate update = app::handle_command(state, command);
+    app::AppUpdate update = app::handle_command(state, command);
+    process_directory_picker_requests(state, update);
     logging::set_file_minimum_level(state.settings.loggingLevel);
     logging::set_debugger_console_minimum_level(state.settings.xemuConsoleLoggingLevel);
     log_app_update(state, update);
@@ -4901,7 +4968,7 @@ namespace {
     if ((previousScreen != state.shell.activeScreen || update.navigation.screenChanged) && !draw_current_shell_frame(activeVideoMode, state, resources, runtime)) {
       return;
     }
-    if (state.shell.activeScreen != app::ScreenId::add_host || !state.addHostDraft.keypad.visible) {
+    if (!(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) && !(state.modal.id == app::ModalId::directory_picker && state.directoryPicker.creating)) {
       clear_keypad_modal_layout_cache(&resources->keypadModalLayoutCache);
     }
   }

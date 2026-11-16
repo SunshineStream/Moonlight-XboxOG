@@ -6,6 +6,8 @@
 #include "src/ui/shell_view.h"
 
 // standard includes
+#include "src/platform/filesystem_utils.h"
+
 #include <algorithm>
 #include <utility>
 #include <vector>
@@ -594,11 +596,72 @@ namespace {
   }
 
   /**
+   * @brief Present staged folder selection or the same keyboard geometry used by stream controls.
+   * @param state Current directory picker and input source.
+   * @param viewModel Receives a scrollable folder dialog or local name-entry keyboard.
+   */
+  void fill_directory_picker_view(const app::ClientState &state, ui::ShellViewModel *viewModel) {
+    const auto &picker = state.directoryPicker;
+    if (picker.creating) {
+      viewModel->modal.visible = false;
+      auto &view = viewModel->keypad;
+      view.visible = true;
+      view.title = "New Folder";
+      view.value = picker.name;
+      view.value.insert(std::min(picker.caret, view.value.size()), "|");
+      if (!picker.error.empty()) {
+        view.lines = {picker.error};
+      }
+      view.columnCount = input::StreamMenu::KEYBOARD_COLUMNS;
+      view.rowCount = input::StreamMenu::KEYBOARD_ROWS;
+      const auto &cells = picker.keyboard.keyboard_cells();
+      for (std::size_t i = 0; i < cells.size(); ++i) {
+        const auto &cell = cells[i];
+        std::string label = picker.keyboard.key_label(static_cast<int>(i));
+        if (cell.key == input::StreamMenu::KEYBOARD_PAGE_KEY && picker.keyboard.keyboardLayout == 1) {
+          label = "ABC";
+        } else if (cell.key == 46) {
+          label = "OK";
+        }
+        view.buttons.push_back({label, true, i == static_cast<std::size_t>(picker.keyboard.keyIndex), cell.column, cell.row, cell.width, cell.height});
+      }
+      if (state.shell.inputDevice == input::UiInputDevice::keyboard) {
+        view.footerActions = {{"create", "Create", "icons\\button-start.svg", {}, false}, {"cancel", "Cancel", "icons\\button-b.svg", {}, false}};
+      } else {
+        view.footerActions = {{"type", "Type", "icons\\button-a.svg", {}, true}, {"delete", "Delete", "icons\\button-x.svg", {}, false}, {"shift", picker.keyboard.shiftOnce ? "Shift: On" : "Shift", "icons\\button-y.svg", {}, false}, {"create", "Create", "icons\\button-start.svg", {}, false}, {"cancel", "Cancel", "icons\\button-b.svg", {}, false}};
+      }
+      return;
+    }
+    auto &view = viewModel->modal;
+    view.title = "Screenshot Folder";
+    const auto path = picker.path.empty() ? std::string("Choose a drive") : picker.path;
+    view.lines = {path.size() > 72 ? "..." + path.substr(path.size() - 69) : path};
+    if (!picker.error.empty()) {
+      view.lines.push_back(picker.error);
+    } else if (!picker.path.empty() && picker.folders.empty()) {
+      view.lines.push_back("No subfolders here.");
+    }
+    const bool canUse = picker.available && !picker.path.empty();
+    view.actions = {
+      {"use-folder", "Use this folder", canUse, state.modal.selectedActionIndex == 0},
+      {"new-folder", "New folder...", canUse, state.modal.selectedActionIndex == 1},
+      {"parent-folder", "Up / Drives", !picker.path.empty(), state.modal.selectedActionIndex == 2},
+      {"default-folder", "Use default location", true, state.modal.selectedActionIndex == 3},
+    };
+    for (std::size_t i = 0; i < picker.folders.size(); ++i) {
+      const auto &folder = picker.folders[i];
+      view.actions.push_back({folder, picker.path.empty() ? folder : platform::file_name_from_path(folder), true, state.modal.selectedActionIndex == i + 4});
+    }
+    view.footerActions = {{"select", "Select", "icons\\button-a.svg", {}, true}, {"use-folder", "Use folder", "icons\\button-y.svg", {}, false}, {"up", "Up", "icons\\button-lb.svg", {}, false}, {"cancel", "Cancel", "icons\\button-b.svg", {}, false}};
+  }
+
+  /**
    * @brief Build the active dialog, including connection-test status icons and diagnostics.
    *
    * @param state Current reducer-owned modal state.
    * @param viewModel Receives render-ready dialog content.
    */
+
   void fill_modal_view(const app::ClientState &state, ui::ShellViewModel *viewModel) {
     if (!state.modal.active()) {
       return;
@@ -626,6 +689,9 @@ namespace {
         return;
       case app::ModalId::confirmation:
         fill_confirmation_modal_view(state, viewModel);
+        return;
+      case app::ModalId::directory_picker:
+        fill_directory_picker_view(state, viewModel);
         return;
       case app::ModalId::connection_test:
         viewModel->modal.busy = state.connectionTest.inProgress;

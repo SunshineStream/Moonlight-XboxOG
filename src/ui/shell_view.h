@@ -92,12 +92,16 @@ namespace ui {
   };
 
   /**
-   * @brief Render-ready button in the keypad modal.
+   * @brief Render-ready numeric or text key with optional explicit keyboard geometry.
    */
   struct ShellModalButton {
     std::string label;  ///< User-facing button label.
     bool enabled = true;  ///< True when the button can be activated.
     bool selected = false;  ///< True when the button currently has focus.
+    int column = -1;  ///< Explicit half-column origin for the shared keyboard; negative uses the numeric grid.
+    int row = 0;  ///< Explicit keyboard row.
+    int width = 1;  ///< Explicit key width in half-columns.
+    int height = 1;  ///< Explicit key height in rows.
   };
 
   /**
@@ -172,7 +176,7 @@ namespace ui {
   };
 
   /**
-   * @brief Add-host keypad modal view rendered above the split add-host screen.
+   * @brief Local numeric or text entry modal, shared by host entry and folder creation.
    */
   struct ShellKeypadModalView {
     bool visible = false;  ///< True when the keypad modal should be rendered.
@@ -184,6 +188,7 @@ namespace ui {
     std::vector<std::string> lines;  ///< Instruction and draft lines shown in the keypad modal.
     std::vector<ShellModalButton> buttons;  ///< Buttons rendered inside the keypad modal.
     std::size_t columnCount = 0U;  ///< Number of columns used to lay out keypad buttons.
+    std::size_t rowCount = 0U;  ///< Explicit keyboard row count; zero derives rows from the numeric grid.
     std::vector<ShellFooterAction> footerActions;  ///< Input, delete, cancel and accept controls inside the dialog.
   };
 

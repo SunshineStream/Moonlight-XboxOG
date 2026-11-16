@@ -130,9 +130,14 @@ surface as the main menus, accepts **A / Enter** to disconnect and **B / Esc** t
 the host app running after disconnecting.
 Returning from the stream resets local keyboard/controller holds before library navigation resumes.
 
-Screenshots default to `E:\UDATA\<title-id>\screenshots` and omit local controls. Change
-`screenshot_directory` in the `[streaming]` section of Moonlight's `moonlight.toml` to use another writable
-folder; the folder is created when the first screenshot is saved. An empty value restores the default.
+Screenshots default to `E:\UDATA\<title-id>\screenshots` and omit local controls. Open
+**Settings > Display > Screenshot Folder** to browse drives and subfolders, select the current folder,
+or create a new folder with the on-screen keyboard or a USB keyboard. **Use default location** restores
+the title-scoped screenshot folder. **B / Esc** cancels without changing the saved destination.
+New folder names use up to 42 printable characters; **Start / Enter** creates the folder. The destination
+is checked for write access before it is saved. You can also change `screenshot_directory` in the
+`[streaming]` section of `moonlight.toml`; a configured folder is created when the first screenshot is
+saved, and an empty value restores the default.
 Use a TOML literal string for Xbox paths, for example `screenshot_directory = 'F:\Screenshots'`.
 The same section stores `keyboard_dock_top = false` (bottom) or `true` (top).
 

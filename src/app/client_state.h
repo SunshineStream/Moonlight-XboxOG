@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // nxdk includes
@@ -18,6 +19,7 @@
 #include "src/app/host_records.h"
 #include "src/app/pairing_flow.h"
 #include "src/input/navigation_input.h"
+#include "src/input/stream_menu.h"
 #include "src/input/ui_input.h"
 #include "src/logging/logger.h"
 #include "src/startup/saved_files.h"
@@ -58,6 +60,7 @@ namespace app {
     confirmation,  ///< Destructive-action confirmation dialog.
     log_viewer,  ///< Dedicated log viewer modal.
     connection_test,  ///< Progress and result of a manual connection test.
+    directory_picker,  ///< Screenshot destination browser and local folder-name keyboard.
   };
 
   /**
@@ -346,6 +349,20 @@ namespace app {
   };
 
   /**
+   * @brief Staged directory selection; the saved setting changes only after successful selection.
+   */
+  struct DirectoryPickerState {
+    std::string path;  ///< Current directory, or empty for mounted drives.
+    std::vector<std::string> folders;  ///< Immediate child directory paths.
+    std::string error;  ///< Listing, creation or destination validation feedback.
+    bool available = false;  ///< The current directory was read successfully.
+    bool creating = false;  ///< Show the local folder-name keyboard.
+    std::string name;  ///< Draft child folder name.
+    std::size_t caret = 0;  ///< Insertion point inside the folder name.
+    input::StreamMenu keyboard;  ///< Reuse the stream keyboard's pages, labels and focus geometry locally.
+  };
+
+  /**
    * @brief State owned by the settings, log viewer, and saved-file workflows.
    */
   struct SettingsState {
@@ -386,6 +403,7 @@ namespace app {
     PairingDraft pairingDraft;  ///< Draft state for the active pairing workflow.
     ModalState modal;  ///< Context modal currently stacked over the shell.
     SettingsState settings;  ///< Settings, log viewer, and saved-file workflow state.
+    DirectoryPickerState directoryPicker;  ///< Pending screenshot-directory workflow.
     ConfirmationDialogState confirmation;  ///< Confirmation dialog content for destructive actions.
   };
 
@@ -418,6 +436,9 @@ namespace app {
     bool appsBrowseShowHidden = false;  ///< Hidden-app visibility requested for the app browse action.
     bool streamLaunchRequested = false;  ///< True when the selected host app should start or resume streaming.
     bool logViewRequested = false;  ///< True when the log viewer should be refreshed from disk.
+    bool directoryListRequested = false;  ///< Read the picker's current directory or mounted drives.
+    bool directoryCreateRequested = false;  ///< Create the named child of the current picker directory.
+    bool directorySelectRequested = false;  ///< Check destination writability before accepting the picker directory.
   };
 
   /**
@@ -667,5 +688,20 @@ namespace app {
    * @return Summary of the resulting state transition.
    */
   AppUpdate handle_command(ClientState &state, input::UiCommand command);
+
+  /**
+   * @brief Insert printable text into the local folder-name draft, without forwarding it to a host.
+   * @param state Current client state.
+   * @param text ASCII text to append, limited to the Xbox component length.
+   */
+  void append_directory_name(ClientState &state, std::string_view text);
+
+  /**
+   * @brief Complete a validated directory selection and rebuild its settings label.
+   * @param state Current client state.
+   * @param update Receives persistence and modal closure flags.
+   * @param path Selected folder; empty restores the title-scoped default.
+   */
+  void accept_screenshot_directory(ClientState &state, AppUpdate &update, const std::string &path);
 
 }  // namespace app
