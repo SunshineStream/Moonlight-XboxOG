@@ -112,7 +112,7 @@ namespace input {
      */
     void toggle_keyboard_page();
     /**
-     * @brief Compute modifiers for a host key, including symbols, Caps and one-shot Shift.
+     * @brief Compute host modifiers, preserving explicit symbols-page bindings regardless of one-shot Shift.
      * @param code Host virtual key to send.
      * @return Moonlight modifier flags.
      */
@@ -149,7 +149,7 @@ namespace input {
 
   private:
     /**
-     * @brief Resolve a cell's own binding without consulting the highlighted cell.
+     * @brief Resolve a cell's binding, applying Caps and one-shot Shift outside the explicit symbols page.
      * @param index Host key catalog index.
      * @return Effective modifiers for that binding.
      */

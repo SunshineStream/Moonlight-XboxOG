@@ -678,3 +678,110 @@ TEST(VideoOverlayTest, RebuildsCachesWhenOpacityOrMatrixChanges) {
   overlay.set_argb_bitmap(20, 20, pixels, streaming::VideoOverlayPlacement::full_screen);
   compare(streaming::VideoColorMatrix::bt709);
 }
+
+/**
+ * @brief Partial ARGB updates match full repaints in RGB and YUY2, including alpha changes and accumulated damage.
+ */
+TEST(VideoOverlayTest, AppliesSmallPatchesAcrossBothPresentationPaths) {
+  for (const int scale : {12, 32, 80}) {
+    streaming::VideoOverlay overlay;
+    std::vector<std::uint8_t> pixels(20 * 16 * 4, 255);
+    overlay.set_argb_bitmap(20, 16, pixels, streaming::VideoOverlayPlacement::full_screen);
+    for (int step = 0; step < 6; ++step) {
+      const streaming::VideoRectangle area {step * 3, step * 2, 3, 2};
+      std::vector<std::uint8_t> patch(area.width * area.height * 4, 0);
+      for (std::size_t i = 0; i < patch.size(); i += 4) {
+        patch[i] = step * 30;
+        patch[i + 1] = 40;
+        patch[i + 2] = 210;
+        patch[i + 3] = step % 3 == 0 ? 255 : step % 3 == 1 ? 150 :
+                                                             0;
+      }
+      for (int row = 0; row < area.height; ++row) {
+        std::copy_n(patch.data() + row * area.width * 4, area.width * 4, pixels.data() + ((area.y + row) * 20 + area.x) * 4);
+      }
+      ASSERT_TRUE(overlay.update_argb_bitmap(area, patch));
+      EXPECT_EQ(overlay.argb_pixels(), pixels);
+      // Accumulate two updates before presentation as a focus change does.
+      if (step % 2 == 0) {
+        continue;
+      }
+      streaming::VideoOverlay fresh;
+      fresh.set_argb_bitmap(20, 16, pixels, streaming::VideoOverlayPlacement::full_screen);
+      const streaming::VideoRectangle destination {0, 0, scale, scale};
+      const streaming::VideoRectangle rgbDestination {0, 0, std::min(32, scale), std::min(32, scale)};
+      for (int bpp : {15, 16, 32}) {
+        const int bytes = bpp == 32 ? 4 : 2;
+        std::vector<std::uint8_t> actual(32 * 32 * bytes, 100);
+        auto expected = actual;
+        ASSERT_TRUE(overlay.draw_rgb(actual.data(), actual.size(), 32 * bytes, 32, 32, bpp, rgbDestination));
+        ASSERT_TRUE(fresh.draw_rgb(expected.data(), expected.size(), 32 * bytes, 32, 32, bpp, rgbDestination));
+        EXPECT_EQ(actual, expected);
+      }
+      for (const auto matrix : {streaming::VideoColorMatrix::bt601, streaming::VideoColorMatrix::bt709}) {
+        std::vector<std::uint8_t> actual(32 * 32 * 2, 100);
+        auto expected = actual;
+        ASSERT_TRUE(overlay.draw_yuy2(actual.data(), actual.size(), 64, 32, 32, destination, matrix));
+        ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 64, 32, 32, destination, matrix));
+        EXPECT_EQ(actual, expected) << "step=" << step << " scale=" << scale;
+      }
+    }
+  }
+}
+
+/**
+ * @brief Invalid patch rectangles, storage and non-ARGB panels are rejected without changing any pixels.
+ */
+TEST(VideoOverlayTest, RejectsInvalidColorPatchesWithoutChangingThePanel) {
+  streaming::VideoOverlay overlay;
+  EXPECT_FALSE(overlay.update_argb_bitmap({0, 0, 1, 1}, {1, 2, 3, 255}));
+  overlay.set_bitmap(2, 2, {1, 2, 3, 4});
+  EXPECT_FALSE(overlay.update_argb_bitmap({0, 0, 1, 1}, {1, 2, 3, 255}));
+  const std::vector<std::uint8_t> original(4 * 4 * 4, 255);
+  overlay.set_argb_bitmap(4, 4, original);
+  for (const auto area : {streaming::VideoRectangle {-1, 0, 1, 1}, {0, -1, 1, 1}, {0, 0, 0, 1}, {0, 0, 1, 0}, {0, 0, 5, 1}, {0, 0, 1, 5}, {4, 0, 1, 1}, {0, 4, 1, 1}, {1, 1, 4, 4}}) {
+    EXPECT_FALSE(overlay.update_argb_bitmap(area, {1, 2, 3, 255}));
+    EXPECT_EQ(overlay.argb_pixels(), original);
+  }
+  EXPECT_FALSE(overlay.update_argb_bitmap({0, 0, 1, 1}, {1, 2, 3}));
+  EXPECT_EQ(overlay.argb_pixels(), original);
+}
+
+/**
+ * @brief Repainting only the old and new wheel sectors is identical to rasterizing the complete ring.
+ */
+TEST(VideoOverlayTest, RepaintsWheelSectorsAndClippedLabelBackgrounds) {
+  std::vector<std::uint8_t> pixels(40 * 40 * 4, 150);
+  const auto backdrop = pixels;
+  int previous = -1;
+  for (int selected : {0, 1, 2, 3, -1, 2, 0}) {
+    if (previous >= 0) {
+      ASSERT_TRUE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, selected, previous));
+    }
+    if (selected >= 0) {
+      ASSERT_TRUE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, selected, selected));
+    }
+    auto expected = backdrop;
+    ASSERT_TRUE(streaming::rasterize_menu_wheel(expected.data(), expected.size(), 160, 40, 40, 20, 20, 18, selected));
+    // Initialize the unchanged sectors on the first frame.
+    if (previous == -1 && selected == 0) {
+      pixels = expected;
+    }
+    EXPECT_EQ(pixels, expected);
+    const streaming::VideoRectangle clip {17, 2, 6, 6};
+    auto clipped = backdrop;
+    ASSERT_TRUE(streaming::rasterize_menu_wheel(clipped.data(), clipped.size(), 160, 40, 40, 20, 20, 18, selected, -1, &clip));
+    for (int y = 0; y < 40; ++y) {
+      for (int x = 0; x < 40; ++x) {
+        const int index = (y * 40 + x) * 4;
+        EXPECT_EQ(clipped[index], x >= clip.x && x < clip.x + clip.width && y >= clip.y && y < clip.y + clip.height ? expected[index] : backdrop[index]);
+      }
+    }
+    previous = selected;
+  }
+  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, 0, -2));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, 0, 4));
+  for (const auto clip : {streaming::VideoRectangle {-1, 0, 1, 1}, {0, -1, 1, 1}, {0, 0, 0, 1}, {0, 0, 1, 0}, {0, 0, 41, 1}, {0, 0, 1, 41}, {40, 0, 1, 1}, {0, 40, 1, 1}}) {
+    EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, 0, -1, &clip));
+  }
+}

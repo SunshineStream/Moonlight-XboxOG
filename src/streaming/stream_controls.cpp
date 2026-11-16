@@ -193,6 +193,8 @@ namespace streaming {
     iconTextures_.clear();
     panelRenderer_.reset();
     panel_.reset();
+    panelContent_.reset();
+    panelDamage_.clear();
   }
 
   void StreamControls::label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, bool leading, bool background, bool fitSingleLine, SDL_Color foreground) {
@@ -246,17 +248,8 @@ namespace streaming {
                                                                                                  0;
     int y = (sample.buttonFlags & DOWN_FLAG) != 0 ? 1 : (sample.buttonFlags & UP_FLAG) != 0 ? -1 :
                                                                                               0;
-    if (x == 0 && y == 0) {
-      if (std::max(std::abs(static_cast<int>(sample.leftStickX)), std::abs(static_cast<int>(sample.leftStickY))) >= input::StreamMenu::WHEEL_DEADZONE) {
-        if (std::abs(static_cast<int>(sample.leftStickX)) > std::abs(static_cast<int>(sample.leftStickY))) {
-          x = sample.leftStickX > 0 ? 1 : -1;
-        } else {
-          y = sample.leftStickY > 0 ? -1 : 1;
-        }
-      }
-    }
     if (navigationNeutralRequired_) {
-      if (x == 0 && y == 0) {
+      if (x == 0 && y == 0 && std::max(std::abs(static_cast<int>(sample.leftStickX)), std::abs(static_cast<int>(sample.leftStickY))) < input::STICK_NAVIGATION_RELEASE_THRESHOLD) {
         navigationNeutralRequired_ = false;
       }
       return;
@@ -265,8 +258,10 @@ namespace streaming {
                                                               y > 0   ? input::UiCommand::move_down :
                                                               y < 0   ? input::UiCommand::move_up :
                                                                         input::UiCommand::none;
-    const auto key = menu_navigation_key(controllerNavigation_.update(command, now));
-    if (key != SDLK_UNKNOWN) {
+    const auto step = x == 0 && y == 0 ? controllerNavigation_.update_stick(sample.leftStickX, sample.leftStickY, now) : controllerNavigation_.update(command, now);
+    const auto key = menu_navigation_key(step);
+    if (key != SDLK_UNKNOWN && !controllerNavigationApplied_) {
+      controllerNavigationApplied_ = true;
       menu_.navigate(key == SDLK_RIGHT ? 1 : key == SDLK_LEFT ? -1 :
                                                                 0,
                      key == SDLK_DOWN ? 1 : key == SDLK_UP ? -1 :
@@ -577,6 +572,7 @@ namespace streaming {
 
   bool StreamControls::pump(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool active, bool &statisticsEnabled) {
     // Sampling and transport enqueueing share one owner so capture cannot race a stale gameplay packet.
+    controllerNavigationApplied_ = false;
     SDL_PumpEvents();
     bool stop = false;
     const bool wasVisible = visible();
@@ -912,7 +908,7 @@ namespace streaming {
     }
   }
 
-  bool StreamControls::render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds) {
+  bool StreamControls::render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip) {
     const int size = std::min(bounds.w, bounds.h);
     if (size <= 0) {
       return false;
@@ -940,6 +936,14 @@ namespace streaming {
       texture = iconTextures_.emplace(key, std::move(loaded)).first;
     }
     SDL_Rect destination {bounds.x + (bounds.w - surface->w) / 2, bounds.y + (bounds.h - surface->h) / 2, surface->w, surface->h};
+    if (clip != nullptr) {
+      SDL_Rect intersection {};
+      if (!SDL_IntersectRect(&destination, clip, &intersection)) {
+        return true;
+      }
+      const SDL_Rect source {intersection.x - destination.x, intersection.y - destination.y, intersection.w, intersection.h};
+      return SDL_RenderCopy(renderer, texture->second.get(), &source, &intersection) == 0;
+    }
     return SDL_RenderCopy(renderer, texture->second.get(), nullptr, &destination) == 0;
   }
 
@@ -966,7 +970,7 @@ namespace streaming {
     label(renderer, font, text, {left + capWidth + 4, bounds.y, std::max(1, groupWidth - capWidth - 4), bounds.h}, false, false, true);
   }
 
-  void StreamControls::render_keyboard(SDL_Renderer *renderer, TTF_Font *font, int width, int height, int rowHeight) {
+  void StreamControls::render_keyboard(SDL_Renderer *renderer, TTF_Font *font, int width, int height, int rowHeight, bool focusOnly) {
     const auto &cells = menu_.keyboard_cells();
     constexpr int padding = 8;
     const int header = TTF_FontLineSkip(font) + 4;
@@ -977,10 +981,34 @@ namespace streaming {
       static const std::array<const char *, 12> shortcuts {"Copy: Ctrl+C", "Paste: Ctrl+V", "Cut: Ctrl+X", "Undo: Ctrl+Z", "Redo: Ctrl+Y", "Select all: Ctrl+A", "Switch app: Alt+Tab", "Close app: Alt+F4", "Ctrl+Alt+Delete", "Desktop: Win+D", "Explorer: Win+E", "Run: Win+R"};
       description = shortcuts[focusedCell.key - 106];
     }
-    label(renderer, font, description, {padding, 2, width - padding * 2, header}, false, false, true);
     const int gridWidth = width - padding * 2;
+    // Erase both outlines before painting either key: adjacent focus rectangles
+    // touch the same gap pixels. No SDL renderer clipping commands are needed.
+    if (focusOnly) {
+      SDL_SetRenderDrawColor(renderer, 16, 16, 16, 255);
+      for (const int index : {panelSelection_, menu_.keyIndex}) {
+        const auto &cell = cells[index];
+        const int left = padding + cell.column * gridWidth / input::StreamMenu::KEYBOARD_COLUMNS;
+        const int right = padding + (cell.column + cell.width) * gridWidth / input::StreamMenu::KEYBOARD_COLUMNS;
+        SDL_Rect area {left - 1, padding + header + cell.row * rowHeight - 1, right - left + 1, cell.height * rowHeight + 1};
+        SDL_RenderFillRect(renderer, &area);
+        panelDamage_.push_back({area.x, area.y, area.w, area.h});
+      }
+    }
+    if (!focusOnly || menu_.keyboardLayout == 2) {
+      SDL_Rect area {0, 0, width, header + 4};
+      if (focusOnly) {
+        SDL_SetRenderDrawColor(renderer, 16, 16, 16, 255);
+        SDL_RenderFillRect(renderer, &area);
+        panelDamage_.push_back({area.x, area.y, area.w, area.h});
+      }
+      label(renderer, font, description, {padding, 2, width - padding * 2, header}, false, false, true);
+    }
     const bool keyboardInput = inputDevice_ == input::UiInputDevice::keyboard;
     for (int i = 0; i < static_cast<int>(cells.size()); ++i) {
+      if (focusOnly && i != panelSelection_ && i != menu_.keyIndex) {
+        continue;
+      }
       const auto &cell = cells[i];
       const int left = padding + cell.column * gridWidth / input::StreamMenu::KEYBOARD_COLUMNS;
       const int right = padding + (cell.column + cell.width) * gridWidth / input::StreamMenu::KEYBOARD_COLUMNS;
@@ -1046,6 +1074,9 @@ namespace streaming {
         SDL_RenderDrawRect(renderer, &focus);
       }
     }
+    if (focusOnly) {
+      return;
+    }
     const int line = TTF_FontLineSkip(font) + 8;
     const int footerY = padding + header + input::StreamMenu::KEYBOARD_ROWS * rowHeight + 4;
     const int footerHeight = std::min(line + 4, height - footerY);
@@ -1085,31 +1116,64 @@ namespace streaming {
     }
     auto &panel = panel_;
     auto &renderer = panelRenderer_;
+    const PanelContent content {font, inputDevice_, menu_.page, menu_.keyboardLayout, menu_.modifiers, menu_.caps, menu_.shiftOnce, stats, mouseDevice_, keyboardTop_, message_};
+    const bool focusOnly = panelContent_ && *panelContent_ == content && (keyboard || menu_.page == input::StreamMenuPage::radial);
+    if (focusOnly && panelSelection_ == (keyboard ? menu_.keyIndex : static_cast<int>(menu_.selected))) {
+      dirty_ = false;
+      return;
+    }
+    panelDamage_.clear();
     const Uint8 background = keyboard ? 16 : 0;
-    SDL_SetRenderDrawColor(renderer.get(), background, background, background, keyboard ? 255 : 150);
-    SDL_RenderClear(renderer.get());
+    if (!focusOnly) {
+      SDL_SetRenderDrawColor(renderer.get(), background, background, background, keyboard ? 255 : 150);
+      SDL_RenderClear(renderer.get());
+    }
     const int line = TTF_FontLineSkip(font) + 8;
-    if (menu_.page == input::StreamMenuPage::radial) {
+    if (!focusOnly && menu_.page == input::StreamMenuPage::radial) {
       label(renderer.get(), font, "Stream controls", {8, 4, width - 16, line}, false, false);
     }
     if (keyboard) {
-      render_keyboard(renderer.get(), font, width, height, rowHeight);
+      render_keyboard(renderer.get(), font, width, height, rowHeight, focusOnly);
     } else if (menu_.page == input::StreamMenuPage::radial) {
       const int cy = height / 2;
       const int radius = std::min(width / 5, (height - line * 4) / 2);
       for (int wheel = 0; wheel < 2; ++wheel) {
         const int cx = width * (wheel == 0 ? 1 : 3) / 4;
-        SDL_RenderFlush(renderer.get());
-        rasterize_menu_wheel(static_cast<std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height, cx, cy, radius, static_cast<int>(menu_.selected) / 4 == wheel ? static_cast<int>(menu_.selected) % 4 : -1);
-        render_icon(renderer.get(), wheel == 0 ? "button-left-stick.svg" : "button-right-stick.svg", {cx - line, cy - line, line * 2, line * 2});
+        const int selected = static_cast<int>(menu_.selected) / 4 == wheel ? static_cast<int>(menu_.selected) % 4 : -1;
+        if (!focusOnly) {
+          SDL_RenderFlush(renderer.get());
+          rasterize_menu_wheel(static_cast<std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height, cx, cy, radius, selected);
+          render_icon(renderer.get(), wheel == 0 ? "button-left-stick.svg" : "button-right-stick.svg", {cx - line, cy - line, line * 2, line * 2});
+        }
         constexpr std::array<int, 4> dx {0, 1, 0, -1};
         constexpr std::array<int, 4> dy {-1, 0, 1, 0};
         for (int sector = 0; sector < 4; ++sector) {
+          if (focusOnly && wheel * 4 + sector != panelSelection_ && wheel * 4 + sector != static_cast<int>(menu_.selected)) {
+            continue;
+          }
           const auto action = static_cast<input::StreamAction>(wheel * 4 + sector);
           const int labelWidth = std::min(line * 6, width / 5);
           const int x = std::clamp(cx + dx[sector] * radius * 2 / 3 - labelWidth / 2, 0, width - labelWidth);
           const int iconSize = std::max(18, line);
           const int groupY = cy + dy[sector] * radius * 2 / 3 - (iconSize + line * 2) / 2;
+          if (focusOnly) {
+            // Restore the label's complete background, including any pixels in
+            // the central hole, before blending its antialiased text again.
+            const SDL_Rect group {x, groupY, labelWidth, iconSize + 2 + line * 2};
+            SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 150);
+            SDL_RenderFillRect(renderer.get(), &group);
+            SDL_RenderFlush(renderer.get());
+            rasterize_menu_wheel(static_cast<std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height, cx, cy, radius, selected, sector);
+            const VideoRectangle clip {group.x, group.y, group.w, group.h};
+            rasterize_menu_wheel(static_cast<std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height, cx, cy, radius, selected, -1, &clip);
+            render_icon(renderer.get(), wheel == 0 ? "button-left-stick.svg" : "button-right-stick.svg", {cx - line, cy - line, line * 2, line * 2}, &group);
+            const VideoRectangle area = sector == 0 ? VideoRectangle {cx - radius, cy - radius, radius * 2 + 1, radius + 1} : sector == 1 ? VideoRectangle {cx, cy - radius, radius + 1, radius * 2 + 1} :
+                                                                                                                            sector == 2   ? VideoRectangle {cx - radius, cy, radius * 2 + 1, radius + 1} :
+                                                                                                                                            VideoRectangle {cx - radius, cy - radius, radius + 1, radius * 2 + 1};
+            const int left = std::min(area.x, clip.x);
+            const int top = std::min(area.y, clip.y);
+            panelDamage_.push_back({left, top, std::max(area.x + area.width, clip.x + clip.width) - left, std::max(area.y + area.height, clip.y + clip.height) - top});
+          }
           constexpr std::array<const char *, 8> icons {"keyboard.svg", "mouse.svg", "scroll-text.svg", "power.svg", "button-guide.svg", "button-share.svg", "camera.svg", "chart-no-axes-combined.svg"};
           render_icon(renderer.get(), icons[wheel * 4 + sector], {x + (labelWidth - iconSize) / 2, groupY, iconSize, iconSize});
           label(renderer.get(), font, input::stream_action_label(action, mouseDevice_ >= 0, stats), {x, groupY + iconSize + 2, labelWidth, line * 2}, false, false);
@@ -1119,7 +1183,7 @@ namespace streaming {
       const std::array<const char *, 4> assets {"button-left-stick.svg", "button-right-stick.svg", "button-a.svg", "button-b.svg"};
       const std::array<const char *, 4> keys {"Arrows", "Tab", "Enter", "Esc"};
       const std::array<const char *, 4> actions {keyboardHints ? "Select" : "Left wheel", keyboardHints ? "Next" : "Right wheel", "Choose", "Resume"};
-      for (int i = 0; i < 4; ++i) {
+      for (int i = 0; !focusOnly && i < 4; ++i) {
         render_hint(renderer.get(), font, assets[i], keys[i], actions[i], {i * width / 4 + 4, height - line * 2, width / 4 - 8, line + 4});
       }
     } else if (menu_.page == input::StreamMenuPage::logs) {
@@ -1160,12 +1224,22 @@ namespace streaming {
         render_hint(renderer.get(), font, i == 0 ? "button-b.svg" : "button-a.svg", i == 0 ? "Esc" : "Enter", i == 0 ? "Cancel" : "Disconnect", {button.x + 4, button.y, button.w - 8, button.h});
       }
     }
-    if (!message_.empty() && menu_.page == input::StreamMenuPage::radial) {
+    if (!focusOnly && !message_.empty() && menu_.page == input::StreamMenuPage::radial) {
       label(renderer.get(), font, message_, {4, line + 4, width - 8, line * 2}, false, false);
     }
     SDL_RenderPresent(renderer.get());
-    auto pixels = extract_overlay_bitmap(static_cast<const std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height, keyboard);
-    backend.set_color_overlay(width, height, std::move(pixels), keyboard ? (keyboardTop_ ? VideoOverlayPlacement::dock_top : VideoOverlayPlacement::dock_bottom) : VideoOverlayPlacement::full_screen);
+    if (focusOnly) {
+      for (const auto &area : panelDamage_) {
+        const auto offset = static_cast<std::size_t>(area.y) * panel->pitch + area.x * 4;
+        const auto pixels = extract_overlay_bitmap(static_cast<const std::uint8_t *>(panel->pixels) + offset, static_cast<std::size_t>(panel->pitch) * height - offset, panel->pitch, area.width, area.height, keyboard);
+        backend.update_color_overlay(area, pixels);
+      }
+    } else {
+      auto pixels = extract_overlay_bitmap(static_cast<const std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height, keyboard);
+      backend.set_color_overlay(width, height, std::move(pixels), keyboard ? (keyboardTop_ ? VideoOverlayPlacement::dock_top : VideoOverlayPlacement::dock_bottom) : VideoOverlayPlacement::full_screen);
+    }
+    panelContent_ = content;
+    panelSelection_ = keyboard ? menu_.keyIndex : static_cast<int>(menu_.selected);
     dirty_ = false;
   }
 }  // namespace streaming

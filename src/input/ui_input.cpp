@@ -8,6 +8,14 @@
 #include <cstdlib>
 
 namespace input {
+  UiCommand DirectionNavigation::update_stick(short x, short y, std::uint32_t now) {
+    const int horizontal = std::abs(static_cast<int>(x));
+    const int vertical = std::abs(static_cast<int>(y));
+    const auto direction = horizontal > vertical ? (x > 0 ? UiCommand::move_right : UiCommand::move_left) : (y > 0 ? UiCommand::move_up : UiCommand::move_down);
+    const int threshold = direction == command_ ? STICK_NAVIGATION_RELEASE_THRESHOLD : STICK_NAVIGATION_THRESHOLD;
+    return update(std::max(horizontal, vertical) >= threshold ? direction : UiCommand::none, now);
+  }
+
   UiCommand DirectionNavigation::update(UiCommand command, std::uint32_t now) {
     if (command == UiCommand::none || !is_repeatable_ui_command(command)) {
       reset();

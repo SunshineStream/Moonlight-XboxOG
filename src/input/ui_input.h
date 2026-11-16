@@ -12,6 +12,8 @@
 namespace input {
   constexpr std::uint32_t NAVIGATION_INITIAL_REPEAT_MILLISECONDS = 150;  ///< Delay shared by keyboard and controller navigation.
   constexpr std::uint32_t NAVIGATION_REPEAT_MILLISECONDS = 45;  ///< Interval shared by keyboard and controller navigation.
+  constexpr short STICK_NAVIGATION_THRESHOLD = 16000;  ///< Deflection required to begin directional navigation.
+  constexpr short STICK_NAVIGATION_RELEASE_THRESHOLD = 12000;  ///< Lower release threshold prevents duplicate steps from stick jitter.
 
   /**
    * @brief Device whose intentional input most recently controlled the UI.
@@ -92,6 +94,14 @@ namespace input {
      * @return Direction to apply, or none until the next repeat.
      */
     UiCommand update(UiCommand command, std::uint32_t now);
+    /**
+     * @brief Navigate along the dominant stick axis using the main menus' hysteresis and repeat timing.
+     * @param x Signed horizontal deflection, positive rightward.
+     * @param y Signed vertical deflection, positive upward.
+     * @param now Monotonic millisecond tick, allowed to wrap.
+     * @return At most one directional step, or none at neutral or before a repeat is due.
+     */
+    UiCommand update_stick(short x, short y, std::uint32_t now);
     /**
      * @brief Clear the held direction on a page or input-device transition.
      */

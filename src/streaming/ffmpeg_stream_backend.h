@@ -110,6 +110,12 @@ namespace streaming {
      * @param placement Panel anchor shared by GPU and software paths.
      */
     void set_color_overlay(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left);
+    /**
+     * @brief Submit a small focus repaint while retaining the rest of the panel and its conversion caches.
+     * @param region Updated rectangle in panel pixels.
+     * @param pixels Packed straight ARGB bytes for that rectangle.
+     */
+    void update_color_overlay(const VideoRectangle &region, const std::vector<std::uint8_t> &pixels);
 
     /**
      * @brief Check whether an overlay change requires presenting an otherwise idle frame.
@@ -442,6 +448,7 @@ namespace streaming {
     SDL_Texture *statisticsTexture_ = nullptr;  ///< Cached panel texture for SDL's final fallback.
     bool statisticsBitmapChanged_ = false;  ///< A panel update requires refreshing a paused video frame.
     bool statisticsTextureChanged_ = false;  ///< SDL texture requires the current bitmap.
+    VideoRectangle statisticsTextureDamage_ {};  ///< Pending SDL texture upload, accumulated until software presentation.
     VideoAccelerationReport acceleration_;  ///< Session diagnostics survive decoder cleanup.
     bool overlayFailed_ = false;  ///< Avoid repeating a known failing hardware path this session.
     std::atomic<bool> audioPlaybackEnabled_ = false;

@@ -283,7 +283,9 @@ namespace input {
     if (index >= 106) {
       return key.modifiers;
     }
-    const bool upper = shiftOnce != (caps && key.code >= 'A' && key.code <= 'Z');
+    // This page already exposes both digits and their symbols as separate keys.
+    // Its explicit bindings must agree with the labels even with one-shot Shift.
+    const bool upper = keyboardLayout != 1 && (shiftOnce != (caps && key.code >= 'A' && key.code <= 'Z'));
     return modifiers | key.modifiers | (upper ? MODIFIER_SHIFT : 0);
   }
 

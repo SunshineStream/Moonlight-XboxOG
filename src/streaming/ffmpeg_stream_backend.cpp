@@ -361,6 +361,7 @@ namespace streaming {
 
   void FfmpegStreamBackend::invalidate_overlay_texture() {
     statisticsBitmapChanged_ = statisticsTextureChanged_ = true;
+    statisticsTextureDamage_ = {0, 0, statisticsOverlay_.width(), statisticsOverlay_.height()};
     if (statisticsTexture_ != nullptr) {
       int width = 0;
       int height = 0;
@@ -369,6 +370,23 @@ namespace streaming {
         statisticsTexture_ = nullptr;
       }
     }
+  }
+
+  void FfmpegStreamBackend::update_color_overlay(const VideoRectangle &region, const std::vector<std::uint8_t> &pixels) {
+    if (!statisticsOverlay_.update_argb_bitmap(region, pixels)) {
+      return;
+    }
+    if (statisticsTextureChanged_) {
+      const int right = std::max(statisticsTextureDamage_.x + statisticsTextureDamage_.width, region.x + region.width);
+      const int bottom = std::max(statisticsTextureDamage_.y + statisticsTextureDamage_.height, region.y + region.height);
+      statisticsTextureDamage_.x = std::min(statisticsTextureDamage_.x, region.x);
+      statisticsTextureDamage_.y = std::min(statisticsTextureDamage_.y, region.y);
+      statisticsTextureDamage_.width = right - statisticsTextureDamage_.x;
+      statisticsTextureDamage_.height = bottom - statisticsTextureDamage_.y;
+    } else {
+      statisticsTextureDamage_ = region;
+    }
+    statisticsBitmapChanged_ = statisticsTextureChanged_ = true;
   }
 
   bool FfmpegStreamBackend::has_pending_overlay() const {
@@ -665,13 +683,16 @@ namespace streaming {
         SDL_SetTextureBlendMode(statisticsTexture_, SDL_BLENDMODE_BLEND);
       }
       statisticsTextureChanged_ = true;
+      statisticsTextureDamage_ = {0, 0, width, height};
     }
     if (statisticsTexture_ == nullptr) {
       return;
     }
     if (statisticsTextureChanged_) {
       const auto &pixels = statisticsOverlay_.argb_pixels();
-      if (SDL_UpdateTexture(statisticsTexture_, nullptr, pixels.data(), width * 4) != 0) {
+      const SDL_Rect damage {statisticsTextureDamage_.x, statisticsTextureDamage_.y, statisticsTextureDamage_.width, statisticsTextureDamage_.height};
+      const auto offset = (static_cast<std::size_t>(damage.y) * width + damage.x) * 4;
+      if (SDL_UpdateTexture(statisticsTexture_, &damage, pixels.data() + offset, width * 4) != 0) {
         return;
       }
       statisticsTextureChanged_ = false;

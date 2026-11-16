@@ -109,7 +109,8 @@ QWERTY keys, a wide space bar, tall side controls, and an outlined focus key. Us
 to move, **A** to type, **X** for Backspace, **Y** for Space, and **Start** for host Enter.
 **Right stick click** applies Shift to the next key; **left stick click** toggles persistent Caps.
 **White / Black (LB / RB)** move the host text cursor left / right. **LT** cycles through letters,
-symbols, and PC keys. The symbols page groups numbers and punctuation; PC keys include F1–F12,
+symbols, and PC keys. The symbols page keeps its explicit numbers and punctuation unchanged by Shift;
+PC keys include F1–F12,
 navigation keys, Ctrl / Alt / Win toggles, and shortcuts for Copy, Paste, Cut, Undo, Redo, Select All,
 Alt+Tab, Alt+F4, Ctrl+Alt+Delete, Win+D, Win+E and Win+R. Focus a shortcut to see its full combination
 above the keys. Named shortcuts send their own modifier combination. **RT** moves the panel between

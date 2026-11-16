@@ -55,9 +55,11 @@ namespace streaming {
    * @param centerY Wheel center Y inside the panel.
    * @param radius Outer radius in pixels, between 1 and 2048.
    * @param selected Selected clockwise sector starting at up, or -1 for none.
+   * @param sector Repaint only this clockwise sector, or -1 for the whole ring.
+   * @param clip Optional pixel rectangle restricting background restoration behind a sector label.
    * @return False when storage or geometry is invalid, without writing pixels.
    */
-  bool rasterize_menu_wheel(std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, int centerX, int centerY, int radius, int selected);
+  bool rasterize_menu_wheel(std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, int centerX, int centerY, int radius, int selected, int sector = -1, const VideoRectangle *clip = nullptr);
 
   /**
    * @brief Placement of a shared panel inside the presented video rectangle.
@@ -92,6 +94,13 @@ namespace streaming {
      * @param placement Anchor inside the video rectangle.
      */
     void set_argb_bitmap(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left);
+    /**
+     * @brief Replace a bounded part of an existing colored panel without scanning or copying unchanged pixels.
+     * @param region Rectangle in panel pixels; must be wholly inside the current panel.
+     * @param pixels Tightly packed straight B, G, R, A bytes for the region.
+     * @return True after updating pixels and invalidating the affected conversion cache, false for invalid input.
+     */
+    bool update_argb_bitmap(const VideoRectangle &region, const std::vector<std::uint8_t> &pixels);
     /**
      * @brief Resolve clipped panel bounds in output pixels for every presentation path.
      * @param destination Presented video rectangle.

@@ -8,6 +8,7 @@
 // standard includes
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 // local includes
 #include "src/input/ui_input.h"
@@ -163,4 +164,39 @@ TEST(DirectionNavigationTest, ClearsOnNeutralOrResetAndHandlesClockWrap) {
   EXPECT_EQ(navigation.update(input::UiCommand::move_up, 53), input::UiCommand::move_up);
   navigation.reset();
   EXPECT_EQ(navigation.update(input::UiCommand::move_up, 54), input::UiCommand::move_up);
+}
+
+/**
+ * @brief Both stick axes use the main menu dead zone, retain a noisy hold and release without a second tap.
+ */
+TEST(DirectionNavigationTest, StickFlicksStepOnceWithHysteresisOnBothAxes) {
+  for (const auto &axis : {std::pair<short, short> {20000, 0}, {-20000, 0}, {0, 20000}, {0, -20000}}) {
+    input::DirectionNavigation navigation;
+    const auto direction = axis.first > 0 ? input::UiCommand::move_right : axis.first < 0 ? input::UiCommand::move_left :
+                                                                         axis.second > 0  ? input::UiCommand::move_up :
+                                                                                            input::UiCommand::move_down;
+    EXPECT_EQ(navigation.update_stick(axis.first / 2, axis.second / 2, 0), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(axis.first, axis.second, 1), direction);
+    EXPECT_EQ(navigation.update_stick(axis.first * 3 / 5, axis.second * 3 / 5, 40), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(axis.first * 7 / 10, axis.second * 7 / 10, 80), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(axis.first, axis.second, 149), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(0, 0, 150), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(axis.first / 2, axis.second / 2, 151), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(axis.first, axis.second, 152), direction);
+    EXPECT_EQ(navigation.update_stick(axis.first, axis.second, 302), direction);
+  }
+}
+
+/**
+ * @brief Dominant axis changes respond immediately, including ties and the signed axis endpoints.
+ */
+TEST(DirectionNavigationTest, StickChangesDirectionWithoutWaitingForRepeat) {
+  input::DirectionNavigation navigation;
+  EXPECT_EQ(navigation.update_stick(32767, -32000, 0), input::UiCommand::move_right);
+  EXPECT_EQ(navigation.update_stick(32767, -32768, 1), input::UiCommand::move_down);
+  EXPECT_EQ(navigation.update_stick(-32768, 0, 2), input::UiCommand::move_left);
+  EXPECT_EQ(navigation.update_stick(16000, 16000, 3), input::UiCommand::move_up);
+  EXPECT_EQ(navigation.update_stick(0, 11999, 4), input::UiCommand::none);
+  EXPECT_EQ(navigation.update_stick(0, 15999, 5), input::UiCommand::none);
+  EXPECT_EQ(navigation.update_stick(0, 16000, 6), input::UiCommand::move_up);
 }

@@ -250,6 +250,33 @@ TEST(StreamMenuTest, LabelsEveryCellIndependentlyOfTheFocusedBinding) {
 }
 
 /**
+ * @brief The symbols page retains its explicit digits and punctuation when one-shot Shift or Caps is active.
+ */
+TEST(StreamMenuTest, ShiftDoesNotReplaceExplicitSymbolsPageKeys) {
+  input::StreamMenu menu;
+  menu.open(-1);
+  menu.page = input::StreamMenuPage::keyboard;
+  menu.toggle_keyboard_page();
+  std::array<std::string, 40> labels;
+  for (int i = 0; i < 40; ++i) {
+    labels[i] = menu.key_label(i);
+  }
+  for (bool caps : {false, true}) {
+    menu.caps = caps;
+    menu.shiftOnce = true;
+    menu.modifiers = MODIFIER_CTRL;
+    for (int i = 0; i < 40; ++i) {
+      menu.keyIndex = i;
+      const auto &binding = input::StreamMenu::KEYS[menu.keyboard_cells()[i].key];
+      EXPECT_EQ(menu.key_label(i), labels[i]);
+      EXPECT_EQ(menu.key_modifiers(menu.keyboard_key()), MODIFIER_CTRL | binding.modifiers);
+    }
+  }
+  menu.key_sent();
+  EXPECT_FALSE(menu.shiftOnce);
+}
+
+/**
  * @brief D-pad navigation selects a wheel sector and logs clamp to their scroll range.
  */
 TEST(StreamMenuTest, SupportsDigitalNavigationAndLogScrolling) {

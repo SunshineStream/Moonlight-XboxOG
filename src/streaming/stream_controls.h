@@ -8,11 +8,13 @@
 #include "src/input/stream_input.h"
 #include "src/input/stream_menu.h"
 #include "src/input/ui_input.h"
+#include "src/streaming/video_overlay.h"
 
 #include <array>
 #include <cstddef>
 #include <map>
 #include <memory>
+#include <optional>
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <string>
@@ -166,22 +168,24 @@ namespace streaming {
      */
     void render_menu(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool stats);
     /**
-     * @brief Draw the Xbox-style character grid, wide space bar and tall shortcut controls.
+     * @brief Draw the keyboard, optionally repainting only the old and new focus cells.
      * @param renderer Software panel renderer.
      * @param font Keyboard font.
      * @param width Panel width.
      * @param height Panel height, including the helper footer.
      * @param rowHeight Height of one character row.
+     * @param focusOnly Retain unchanged keys and helpers during directional navigation.
      */
-    void render_keyboard(SDL_Renderer *renderer, TTF_Font *font, int width, int height, int rowHeight);
+    void render_keyboard(SDL_Renderer *renderer, TTF_Font *font, int width, int height, int rowHeight, bool focusOnly = false);
     /**
      * @brief Draw a cached SVG raster on the current software panel.
      * @param renderer Panel renderer.
      * @param asset Icon filename under assets/icons.
      * @param bounds Destination bounds.
+     * @param clip Optional repaint rectangle, applied through source cropping rather than renderer clipping.
      * @return True when the icon was drawn.
      */
-    bool render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds);
+    bool render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip = nullptr);
     /**
      * @brief Draw a controller glyph or keyboard keycap beside its action label.
      * @param renderer Panel renderer.
@@ -212,6 +216,7 @@ namespace streaming {
     input::StreamMenu menu_;  ///< Local menu state.
     input::KeyboardNavigation keyboardNavigation_;  ///< Local keyboard repeats, independent of gameplay key forwarding.
     input::DirectionNavigation controllerNavigation_;  ///< Immediate direction changes with the shared repeat interval.
+    bool controllerNavigationApplied_ = false;  ///< Queued events and the polling sample can advance focus only once per input pass.
     bool navigationNeutralRequired_ = false;  ///< Release wheel navigation before moving around a newly opened page.
     input::UiInputDevice inputDevice_ = input::UiInputDevice::gamepad;  ///< Device used by local helper text.
     bool armed_ = false;  ///< Opening buttons have been released.
@@ -236,5 +241,12 @@ namespace streaming {
     std::map<std::tuple<TTF_Font *, std::string, int, Uint32>, CachedText> text_;  ///< Bounded cache of unchanged label rasters.
     std::size_t textBytes_ = 0;  ///< Estimated text texture bytes, bounded to protect the Xbox memory budget.
     std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Texture>> iconTextures_;  ///< Renderer-owned SVG textures.
+    /**
+     * @brief Content dependencies other than the focused key or wheel sector.
+     */
+    using PanelContent = std::tuple<TTF_Font *, input::UiInputDevice, input::StreamMenuPage, int, int, bool, bool, bool, int, bool, std::string>;
+    std::optional<PanelContent> panelContent_;  ///< Last fully drawn content; changes invalidate incremental focus painting.
+    int panelSelection_ = -1;  ///< Previously painted keyboard cell or wheel sector.
+    std::vector<VideoRectangle> panelDamage_;  ///< Regions repainted during the current input pass.
   };
 }  // namespace streaming
