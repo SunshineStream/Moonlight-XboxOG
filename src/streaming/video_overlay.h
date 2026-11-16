@@ -85,7 +85,7 @@ namespace streaming {
      */
     void set_bitmap(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left, std::vector<std::uint8_t> opacity = {});
     /**
-     * @brief Replace the panel with straight ARGB pixels and their original SVG colors.
+     * @brief Replace colored pixels, retaining conversion caches and tracking damage for stable panel geometry.
      * @param width Bitmap width.
      * @param height Bitmap height.
      * @param pixels Packed B, G, R, A bytes; invalid storage clears the panel.
@@ -168,6 +168,7 @@ namespace streaming {
     int width_ = 0;  ///< Packed panel width.
     int height_ = 0;  ///< Packed panel height.
     VideoOverlayPlacement placement_ = VideoOverlayPlacement::top_left;  ///< Panel anchor shared by SDL, RGB and YUY2 paths.
+    VideoRectangle damage_ {};  ///< Pending source-pixel changes; only affected YUY2 pairs need reconversion.
     std::vector<std::uint8_t> grayscale_;  ///< Unpremultiplied font and UI colors.
     std::vector<std::uint8_t> opacity_;  ///< Optional source coverage; empty for legacy opaque statistics.
     std::vector<std::uint8_t> argb_;  ///< Original straight ARGB UI colors; empty for grayscale statistics.

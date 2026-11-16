@@ -125,6 +125,12 @@ namespace input {
      * @brief Consume one-shot Shift after sending a host key.
      */
     void key_sent();
+    /**
+     * @brief Complete the disconnect dialog directly, without directional selection.
+     * @param accept True for A/Enter to disconnect; false for B/Escape to cancel.
+     * @return True only for an accepted disconnect on the confirmation page.
+     */
+    bool confirm_disconnect(bool accept);
     StreamMenuPage page = StreamMenuPage::closed;  ///< Current screen.
     StreamAction selected = StreamAction::none;  ///< Highlighted wheel action.
     int owner = -1;  ///< Controller that opened local controls.
@@ -132,7 +138,6 @@ namespace input {
     int keyboardLayout = 0;  ///< Letters, symbols, or desktop keys and shortcuts (0 through 2).
     bool shiftOnce = false;  ///< Shift applies to the next host key only.
     bool caps = false;  ///< Persistent uppercase letters, independent of the host Caps Lock state.
-    bool confirmQuit = false;  ///< Disconnect button selected; Cancel is the initial selection.
     int modifiers = 0;  ///< Latched Moonlight modifier toggles.
     int logOffset = 0;  ///< Lines scrolled backward from the newest log.
     static constexpr int KEYBOARD_COLUMNS = 26;  ///< Half-key column units, including both side control rails.
@@ -143,6 +148,12 @@ namespace input {
     static const std::array<StreamKeyboardKey, 118> KEYS;  ///< Host keys, explicit symbols and common desktop shortcuts.
 
   private:
+    /**
+     * @brief Resolve a cell's own binding without consulting the highlighted cell.
+     * @param index Host key catalog index.
+     * @return Effective modifiers for that binding.
+     */
+    int binding_modifiers(int index) const;
     int keyboardColumn_ = 4;  ///< Preferred column retained while traversing wide keys.
     int keyboardRow_ = 1;  ///< Preferred row retained while traversing tall side controls.
     std::array<short, 4> previousSticks_ {};  ///< Previous sampled axes so a stationary stick cannot steal the other wheel's selection.

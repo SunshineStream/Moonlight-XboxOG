@@ -10,11 +10,13 @@
 #include "src/input/ui_input.h"
 
 #include <array>
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace streaming {
@@ -86,7 +88,7 @@ namespace streaming {
      */
     std::vector<std::string> diagnostic_lines() const;
     /**
-     * @brief Route SDL events and rebuild local UI only when it changes.
+     * @brief Route a bounded batch of SDL events and update cached local controls without starving video presentation.
      * @param backend Active video backend receiving the shared GPU/software overlay.
      * @param font Font for menu labels and keyboard cells.
      * @param width Output width.
@@ -108,6 +110,38 @@ namespace streaming {
 
   private:
     /**
+     * @brief One renderer-owned text texture reused between focus updates.
+     */
+    struct CachedText {
+      int width = 0;  ///< Natural raster width.
+      int height = 0;  ///< Natural raster height.
+      std::shared_ptr<SDL_Texture> texture;  ///< Texture tied to the retained panel renderer.
+    };
+
+    /**
+     * @brief Release panel caches before destroying their renderer and surface.
+     */
+    void clear_panel();
+    /**
+     * @brief Draw cached text without rerasterizing unchanged labels on each selection.
+     * @param renderer Retained panel renderer.
+     * @param font Label font.
+     * @param text UTF-8 label.
+     * @param bounds Label bounds.
+     * @param leading Align console output to its top-left corner.
+     * @param background Paint an opaque label background.
+     * @param fitSingleLine Shrink a single-line key label to fit.
+     * @param foreground Text color.
+     */
+    void label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, bool leading = false, bool background = true, bool fitSingleLine = false, SDL_Color foreground = {255, 255, 255, 255});
+    /**
+     * @brief Apply sampled or queued digital/stick navigation with shared repeat timing.
+     * @param sample Controller state, with positive stick Y upward.
+     * @param now Current SDL tick.
+     */
+    void navigate_controller(const input::ControllerState &sample, Uint32 now);
+
+    /**
      * @brief Independent controller state and shortcut latch.
      */
     struct Device {
@@ -123,7 +157,7 @@ namespace streaming {
      */
     void open_menu(int device);
     /**
-     * @brief Draw colored controls with a solid OSK panel and a transparent wheel background.
+     * @brief Draw cached colored controls with an opaque OSK and a translucent wheel backdrop.
      * @param backend Video backend.
      * @param font Menu font.
      * @param width Output width.
@@ -177,13 +211,14 @@ namespace streaming {
     input::StreamInput router_;  ///< Ordered event-thread host input.
     input::StreamMenu menu_;  ///< Local menu state.
     input::KeyboardNavigation keyboardNavigation_;  ///< Local keyboard repeats, independent of gameplay key forwarding.
+    input::DirectionNavigation controllerNavigation_;  ///< Immediate direction changes with the shared repeat interval.
+    bool navigationNeutralRequired_ = false;  ///< Release wheel navigation before moving around a newly opened page.
     input::UiInputDevice inputDevice_ = input::UiInputDevice::gamepad;  ///< Device used by local helper text.
     bool armed_ = false;  ///< Opening buttons have been released.
     bool dirty_ = false;  ///< Overlay requires rasterization.
     bool focused_ = true;  ///< Window focus state.
     int mouseDevice_ = -1;  ///< Virtual mouse controller, or disabled.
     Uint32 lastTick_ = 0;  ///< Pointer integration clock.
-    Uint32 navigationTick_ = 0;  ///< Stick navigation repeat clock.
     int pulseSlot_ = -1;  ///< Controller with a pending guide/share release.
     Uint32 pulseUntil_ = 0;  ///< Guide/share pulse deadline.
     std::string message_;  ///< Last action result.
@@ -196,5 +231,10 @@ namespace streaming {
     std::string screenshotDirectory_;  ///< Configured screenshot folder, empty for the default.
     Uint32 logRefreshTick_ = 0;  ///< Last live log refresh.
     std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Surface>> icons_;  ///< Cached SVG rasters survive panel renderer replacement.
+    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> panel_ {nullptr, SDL_FreeSurface};  ///< Retained software composition target.
+    std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> panelRenderer_ {nullptr, SDL_DestroyRenderer};  ///< Renderer reused at a stable panel size.
+    std::map<std::tuple<TTF_Font *, std::string, int, Uint32>, CachedText> text_;  ///< Bounded cache of unchanged label rasters.
+    std::size_t textBytes_ = 0;  ///< Estimated text texture bytes, bounded to protect the Xbox memory budget.
+    std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Texture>> iconTextures_;  ///< Renderer-owned SVG textures.
   };
 }  // namespace streaming

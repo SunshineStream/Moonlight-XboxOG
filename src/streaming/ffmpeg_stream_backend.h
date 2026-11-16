@@ -275,7 +275,7 @@ namespace streaming {
      */
     void render_sdl_statistics(SDL_Renderer *renderer, const SDL_Rect &destination);
     /**
-     * @brief Mark either bitmap format changed and discard the previous SDL texture.
+     * @brief Mark pixels changed, retaining the SDL texture when its dimensions still match.
      */
     void invalidate_overlay_texture();
     /**

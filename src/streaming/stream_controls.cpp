@@ -184,33 +184,49 @@ namespace {
     }
   }
 
-  /**
-   * @brief Rasterize clipped text with optional leading alignment and a background.
-   * @param renderer Software panel renderer.
-   * @param font Label font.
-   * @param text UTF-8 label.
-   * @param bounds Label rectangle.
-   * @param leading Align text to the top-left for console output instead of centering it.
-   * @param background True to paint a label background; false to retain its key surface.
-   * @param fitSingleLine Scale an unwrapped key label down when needed to fit SD cells.
-   * @param foreground Text color, including log severity and focused modal buttons.
-   */
-  void label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, bool leading = false, bool background = true, bool fitSingleLine = false, SDL_Color foreground = {255, 255, 255, 255}) {
+}  // namespace
+
+namespace streaming {
+  void StreamControls::clear_panel() {
+    text_.clear();
+    textBytes_ = 0;
+    iconTextures_.clear();
+    panelRenderer_.reset();
+    panel_.reset();
+  }
+
+  void StreamControls::label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, bool leading, bool background, bool fitSingleLine, SDL_Color foreground) {
     if (background) {
       SDL_SetRenderDrawColor(renderer, 16, 16, 16, 255);
       SDL_RenderFillRect(renderer, &bounds);
     }
-    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface(fitSingleLine ? TTF_RenderUTF8_Blended(font, text.c_str(), foreground) : TTF_RenderUTF8_Blended_Wrapped(font, text.c_str(), foreground, std::max(1, bounds.w - 4)), SDL_FreeSurface);
-    if (!surface) {
+    if (text.empty()) {
       return;
     }
-    std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture(SDL_CreateTextureFromSurface(renderer, surface.get()), SDL_DestroyTexture);
-    if (!texture) {
-      return;
+    const Uint32 color = foreground.r | (static_cast<Uint32>(foreground.g) << 8) | (static_cast<Uint32>(foreground.b) << 16) | (static_cast<Uint32>(foreground.a) << 24);
+    const auto key = std::make_tuple(font, text, fitSingleLine ? 0 : std::max(1, bounds.w - 4), color);
+    auto found = text_.find(key);
+    if (found == text_.end()) {
+      std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface(fitSingleLine ? TTF_RenderUTF8_Blended(font, text.c_str(), foreground) : TTF_RenderUTF8_Blended_Wrapped(font, text.c_str(), foreground, std::max(1, bounds.w - 4)), SDL_FreeSurface);
+      if (!surface) {
+        return;
+      }
+      const auto bytes = static_cast<std::size_t>(surface->w) * surface->h * 4;
+      if (textBytes_ + bytes > 1024U * 1024U) {
+        SDL_RenderFlush(renderer);
+        text_.clear();
+        textBytes_ = 0;
+      }
+      std::shared_ptr<SDL_Texture> texture(SDL_CreateTextureFromSurface(renderer, surface.get()), SDL_DestroyTexture);
+      if (!texture) {
+        return;
+      }
+      found = text_.emplace(key, CachedText {surface->w, surface->h, std::move(texture)}).first;
+      textBytes_ += bytes;
     }
-    // nxdk's SDL 2.0.9 software queue can dereference a missing viewport when
-    // a standalone clip command follows a texture flush. Crop the source instead.
-    auto layout = streaming::layout_overlay_label(surface->w, surface->h, {bounds.x, bounds.y, bounds.w, bounds.h}, fitSingleLine);
+    const auto &raster = found->second;
+    // nxdk SDL 2.0.9 requires source cropping rather than standalone clip commands.
+    auto layout = layout_overlay_label(raster.width, raster.height, {bounds.x, bounds.y, bounds.w, bounds.h}, fitSingleLine);
     if (leading) {
       layout.source.x = layout.source.y = 0;
       layout.destination.x = bounds.x;
@@ -218,11 +234,47 @@ namespace {
     }
     SDL_Rect source {layout.source.x, layout.source.y, layout.source.width, layout.source.height};
     SDL_Rect destination {layout.destination.x, layout.destination.y, layout.destination.width, layout.destination.height};
-    SDL_RenderCopy(renderer, texture.get(), &source, &destination);
+    SDL_RenderCopy(renderer, raster.texture.get(), &source, &destination);
   }
-}  // namespace
 
-namespace streaming {
+  void StreamControls::navigate_controller(const input::ControllerState &sample, Uint32 now) {
+    if (menu_.page != input::StreamMenuPage::keyboard && menu_.page != input::StreamMenuPage::logs) {
+      controllerNavigation_.reset();
+      return;
+    }
+    int x = (sample.buttonFlags & RIGHT_FLAG) != 0 ? 1 : (sample.buttonFlags & LEFT_FLAG) != 0 ? -1 :
+                                                                                                 0;
+    int y = (sample.buttonFlags & DOWN_FLAG) != 0 ? 1 : (sample.buttonFlags & UP_FLAG) != 0 ? -1 :
+                                                                                              0;
+    if (x == 0 && y == 0) {
+      if (std::max(std::abs(static_cast<int>(sample.leftStickX)), std::abs(static_cast<int>(sample.leftStickY))) >= input::StreamMenu::WHEEL_DEADZONE) {
+        if (std::abs(static_cast<int>(sample.leftStickX)) > std::abs(static_cast<int>(sample.leftStickY))) {
+          x = sample.leftStickX > 0 ? 1 : -1;
+        } else {
+          y = sample.leftStickY > 0 ? -1 : 1;
+        }
+      }
+    }
+    if (navigationNeutralRequired_) {
+      if (x == 0 && y == 0) {
+        navigationNeutralRequired_ = false;
+      }
+      return;
+    }
+    const auto command = x > 0 ? input::UiCommand::move_right : x < 0 ? input::UiCommand::move_left :
+                                                              y > 0   ? input::UiCommand::move_down :
+                                                              y < 0   ? input::UiCommand::move_up :
+                                                                        input::UiCommand::none;
+    const auto key = menu_navigation_key(controllerNavigation_.update(command, now));
+    if (key != SDLK_UNKNOWN) {
+      menu_.navigate(key == SDLK_RIGHT ? 1 : key == SDLK_LEFT ? -1 :
+                                                                0,
+                     key == SDLK_DOWN ? 1 : key == SDLK_UP ? -1 :
+                                                             0);
+      dirty_ = true;
+    }
+  }
+
   StreamControls::StreamControls():
       router_(send_packet) {}
 
@@ -249,6 +301,7 @@ namespace streaming {
   }
 
   void StreamControls::close() {
+    clear_panel();
     icons_.clear();
     for (auto &device : devices_) {
       if (device.handle != nullptr) {
@@ -356,6 +409,8 @@ namespace streaming {
     }
     menu_.open(device);
     keyboardNavigation_.reset();
+    controllerNavigation_.reset();
+    navigationNeutralRequired_ = false;
     keyboardPageTriggerDown_ = false;
     keyboardDockTriggerDown_ = false;
     inputDevice_ = device < 0 ? input::UiInputDevice::keyboard : input::UiInputDevice::gamepad;
@@ -389,6 +444,16 @@ namespace streaming {
   }
 
   bool StreamControls::menu_key(SDL_Keycode key, FfmpegStreamBackend &backend, bool active, bool &stats) {
+    if (menu_.page == input::StreamMenuPage::quit_confirmation) {
+      if (key == SDLK_RETURN) {
+        return menu_.confirm_disconnect(true);
+      }
+      if (key == SDLK_ESCAPE) {
+        dirty_ = true;
+        return menu_.confirm_disconnect(false);
+      }
+      return false;
+    }
     dirty_ = true;
     if (key == SDLK_ESCAPE) {
       if (menu_.page == input::StreamMenuPage::radial) {
@@ -435,13 +500,6 @@ namespace streaming {
       }
       return false;
     }
-    if (menu_.page == input::StreamMenuPage::quit_confirmation) {
-      if (menu_.confirmQuit) {
-        return true;
-      }
-      menu_.page = input::StreamMenuPage::radial;
-      return false;
-    }
     if (menu_.page == input::StreamMenuPage::keyboard) {
       if (active) {
         tap_key(menu_.keyboard_key());
@@ -454,13 +512,16 @@ namespace streaming {
     switch (menu_.selected) {
       case input::StreamAction::quit:
         menu_.page = input::StreamMenuPage::quit_confirmation;
-        menu_.confirmQuit = false;
         break;
       case input::StreamAction::keyboard:
         menu_.page = input::StreamMenuPage::keyboard;
+        controllerNavigation_.reset();
+        navigationNeutralRequired_ = true;
         break;
       case input::StreamAction::logs:
         menu_.page = input::StreamMenuPage::logs;
+        controllerNavigation_.reset();
+        navigationNeutralRequired_ = true;
         logs_.clear();
         for (const auto &entry : logging::snapshot()) {
           logs_.push_back(logging::format_entry(entry));
@@ -520,8 +581,10 @@ namespace streaming {
     bool stop = false;
     const bool wasVisible = visible();
     SDL_Event event {};
-    while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT) > 0) {
-      const bool gamepadActivity = event.type == SDL_CONTROLLERBUTTONDOWN || (event.type == SDL_CONTROLLERAXISMOTION && input::is_gamepad_ui_activity(event.caxis.value, event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT));
+    const Uint32 eventStart = SDL_GetTicks();
+    for (int count = 0; count < 128 && (count == 0 || SDL_GetTicks() - eventStart < 4) && SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT) > 0; ++count) {
+      const bool triggerAxis = event.type == SDL_CONTROLLERAXISMOTION && (event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+      const bool gamepadActivity = event.type == SDL_CONTROLLERBUTTONDOWN || (event.type == SDL_CONTROLLERAXISMOTION && (triggerAxis ? event.caxis.value >= 16000 : std::abs(static_cast<int>(event.caxis.value)) >= input::StreamMenu::WHEEL_DEADZONE));
       if (visible() && gamepadActivity && menu_.owner < 0) {
         menu_.owner = event.type == SDL_CONTROLLERBUTTONDOWN ? event.cbutton.which : event.caxis.which;
       }
@@ -586,15 +649,19 @@ namespace streaming {
             router_.controller(button.which, device.sample);
           }
         }
+        if (visible() && armed_ && button.state == SDL_RELEASED && button.which == menu_.owner && menu_.page != input::StreamMenuPage::radial) {
+          for (const auto &device : devices_) {
+            if (device.handle != nullptr && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(device.handle)) == button.which) {
+              navigate_controller(device.sample, SDL_GetTicks());
+            }
+          }
+        }
         if (visible() && armed_ && button.state == SDL_PRESSED) {
           if (menu_.owner < 0) {
             menu_.owner = button.which;
           }
           if (button.which != menu_.owner) {
             continue;
-          }
-          if (button.button >= SDL_CONTROLLER_BUTTON_DPAD_UP && button.button <= SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
-            navigationTick_ = SDL_GetTicks();
           }
           switch (button.button) {
             case SDL_CONTROLLER_BUTTON_A:
@@ -604,16 +671,23 @@ namespace streaming {
               stop = menu_key(SDLK_ESCAPE, backend, active, statisticsEnabled) || stop;
               break;
             case SDL_CONTROLLER_BUTTON_DPAD_UP:
-              menu_key(SDLK_UP, backend, active, statisticsEnabled);
-              break;
             case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-              menu_key(SDLK_DOWN, backend, active, statisticsEnabled);
-              break;
             case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-              menu_key(SDLK_LEFT, backend, active, statisticsEnabled);
-              break;
             case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-              menu_key(SDLK_RIGHT, backend, active, statisticsEnabled);
+              if (menu_.page == input::StreamMenuPage::radial) {
+                menu_key(button.button == SDL_CONTROLLER_BUTTON_DPAD_UP ? SDLK_UP : button.button == SDL_CONTROLLER_BUTTON_DPAD_DOWN ? SDLK_DOWN :
+                                                                                  button.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT   ? SDLK_LEFT :
+                                                                                                                                       SDLK_RIGHT,
+                         backend,
+                         active,
+                         statisticsEnabled);
+              } else {
+                for (const auto &device : devices_) {
+                  if (device.handle != nullptr && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(device.handle)) == button.which) {
+                    navigate_controller(device.sample, SDL_GetTicks());
+                  }
+                }
+              }
               break;
             case SDL_CONTROLLER_BUTTON_X:
               if (active && menu_.page == input::StreamMenuPage::keyboard) {
@@ -652,7 +726,7 @@ namespace streaming {
               break;
           }
         }
-      } else if (event.type == SDL_CONTROLLERAXISMOTION && visible() && armed_ && event.caxis.which == menu_.owner && menu_.page == input::StreamMenuPage::radial) {
+      } else if (event.type == SDL_CONTROLLERAXISMOTION && visible() && armed_ && event.caxis.which == menu_.owner) {
         for (auto &device : devices_) {
           if (device.handle == nullptr || SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(device.handle)) != event.caxis.which) {
             continue;
@@ -676,7 +750,11 @@ namespace streaming {
               break;
           }
           if (event.caxis.axis <= SDL_CONTROLLER_AXIS_RIGHTY) {
-            dirty_ = menu_.sample_sticks(sample.leftStickX, sample.leftStickY, sample.rightStickX, sample.rightStickY) || dirty_;
+            if (menu_.page == input::StreamMenuPage::radial) {
+              dirty_ = menu_.sample_sticks(sample.leftStickX, sample.leftStickY, sample.rightStickX, sample.rightStickY) || dirty_;
+            } else {
+              navigate_controller(sample, SDL_GetTicks());
+            }
           }
         }
       } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
@@ -735,6 +813,10 @@ namespace streaming {
         stop = true;
       }
     }
+    if (stop) {
+      router_.set_captured(true);
+      return true;
+    }
     poll();
     const Uint32 now = SDL_GetTicks();
     if (menu_.page == input::StreamMenuPage::logs && now - logRefreshTick_ >= 1000) {
@@ -791,16 +873,8 @@ namespace streaming {
         // Poll on every pump as well as consuming events: Xbox input can change
         // between queued axis events, and a selected item must not freeze polling.
         dirty_ = menu_.sample_sticks(sample.leftStickX, sample.leftStickY, sample.rightStickX, sample.rightStickY) || dirty_;
-      } else if (menu_.page != input::StreamMenuPage::radial && now - navigationTick_ >= 180) {
-        const int x = (sample.buttonFlags & RIGHT_FLAG) != 0 || sample.leftStickX > 18000 ? 1 : (sample.buttonFlags & LEFT_FLAG) != 0 || sample.leftStickX < -18000 ? -1 :
-                                                                                                                                                                      0;
-        const int y = (sample.buttonFlags & UP_FLAG) != 0 || sample.leftStickY > 18000 ? -1 : (sample.buttonFlags & DOWN_FLAG) != 0 || sample.leftStickY < -18000 ? 1 :
-                                                                                                                                                                    0;
-        if (x != 0 || y != 0) {
-          menu_.navigate(x, y);
-          navigationTick_ = now;
-          dirty_ = true;
-        }
+      } else {
+        navigate_controller(sample, now);
       }
     }
     if (pulseSlot_ >= 0 && (!visible() || static_cast<Sint32>(now - pulseUntil_) >= 0 || (router_.active_mask() & (1U << pulseSlot_)) == 0)) {
@@ -811,6 +885,7 @@ namespace streaming {
       keyboardNavigation_.reset();
       router_.set_captured(!focused_);
       backend.set_statistics_bitmap(0, 0, {});
+      clear_panel();
       dirty_ = false;
     }
     backend.local_overlay_size(width, height);
@@ -856,9 +931,16 @@ namespace streaming {
       return false;
     }
     const auto &surface = found->second;
-    std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture(SDL_CreateTextureFromSurface(renderer, surface.get()), SDL_DestroyTexture);
+    auto texture = iconTextures_.find(key);
+    if (texture == iconTextures_.end()) {
+      auto loaded = std::shared_ptr<SDL_Texture>(SDL_CreateTextureFromSurface(renderer, surface.get()), SDL_DestroyTexture);
+      if (!loaded) {
+        return false;
+      }
+      texture = iconTextures_.emplace(key, std::move(loaded)).first;
+    }
     SDL_Rect destination {bounds.x + (bounds.w - surface->w) / 2, bounds.y + (bounds.h - surface->h) / 2, surface->w, surface->h};
-    return texture && SDL_RenderCopy(renderer, texture.get(), nullptr, &destination) == 0;
+    return SDL_RenderCopy(renderer, texture->second.get(), nullptr, &destination) == 0;
   }
 
   void StreamControls::render_hint(SDL_Renderer *renderer, TTF_Font *font, const char *asset, const char *key, const char *text, SDL_Rect bounds, bool compact) {
@@ -949,7 +1031,7 @@ namespace streaming {
       if (cell.width > 2 && shortcutIcon != nullptr && (!keyboardInput || *shortcutKey != '\0')) {
         if (cell.height > 1) {
           label(renderer, font, text, {key.x + 2, key.y + 2, key.w - 4, key.h / 2}, false, false, true);
-          render_hint(renderer, font, shortcutIcon, shortcutKey, "", {key.x + 2, key.y + key.h / 2, key.w - 4, key.h / 2 - 2}, true);
+          render_hint(renderer, font, shortcutIcon, shortcutKey, "", {key.x + 2, key.y + key.h / 2, key.w - 4, key.h / 2 - 2}, cell.key != input::StreamMenu::KEYBOARD_CAPS_KEY && cell.key != 46);
         } else {
           render_hint(renderer, font, shortcutIcon, shortcutKey, text.c_str(), {key.x + 2, key.y + 2, key.w - 4, key.h - 4}, true);
         }
@@ -967,11 +1049,11 @@ namespace streaming {
     const int line = TTF_FontLineSkip(font) + 8;
     const int footerY = padding + header + input::StreamMenu::KEYBOARD_ROWS * rowHeight + 4;
     const int footerHeight = std::min(line + 4, height - footerY);
-    const std::array<const char *, 6> assets {"button-a.svg", "button-b.svg", "button-lt.svg", "button-right-stick.svg", "button-left-stick.svg", "button-rt.svg"};
-    const std::array<const char *, 6> keys {"Enter", "Esc", "Tab", "Shift", "Caps", "F2"};
-    const std::array<const char *, 6> actions {"Select", "Back", "Pages", menu_.shiftOnce ? "Shift: On" : "Shift", menu_.caps ? "Caps: On" : "Caps", keyboardTop_ ? "Move down" : "Move up"};
-    for (int i = 0; i < 6; ++i) {
-      render_hint(renderer, font, assets[i], keys[i], actions[i], {(i % 3) * width / 3 + 4, footerY + (i / 3) * line, width / 3 - 8, footerHeight});
+    const std::array<const char *, 4> assets {"button-a.svg", "button-b.svg", "button-right-stick.svg", "button-rt.svg"};
+    const std::array<const char *, 4> keys {"Enter", "Esc", "Shift", "F2"};
+    const std::array<const char *, 4> actions {"Select", "Back", menu_.shiftOnce ? "Shift: On" : "Shift", keyboardTop_ ? "Move down" : "Move up"};
+    for (int i = 0; i < 4; ++i) {
+      render_hint(renderer, font, assets[i], keys[i], actions[i], {i * width / 4 + 4, footerY, width / 4 - 8, footerHeight});
     }
   }
 
@@ -983,18 +1065,26 @@ namespace streaming {
     const int rowHeight = std::max(TTF_FontLineSkip(font) + 8, width * 9 / 200);
     const int safeBottom = std::max(8, height / 40);
     width = keyboard ? width * 9 / 10 : width;
-    height = keyboard ? std::min(height - VideoOverlay::MARGIN * 2, rowHeight * input::StreamMenu::KEYBOARD_ROWS + 28 + TTF_FontLineSkip(font) + (TTF_FontLineSkip(font) + 8) * 2 + safeBottom) : height;
+    height = keyboard ? std::min(height - VideoOverlay::MARGIN * 2, rowHeight * input::StreamMenu::KEYBOARD_ROWS + 28 + TTF_FontLineSkip(font) + (TTF_FontLineSkip(font) + 8) + safeBottom) : height;
     if (width <= 0 || height <= 0 || font == nullptr) {
       return;
     }
-    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> panel(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888), SDL_FreeSurface);
-    if (!panel) {
+    if (!panel_ || panel_->w != width || panel_->h != height) {
+      clear_panel();
+      panel_.reset(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888));
+      if (panel_) {
+        panelRenderer_.reset(SDL_CreateSoftwareRenderer(panel_.get()));
+      }
+    }
+    if (!panelRenderer_) {
       return;
     }
-    std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer(SDL_CreateSoftwareRenderer(panel.get()), SDL_DestroyRenderer);
-    if (!renderer) {
-      return;
+    if (text_.size() > 256) {
+      text_.clear();
+      textBytes_ = 0;
     }
+    auto &panel = panel_;
+    auto &renderer = panelRenderer_;
     const Uint8 background = keyboard ? 16 : 0;
     SDL_SetRenderDrawColor(renderer.get(), background, background, background, keyboard ? 255 : 150);
     SDL_RenderClear(renderer.get());
@@ -1065,13 +1155,10 @@ namespace streaming {
       label(renderer.get(), font, "Disconnect from stream?", {card.x + 20, card.y + 28, card.w - 40, line}, false, false);
       label(renderer.get(), font, "The app will keep running on your PC.", {card.x + 20, card.y + 28 + line, card.w - 40, line * 2}, false, false);
       for (int i = 0; i < 2; ++i) {
-        const bool selected = menu_.confirmQuit == (i == 1);
-        SDL_Rect button {card.x + 20 + i * (card.w - 32) / 2, card.y + card.h - line * 2 - 12, (card.w - 48) / 2, line + 8};
-        ui::draw_dialog_round_rect(renderer.get(), button, selected ? SDL_Color {130, 180, 255, 255} : SDL_Color {28, 40, 61, 255}, 6);
-        label(renderer.get(), font, i == 0 ? "Cancel" : "Disconnect", button, false, false, true, selected ? SDL_Color {13, 18, 29, 255} : SDL_Color {242, 245, 248, 255});
+        SDL_Rect button {card.x + 20 + i * (card.w - 32) / 2, card.y + card.h - line * 2, (card.w - 48) / 2, line + 12};
+        ui::draw_dialog_round_rect(renderer.get(), button, {28, 40, 61, 255}, 6);
+        render_hint(renderer.get(), font, i == 0 ? "button-b.svg" : "button-a.svg", i == 0 ? "Esc" : "Enter", i == 0 ? "Cancel" : "Disconnect", {button.x + 4, button.y, button.w - 8, button.h});
       }
-      render_hint(renderer.get(), font, "button-a.svg", "Enter", "Select", {card.x, card.y + card.h - line, card.w / 2, line});
-      render_hint(renderer.get(), font, "button-b.svg", "Esc", "Back", {card.x + card.w / 2, card.y + card.h - line, card.w / 2, line});
     }
     if (!message_.empty() && menu_.page == input::StreamMenuPage::radial) {
       label(renderer.get(), font, message_, {4, line + 4, width - 8, line * 2}, false, false);

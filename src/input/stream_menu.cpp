@@ -163,7 +163,6 @@ namespace input {
     keyboardLayout = 0;
     shiftOnce = false;
     caps = false;
-    confirmQuit = false;
     keyboardColumn_ = 4;
     keyboardRow_ = 1;
     previousSticks_ = {};
@@ -222,8 +221,7 @@ namespace input {
       if (next != cells.end()) {
         keyIndex = static_cast<int>(next - cells.begin());
       }
-    } else if (page == StreamMenuPage::quit_confirmation && (x != 0 || y != 0)) {
-      confirmQuit = !confirmQuit;
+
     } else if (page == StreamMenuPage::logs) {
       logOffset = std::clamp(logOffset - y * 5, 0, 255);
     } else if (page == StreamMenuPage::radial && (x != 0 || y != 0)) {
@@ -260,7 +258,7 @@ namespace input {
                                                                   "ABC";
     }
     if (catalogIndex == KEYBOARD_CAPS_KEY) {
-      return caps ? "[Caps]" : "Caps";
+      return "Caps";
     }
     const auto &key = KEYS.at(catalogIndex);
     if (key.code == -MODIFIER_SHIFT) {
@@ -269,17 +267,34 @@ namespace input {
     if (key.code < 0 && (modifiers & -key.code) != 0) {
       return std::string("[") + key.label + "]";
     }
-    return (key_modifiers(key.code) & MODIFIER_SHIFT) != 0 ? key.shifted : key.label;
+    return (binding_modifiers(catalogIndex) & MODIFIER_SHIFT) != 0 ? key.shifted : key.label;
   }
 
   int StreamMenu::key_modifiers(int code) const {
     const int key = keyboard_cells().at(keyIndex).key;
-    const int required = key < static_cast<int>(KEYS.size()) && KEYS[key].code == code ? KEYS[key].modifiers : 0;
-    if (key >= 106 && key < static_cast<int>(KEYS.size()) && KEYS[key].code == code) {
-      return required;
+    if (key < static_cast<int>(KEYS.size()) && KEYS[key].code == code) {
+      return binding_modifiers(key);
     }
-    const bool upper = shiftOnce != (caps && code >= 'A' && code <= 'Z');
-    return modifiers | required | (upper ? MODIFIER_SHIFT : 0);
+    return modifiers | ((shiftOnce != (caps && code >= 'A' && code <= 'Z')) ? MODIFIER_SHIFT : 0);
+  }
+
+  int StreamMenu::binding_modifiers(int index) const {
+    const auto &key = KEYS.at(index);
+    if (index >= 106) {
+      return key.modifiers;
+    }
+    const bool upper = shiftOnce != (caps && key.code >= 'A' && key.code <= 'Z');
+    return modifiers | key.modifiers | (upper ? MODIFIER_SHIFT : 0);
+  }
+
+  bool StreamMenu::confirm_disconnect(bool accept) {
+    if (page != StreamMenuPage::quit_confirmation) {
+      return false;
+    }
+    if (!accept) {
+      page = StreamMenuPage::radial;
+    }
+    return accept;
   }
 
   void StreamMenu::toggle_shift() {

@@ -81,6 +81,30 @@ namespace input {
   };
 
   /**
+   * @brief Repeat one sampled controller direction with the shared keyboard/menu timing.
+   */
+  class DirectionNavigation {
+  public:
+    /**
+     * @brief Emit a changed direction immediately, then repeat after the shared hold delay.
+     * @param command Sampled direction, or none at neutral.
+     * @param now Monotonic millisecond tick, allowed to wrap.
+     * @return Direction to apply, or none until the next repeat.
+     */
+    UiCommand update(UiCommand command, std::uint32_t now);
+    /**
+     * @brief Clear the held direction on a page or input-device transition.
+     */
+    void reset();
+
+  private:
+    UiCommand command_ = UiCommand::none;  ///< Currently held direction.
+    std::uint32_t pressedAt_ = 0;  ///< First sample of the held direction.
+    std::uint32_t repeatedAt_ = 0;  ///< Most recent emitted repeat.
+    bool repeated_ = false;  ///< The initial repeat delay has elapsed.
+  };
+
+  /**
    * @brief Repeat timing for one held controller direction.
    */
   struct ControllerNavigationHoldState {

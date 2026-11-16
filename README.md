@@ -99,7 +99,8 @@ for readability. Guide and Share use Xbox Series-style symbols.
 | Left  | Keyboard | Mouse mode | View logs  | Quit stream            |
 | Right | Guide    | Share      | Screenshot | Enable / disable stats |
 
-**Quit stream** asks for confirmation before disconnecting. The client displays **Stopping stream...**,
+**Quit stream** opens a confirmation dialog: **A / Enter** disconnects and **B / Esc** cancels.
+The icons sit on their buttons; arrow navigation is not required. The client displays **Stopping stream...**,
 then a stream summary. Release the buttons, then press a button to return to the library.
 The host application keeps running.
 
@@ -114,7 +115,9 @@ Alt+Tab, Alt+F4, Ctrl+Alt+Delete, Win+D, Win+E and Win+R. Focus a shortcut to se
 above the keys. Named shortcuts send their own modifier combination. **RT** moves the panel between
 the top and bottom edges; the placement is saved when the stream ends. **B** returns to the wheels.
 Leaving the keyboard clears held modifiers. Keys use the host's US keyboard layout.
-Controller shortcut icons retain the same colors as the main menus, with smaller glyphs inside keys.
+Controller shortcut icons retain the same colors as the main menus. Caps and Enter use larger side-key
+glyphs; the four footer helpers (Select, Back, Shift and Move) share one row. Held controller navigation
+uses the same 150 ms initial delay and 45 ms repeat interval as keyboard navigation.
 When using a physical keyboard, use **Tab** to change page, **Shift** for one-shot Shift, **Caps Lock**
 to toggle Caps, **F2** to move the panel, **Space / Backspace** to send those keys, and **Esc** to return.
 In the numeric address/port keypad, **Space** types the focused key and **Enter** accepts the field;
@@ -122,7 +125,8 @@ In the numeric address/port keypad, **Space** types the focused key and **Enter*
 
 Stream logs appear in a live side panel with severity colors and a scrollbar. Scroll upward to read
 older entries; return to the bottom to follow new entries. The disconnect dialog uses the same modal
-surface as the main menus, starts on **Cancel**, and leaves the host app running after disconnecting.
+surface as the main menus, accepts **A / Enter** to disconnect and **B / Esc** to cancel, and leaves
+the host app running after disconnecting.
 Returning from the stream resets local keyboard/controller holds before library navigation resumes.
 
 Screenshots default to `E:\UDATA\<title-id>\screenshots` and omit local controls. Change
@@ -132,7 +136,8 @@ Use a TOML literal string for Xbox paths, for example `screenshot_directory = 'F
 The same section stores `keyboard_dock_top = false` (bottom) or `true` (top).
 
 Mouse mode uses the invoking controller's **left stick** for movement and **A / B** for left / right
-clicks. That controller's gameplay input stays suppressed until mouse mode is disabled through the menu;
+clicks. Stick-driven mouse movement is reported at up to 125 Hz, while button presses and releases
+are sent immediately. That controller's gameplay input stays suppressed until mouse mode is disabled through the menu;
 other gamepads continue to work. Physical keyboard and mouse input can be used alongside virtual input.
 
 Up to four gamepads are sent as separate controllers to Sunshine. Disconnecting a controller releases

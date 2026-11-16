@@ -199,20 +199,64 @@ namespace streaming {
       set_bitmap(0, 0, {});
       return;
     }
+    const bool sameGeometry = width_ == width && height_ == height && placement_ == placement && !argb_.empty();
+    if (sameGeometry && argb_ == pixels) {
+      return;
+    }
+    bool opaque = true;
+    for (std::size_t index = 3; index < pixels.size(); index += 4) {
+      if (pixels[index] != 255) {
+        opaque = false;
+        break;
+      }
+    }
+    const bool reuse = sameGeometry && opaque == opaque_;
+    VideoRectangle changed {};
+    if (reuse) {
+      int left = width;
+      int right = 0;
+      int top = height;
+      int bottom = 0;
+      for (int row = 0; row < height; ++row) {
+        const auto offset = static_cast<std::size_t>(row) * width * 4;
+        if (std::memcmp(argb_.data() + offset, pixels.data() + offset, static_cast<std::size_t>(width) * 4) == 0) {
+          continue;
+        }
+        int first = 0;
+        while (std::memcmp(argb_.data() + offset + first * 4, pixels.data() + offset + first * 4, 4) == 0) {
+          ++first;
+        }
+        int last = width - 1;
+        while (std::memcmp(argb_.data() + offset + last * 4, pixels.data() + offset + last * 4, 4) == 0) {
+          --last;
+        }
+        left = std::min(left, first);
+        right = std::max(right, last + 1);
+        top = std::min(top, row);
+        bottom = row + 1;
+      }
+      if (damage_.width > 0 && damage_.height > 0) {
+        left = std::min(left, damage_.x);
+        right = std::max(right, damage_.x + damage_.width);
+        top = std::min(top, damage_.y);
+        bottom = std::max(bottom, damage_.y + damage_.height);
+      }
+      changed = {left, top, right - left, bottom - top};
+    }
     width_ = width;
     height_ = height;
     placement_ = placement;
     argb_ = std::move(pixels);
     std::vector<std::uint8_t>().swap(grayscale_);
     std::vector<std::uint8_t>().swap(opacity_);
-    opaque_ = true;
-    for (std::size_t index = 3; index < argb_.size(); index += 4) {
-      if (argb_[index] != 255) {
-        opaque_ = false;
-        break;
-      }
+    opaque_ = opaque;
+    if (reuse) {
+      rgb_.clear();
+      rgbBpp_ = 0;
+      damage_ = changed;
+    } else {
+      invalidate_caches();
     }
-    invalidate_caches();
   }
 
   std::uint32_t VideoOverlay::color_at(std::size_t index) const {
@@ -226,6 +270,7 @@ namespace streaming {
   }
 
   void VideoOverlay::invalidate_caches() {
+    damage_ = {0, 0, width_, height_};
     rgb_.clear();
     rgbBpp_ = 0;
     yuy2_.clear();
@@ -333,7 +378,8 @@ namespace streaming {
     if (!valid_storage(pixels, capacity, pitch, frameWidth, frameHeight, 2) || (frameWidth & 1) != 0 || frameWidth > 2046 || frameHeight > 2047 || destination.width <= MARGIN || destination.height <= MARGIN || matrix == VideoColorMatrix::unsupported) {
       return false;
     }
-    if (frameWidth_ != frameWidth || frameHeight_ != frameHeight || outputWidth_ != destination.width || outputHeight_ != destination.height || matrix_ != matrix) {
+    const bool rebuild = frameWidth_ != frameWidth || frameHeight_ != frameHeight || outputWidth_ != destination.width || outputHeight_ != destination.height || matrix_ != matrix;
+    if (rebuild) {
       matrix_ = matrix;
       frameWidth_ = frameWidth;
       frameHeight_ = frameHeight;
@@ -357,9 +403,21 @@ namespace streaming {
       if (!opaque_) {
         yuy2Opacity_.resize(yuy2_.size() / 2);
       }
-      for (int row = 0; row < source_.height; ++row) {
+    }
+    if (rebuild || (damage_.width > 0 && damage_.height > 0)) {
+      const auto bounds = rectangle({0, 0, destination.width, destination.height});
+      const int visibleWidth = bounds.width;
+      const int visibleHeight = bounds.height;
+      if (visibleWidth == 0 || visibleHeight == 0) {
+        return true;
+      }
+      const int firstRow = rebuild ? 0 : std::min(source_.height, damage_.y * source_.height / visibleHeight);
+      const int lastRow = rebuild ? source_.height : std::min(source_.height, ((damage_.y + damage_.height) * source_.height + visibleHeight - 1) / visibleHeight);
+      const int firstColumn = rebuild ? 0 : std::min(source_.width, (damage_.x * source_.width / visibleWidth) & ~1);
+      const int lastColumn = rebuild ? source_.width : std::min(source_.width, ((((damage_.x + damage_.width) * source_.width + visibleWidth - 1) / visibleWidth) + 1) & ~1);
+      for (int row = firstRow; row < lastRow; ++row) {
         const int bitmapRow = std::min(visibleHeight - 1, row * visibleHeight / source_.height);
-        for (int column = 0; column < source_.width; column += 2) {
+        for (int column = firstColumn; column < lastColumn; column += 2) {
           const int firstColumn = std::min(visibleWidth - 1, column * visibleWidth / source_.width);
           const int secondColumn = std::min(visibleWidth - 1, (column + 1) * visibleWidth / source_.width);
           const auto firstColor = color_at(static_cast<std::size_t>(bitmapRow) * width_ + firstColumn);
@@ -383,6 +441,7 @@ namespace streaming {
         }
       }
     }
+    damage_ = {};
 
     if (source_.width <= 0 || source_.height <= 0) {
       return true;

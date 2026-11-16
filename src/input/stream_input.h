@@ -90,7 +90,7 @@ namespace input {
      */
     void set_mouse_device(int device);
     /**
-     * @brief Integrate stick movement at a bounded time step, preserving fractional motion.
+     * @brief Integrate stick movement at up to 125 reports/second, preserving fractional motion and immediate clicks.
      * @param milliseconds Elapsed event-thread time.
      */
     void tick(unsigned milliseconds);
@@ -171,6 +171,7 @@ namespace input {
     int mouseDevice_ = -1;  ///< Pad controlling the mouse, or disabled.
     double mouseX_ = 0;  ///< Fractional horizontal motion.
     double mouseY_ = 0;  ///< Fractional vertical motion.
+    unsigned mouseElapsed_ = 0;  ///< Milliseconds accumulated toward the next 8 ms pointer report.
   };
 
   /**

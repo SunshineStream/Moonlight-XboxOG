@@ -204,19 +204,49 @@ TEST(StreamMenuTest, SendsSymbolsAndDesktopCombinations) {
 }
 
 /**
- * @brief Disconnect confirmation starts with Cancel and changes only on deliberate navigation.
+ * @brief Disconnect is accepted directly and arrows cannot change A/B semantics.
  */
-TEST(StreamMenuTest, DefaultsToCancelOnDisconnectConfirmation) {
+TEST(StreamMenuTest, RequiresExplicitDisconnectAndCancelsDirectly) {
   input::StreamMenu menu;
+  EXPECT_FALSE(menu.confirm_disconnect(true));
   menu.open(1);
+  EXPECT_FALSE(menu.confirm_disconnect(true));
   menu.page = input::StreamMenuPage::quit_confirmation;
-  EXPECT_FALSE(menu.confirmQuit);
-  menu.navigate(0, 0);
-  EXPECT_FALSE(menu.confirmQuit);
   menu.navigate(1, 0);
-  EXPECT_TRUE(menu.confirmQuit);
-  menu.navigate(-1, 0);
-  EXPECT_FALSE(menu.confirmQuit);
+  menu.navigate(0, -1);
+  EXPECT_EQ(menu.page, input::StreamMenuPage::quit_confirmation);
+  EXPECT_FALSE(menu.confirm_disconnect(false));
+  EXPECT_EQ(menu.page, input::StreamMenuPage::radial);
+  menu.page = input::StreamMenuPage::quit_confirmation;
+  EXPECT_TRUE(menu.confirm_disconnect(true));
+}
+
+/**
+ * @brief A symbol sharing a digit's virtual key never changes that digit's label or sent modifiers.
+ */
+TEST(StreamMenuTest, LabelsEveryCellIndependentlyOfTheFocusedBinding) {
+  input::StreamMenu menu;
+  menu.open(-1);
+  menu.page = input::StreamMenuPage::keyboard;
+  menu.toggle_keyboard_page();
+  const std::array<const char *, 10> digits {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"};
+  for (int focus = 0; focus < 47; ++focus) {
+    menu.keyIndex = focus;
+    for (int digit = 0; digit < 10; ++digit) {
+      EXPECT_EQ(menu.key_label(digit), digits[digit]) << "focus=" << focus;
+    }
+  }
+  menu.keyIndex = 12;
+  EXPECT_EQ(menu.key_label(2), "3");
+  EXPECT_EQ(menu.key_label(12), "#");
+  EXPECT_EQ(menu.keyboard_key(), '3');
+  EXPECT_EQ(menu.key_modifiers('3'), MODIFIER_SHIFT);
+  menu.keyIndex = 2;
+  EXPECT_EQ(menu.keyboard_key(), '3');
+  EXPECT_EQ(menu.key_modifiers('3'), 0);
+  menu.caps = true;
+  EXPECT_EQ(menu.key_label(43), "Caps");
+  EXPECT_EQ(menu.key_label(2), "3");
 }
 
 /**

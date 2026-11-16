@@ -131,6 +131,7 @@ namespace input {
     const int previous = mouseDevice_;
     mouseDevice_ = device;
     mouseX_ = mouseY_ = 0;
+    mouseElapsed_ = 0;
     for (int i = 0; i < 4; ++i) {
       if (slots_[i].device != -1 && (slots_[i].device == previous || slots_[i].device == device)) {
         if (!equal(slots_[i].last, {})) {
@@ -145,6 +146,12 @@ namespace input {
     if (captured_ || mouseDevice_ < 0) {
       return;
     }
+    mouseElapsed_ = std::min(50U, mouseElapsed_ + std::min(milliseconds, 50U));
+    if (mouseElapsed_ < 8) {
+      return;
+    }
+    const double seconds = mouseElapsed_ / 1000.0;
+    mouseElapsed_ = 0;
     for (const auto &slot : slots_) {
       if (slot.device != mouseDevice_ || slot.blocked) {
         continue;
@@ -152,7 +159,6 @@ namespace input {
       const auto &state = slot.sampled;
       mouse_button(VIRTUAL_MOUSE_SOURCE, BUTTON_LEFT, (state.buttonFlags & A_FLAG) != 0);
       mouse_button(VIRTUAL_MOUSE_SOURCE, BUTTON_RIGHT, (state.buttonFlags & B_FLAG) != 0);
-      const double seconds = std::min(milliseconds, 50U) / 1000.0;
       mouseX_ += mouse_axis(state.leftStickX) * 900 * seconds;
       mouseY_ -= mouse_axis(state.leftStickY) * 900 * seconds;
       const int x = static_cast<int>(mouseX_);
@@ -167,7 +173,14 @@ namespace input {
     if (code <= 0 || (captured_ && pressed)) {
       return;
     }
-    auto &sources = held[code];
+    auto entry = held.find(code);
+    if (entry == held.end()) {
+      if (!pressed) {
+        return;
+      }
+      entry = held.emplace(code, std::set<int> {}).first;
+    }
+    auto &sources = entry->second;
     const bool wasPressed = !sources.empty();
     if (pressed) {
       sources.insert(source);
@@ -228,6 +241,7 @@ namespace input {
   }
 
   void StreamInput::release_all() {
+    mouseElapsed_ = 0;
     for (int i = 0; i < 4; ++i) {
       if (slots_[i].device != -1 && !equal(slots_[i].last, {})) {
         send_controller(i, {});

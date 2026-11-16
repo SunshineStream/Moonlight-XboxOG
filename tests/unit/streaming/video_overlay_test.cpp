@@ -597,3 +597,84 @@ TEST(VideoOverlayTest, DimsTheStreamThroughBothPresentationPaths) {
     EXPECT_EQ(yuy2, expected);
   }
 }
+
+/**
+ * @brief Cached UI damage produces the same colors, alpha and chroma as a fresh overlay at both scales.
+ */
+TEST(VideoOverlayTest, RecolorsChangedRegionsWithoutStaleGpuPixels) {
+  for (const int scale : {32, 128}) {
+    for (const auto matrix : {streaming::VideoColorMatrix::bt601, streaming::VideoColorMatrix::bt709}) {
+      streaming::VideoOverlay incremental;
+      std::vector<std::uint8_t> pixels(16 * 12 * 4, 0);
+      for (std::size_t i = 3; i < pixels.size(); i += 4) {
+        pixels[i] = 150;
+      }
+      const streaming::VideoRectangle destination {0, 0, scale, scale * 3 / 4};
+      for (int step = 0; step < 8; ++step) {
+        const auto index = static_cast<std::size_t>((step * 7) % (16 * 12)) * 4;
+        pixels[index] = 200;
+        pixels[index + 1] = 40;
+        pixels[index + 2] = 70;
+        pixels[index + 3] = step % 2 ? 255 : 0;
+        incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
+        if (step % 2 == 0) {
+          const auto other = static_cast<std::size_t>(16 * 12 - step - 1) * 4;
+          pixels[other + 1] = 240;
+          incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
+        }
+        // An identical update must preserve pending damage until presentation.
+        incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
+        streaming::VideoOverlay fresh;
+        fresh.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
+        std::vector<std::uint8_t> actual(64 * 48 * 2, 100);
+        auto expected = actual;
+        ASSERT_TRUE(incremental.draw_yuy2(actual.data(), actual.size(), 128, 64, 48, destination, matrix));
+        ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 128, 64, 48, destination, matrix));
+        EXPECT_EQ(actual, expected) << "scale=" << scale << " step=" << step;
+        // A new host frame must still be composed with the cached UI.
+        actual.assign(actual.size(), 180);
+        expected = actual;
+        ASSERT_TRUE(incremental.draw_yuy2(actual.data(), actual.size(), 128, 64, 48, destination, matrix));
+        ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 128, 64, 48, destination, matrix));
+        EXPECT_EQ(actual, expected);
+      }
+    }
+  }
+}
+
+/**
+ * @brief RGB output and GPU conversion survive opacity transitions, clipped damage and a matrix change.
+ */
+TEST(VideoOverlayTest, RebuildsCachesWhenOpacityOrMatrixChanges) {
+  streaming::VideoOverlay overlay;
+  std::vector<std::uint8_t> pixels(20 * 20 * 4, 255);
+  const auto compare = [&](streaming::VideoColorMatrix matrix) {
+    streaming::VideoOverlay fresh;
+    fresh.set_argb_bitmap(20, 20, pixels, streaming::VideoOverlayPlacement::full_screen);
+    for (int bpp : {15, 16, 32}) {
+      const int bytes = bpp == 32 ? 4 : 2;
+      std::vector<std::uint8_t> actual(16 * 16 * bytes, 90);
+      auto expected = actual;
+      ASSERT_TRUE(overlay.draw_rgb(actual.data(), actual.size(), 16 * bytes, 16, 16, bpp, {0, 0, 16, 16}));
+      ASSERT_TRUE(fresh.draw_rgb(expected.data(), expected.size(), 16 * bytes, 16, 16, bpp, {0, 0, 16, 16}));
+      EXPECT_EQ(actual, expected);
+    }
+    std::vector<std::uint8_t> actual(16 * 16 * 2, 90);
+    auto expected = actual;
+    ASSERT_TRUE(overlay.draw_yuy2(actual.data(), actual.size(), 32, 16, 16, {0, 0, 16, 16}, matrix));
+    ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 32, 16, 16, {0, 0, 16, 16}, matrix));
+    EXPECT_EQ(actual, expected);
+  };
+  overlay.set_argb_bitmap(20, 20, pixels, streaming::VideoOverlayPlacement::full_screen);
+  compare(streaming::VideoColorMatrix::bt601);
+  pixels[3] = 80;
+  overlay.set_argb_bitmap(20, 20, pixels, streaming::VideoOverlayPlacement::full_screen);
+  compare(streaming::VideoColorMatrix::bt601);
+  pixels[(19 * 20 + 19) * 4] = 40;
+  overlay.set_argb_bitmap(20, 20, pixels, streaming::VideoOverlayPlacement::full_screen);
+  compare(streaming::VideoColorMatrix::bt601);
+  compare(streaming::VideoColorMatrix::bt709);
+  pixels[3] = 255;
+  overlay.set_argb_bitmap(20, 20, pixels, streaming::VideoOverlayPlacement::full_screen);
+  compare(streaming::VideoColorMatrix::bt709);
+}

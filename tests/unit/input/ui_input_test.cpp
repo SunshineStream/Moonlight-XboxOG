@@ -132,3 +132,35 @@ TEST(ShellInputStateTest, ResumesNavigationAfterStreamingConsumesReleaseEvents) 
   EXPECT_EQ(state.keyboardNavigation.poll(10150), input::UiCommand::move_down);
   EXPECT_EQ(state.keyboardNavigation.press(2, input::UiCommand::confirm, 10200), input::UiCommand::confirm);
 }
+
+/**
+ * @brief Controller direction changes respond immediately and held movement matches keyboard repeats.
+ */
+TEST(DirectionNavigationTest, RespondsImmediatelyAndUsesSharedRepeatTiming) {
+  input::DirectionNavigation navigation;
+  EXPECT_EQ(navigation.update(input::UiCommand::move_down, 100), input::UiCommand::move_down);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_down, 249), input::UiCommand::none);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_down, 250), input::UiCommand::move_down);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_down, 294), input::UiCommand::none);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_down, 295), input::UiCommand::move_down);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_left, 296), input::UiCommand::move_left);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_right, 297), input::UiCommand::move_right);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_right, 10000), input::UiCommand::move_right);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_right, 10000), input::UiCommand::none);
+}
+
+/**
+ * @brief Neutral, actions and page transitions cancel a hold, including when the clock wraps.
+ */
+TEST(DirectionNavigationTest, ClearsOnNeutralOrResetAndHandlesClockWrap) {
+  input::DirectionNavigation navigation;
+  constexpr auto start = std::numeric_limits<std::uint32_t>::max() - 100;
+  EXPECT_EQ(navigation.update(input::UiCommand::move_up, start), input::UiCommand::move_up);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_up, 49), input::UiCommand::move_up);
+  EXPECT_EQ(navigation.update(input::UiCommand::none, 50), input::UiCommand::none);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_up, 51), input::UiCommand::move_up);
+  EXPECT_EQ(navigation.update(input::UiCommand::confirm, 52), input::UiCommand::none);
+  EXPECT_EQ(navigation.update(input::UiCommand::move_up, 53), input::UiCommand::move_up);
+  navigation.reset();
+  EXPECT_EQ(navigation.update(input::UiCommand::move_up, 54), input::UiCommand::move_up);
+}

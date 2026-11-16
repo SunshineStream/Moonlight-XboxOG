@@ -274,3 +274,54 @@ TEST(StreamKeyMappingTest, PreservesExtendedModifiersNavigationAndKeypad) {
     EXPECT_NE(input::keyboard_virtual_key(usage), 0) << usage;
   }
 }
+
+/**
+ * @brief Stick mouse reports are capped at 125 Hz while press/release transitions remain immediate.
+ */
+TEST_F(StreamInputTest, BoundsMouseReportRateWithoutDelayingClicks) {
+  router.connect(0);
+  router.set_mouse_device(0);
+  router.controller(0, {});
+  packets.clear();
+  router.controller(0, {0, 0, 0, 32767, 0});
+  router.tick(1);
+  EXPECT_TRUE(packets.empty());
+  router.controller(0, {A_FLAG, 0, 0, 32767, 0});
+  ASSERT_EQ(packets.size(), 1);
+  EXPECT_TRUE(packets.back().pressed);
+  router.controller(0, {0, 0, 0, 32767, 0});
+  ASSERT_EQ(packets.size(), 2);
+  EXPECT_FALSE(packets.back().pressed);
+  router.tick(7);
+  ASSERT_EQ(packets.size(), 3);
+  EXPECT_EQ(packets.back().type, input::StreamPacketType::mouse_move);
+  EXPECT_EQ(packets.back().x, 7);
+  router.tick(0);
+  EXPECT_EQ(packets.size(), 3);
+}
+
+/**
+ * @brief A minute of high-frequency polling preserves mouse speed without flooding the transport.
+ */
+TEST(StreamInputRateTest, SustainsMouseMovementWithBoundedTraffic) {
+  int reports = 0;
+  int distance = 0;
+  input::StreamInput router([&](const input::StreamPacket &packet) {
+    if (packet.type == input::StreamPacketType::mouse_move) {
+      ++reports;
+      distance += packet.x;
+      EXPECT_GE(packet.x, 0);
+      EXPECT_LE(packet.x, 8);
+    }
+  });
+  router.connect(0);
+  router.set_mouse_device(0);
+  router.controller(0, {});
+  router.controller(0, {0, 0, 0, 32767, 0});
+  for (int i = 0; i < 60000; ++i) {
+    router.controller(0, {0, 0, 0, 32767, 0});
+    router.tick(1);
+  }
+  EXPECT_EQ(reports, 7500);
+  EXPECT_NEAR(distance, 54000, 1);
+}

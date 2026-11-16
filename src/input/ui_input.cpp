@@ -8,6 +8,29 @@
 #include <cstdlib>
 
 namespace input {
+  UiCommand DirectionNavigation::update(UiCommand command, std::uint32_t now) {
+    if (command == UiCommand::none || !is_repeatable_ui_command(command)) {
+      reset();
+      return UiCommand::none;
+    }
+    if (command != command_) {
+      command_ = command;
+      pressedAt_ = repeatedAt_ = now;
+      repeated_ = false;
+      return command;
+    }
+    if ((!repeated_ && now - pressedAt_ >= NAVIGATION_INITIAL_REPEAT_MILLISECONDS) || (repeated_ && now - repeatedAt_ >= NAVIGATION_REPEAT_MILLISECONDS)) {
+      repeatedAt_ = now;
+      repeated_ = true;
+      return command;
+    }
+    return UiCommand::none;
+  }
+
+  void DirectionNavigation::reset() {
+    *this = {};
+  }
+
   bool is_gamepad_ui_activity(short value, bool trigger) {
     return trigger ? value >= 16000 : std::abs(static_cast<int>(value)) >= 16000;
   }

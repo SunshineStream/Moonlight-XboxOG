@@ -362,8 +362,12 @@ namespace streaming {
   void FfmpegStreamBackend::invalidate_overlay_texture() {
     statisticsBitmapChanged_ = statisticsTextureChanged_ = true;
     if (statisticsTexture_ != nullptr) {
-      SDL_DestroyTexture(statisticsTexture_);
-      statisticsTexture_ = nullptr;
+      int width = 0;
+      int height = 0;
+      if (SDL_QueryTexture(statisticsTexture_, nullptr, nullptr, &width, &height) != 0 || width != statisticsOverlay_.width() || height != statisticsOverlay_.height()) {
+        SDL_DestroyTexture(statisticsTexture_);
+        statisticsTexture_ = nullptr;
+      }
     }
   }
 

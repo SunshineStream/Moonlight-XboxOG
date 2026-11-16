@@ -23,5 +23,7 @@ Keyboard helper keycaps are drawn with SDL primitives and the bundled UI font ra
 Their measured widths adapt to labels such as Enter and Shift+PgUp, and crowded modal helpers wrap
 onto additional rows. The active input device chooses between these keycaps and the controller glyphs.
 
-Stream controls reuse the original colored controller button assets and SVG rasterizer. The stick,
-Guide and Share symbols are local vector assets; Lucide supplies the other stream action symbols.
+Stream controls reuse the original colored controller button assets and SVG rasterizer. The stick and
+Share symbols are local vector assets; Lucide supplies the other stream action symbols.
+The Guide button uses the [Xbox symbol from Simple Icons 11.15.0](https://github.com/simple-icons/simple-icons/blob/11.15.0/icons/xbox.svg),
+under [CC0](licenses/simple-icons.txt), with matching 24-unit dimensions and an explicit white fill for the older Xbox NanoSVG parser.
