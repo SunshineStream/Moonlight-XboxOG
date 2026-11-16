@@ -150,7 +150,7 @@ namespace {
   }
 
   /**
-   * @brief Every settings category has a recognizable packaged Lucide icon.
+   * @brief All five settings categories, including separate Display and Storage sections, have packaged icons.
    */
   TEST(ShellViewTest, DecoratesSettingsCategoriesWithIcons) {
     app::ClientState state = app::create_initial_state();
@@ -158,11 +158,13 @@ namespace {
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
     const auto view = ui::build_shell_view_model(state, {});
-    ASSERT_EQ(view.content.menuRows.size(), 4U);
+    ASSERT_EQ(view.content.menuRows.size(), 5U);
     EXPECT_EQ(view.content.menuRows[0].iconAssetPath, "icons\\scroll-text.svg");
     EXPECT_EQ(view.content.menuRows[1].iconAssetPath, "icons\\monitor.svg");
     EXPECT_EQ(view.content.menuRows[2].iconAssetPath, "icons\\gamepad-2.svg");
-    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\rotate-ccw.svg");
+    EXPECT_EQ(view.content.menuRows[3].label, "Storage");
+    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\save.svg");
+    EXPECT_EQ(view.content.menuRows[4].iconAssetPath, "icons\\rotate-ccw.svg");
   }
 
   /**

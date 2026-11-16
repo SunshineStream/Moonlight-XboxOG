@@ -26,8 +26,11 @@ namespace {
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
     app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::activate);
-    EXPECT_TRUE(state.detailMenu.select_item_by_id("screenshot-directory"));
+    state.detailMenu.select_item_by_id("screenshot-directory");
+    EXPECT_EQ(state.detailMenu.selected_item()->id, "screenshot-directory");
     const auto update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_TRUE(update.requests.directoryListRequested);
     EXPECT_TRUE(update.navigation.modalOpened);
@@ -53,8 +56,9 @@ namespace {
 TEST(DirectoryPickerTest, StagesConfiguredAndDefaultLocationsUntilAccepted) {
   for (const std::string configured : {std::string {}, std::string("F:\\Shots")}) {
     auto state = open_picker(configured);
-    EXPECT_EQ(state.settings.selectedCategory, app::SettingsCategory::streaming);
-    EXPECT_EQ(state.menu.items()[1].label, "Streaming");
+    EXPECT_EQ(state.settings.selectedCategory, app::SettingsCategory::storage);
+    EXPECT_EQ(state.menu.items()[1].label, "Display");
+    EXPECT_EQ(state.menu.items()[3].label, "Storage");
     EXPECT_EQ(state.directoryPicker.path, configured.empty() ? startup::default_storage_path("screenshots") : configured);
     auto view = ui::build_shell_view_model(state, {});
     EXPECT_EQ(view.modal.title, "Screenshot Folder");
@@ -230,4 +234,28 @@ TEST(DirectoryPickerTest, BuildsScrollableFoldersAndControllerOrKeyboardNameEntr
   ASSERT_EQ(view.keypad.footerActions.size(), 2);
   EXPECT_EQ(view.keypad.footerActions[0].keyLabel, "Enter");
   EXPECT_EQ(view.keypad.footerActions[1].keyLabel, "Esc");
+}
+
+/**
+ * @brief Storage owns screenshot destinations while Display retains its original stream and presentation options.
+ */
+TEST(DirectoryPickerTest, KeepsStorageSeparateFromTheExistingDisplayCategory) {
+  auto state = open_picker("F:\\Screenshots");
+  ASSERT_EQ(state.menu.items().size(), 5);
+  EXPECT_EQ(state.menu.items()[3].id, "settings-category:storage");
+  EXPECT_EQ(state.menu.items()[4].id, "settings-category:reset");
+  app::handle_command(state, input::UiCommand::back);
+  ASSERT_EQ(state.detailMenu.items().size(), 1);
+  EXPECT_EQ(state.detailMenu.selected_item()->id, "screenshot-directory");
+  const auto view = ui::build_shell_view_model(state, {});
+  EXPECT_EQ(view.content.bodyLines[0], "Category: Storage");
+  app::handle_command(state, input::UiCommand::back);
+  app::handle_command(state, input::UiCommand::move_up);
+  app::handle_command(state, input::UiCommand::move_up);
+  app::handle_command(state, input::UiCommand::activate);
+  EXPECT_EQ(state.settings.selectedCategory, app::SettingsCategory::display);
+  EXPECT_EQ(state.detailMenu.items().size(), 6);
+  EXPECT_EQ(state.detailMenu.selected_item()->id, "cycle-stream-video-mode");
+  EXPECT_FALSE(state.detailMenu.select_item_by_id("screenshot-directory"));
+  EXPECT_EQ(state.settings.screenshotDirectory, "F:\\Screenshots");
 }

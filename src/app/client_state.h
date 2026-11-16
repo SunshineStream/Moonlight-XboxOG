@@ -85,8 +85,9 @@ namespace app {
    */
   enum class SettingsCategory {
     logging,  ///< Logging and diagnostics options.
-    streaming,  ///< Stream video, audio, telemetry and screenshot options.
+    display,  ///< Display, stream video, audio and telemetry options.
     input,  ///< Input and controller options.
+    storage,  ///< Screenshot destinations and other saved-file location options.
     reset,  ///< Reset and cleanup actions.
   };
 

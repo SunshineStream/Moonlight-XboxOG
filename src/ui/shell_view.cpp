@@ -204,14 +204,21 @@ namespace {
     return state.addHostDraft.portInput;
   }
 
+  /**
+   * @brief Name the selected settings section without conflating Display and Storage.
+   * @param category Active settings category.
+   * @return User-facing category name.
+   */
   const char *settings_category_label(app::SettingsCategory category) {
     switch (category) {
       case app::SettingsCategory::logging:
         return "Logging";
-      case app::SettingsCategory::streaming:
-        return "Streaming";
+      case app::SettingsCategory::display:
+        return "Display";
       case app::SettingsCategory::input:
         return "Input";
+      case app::SettingsCategory::storage:
+        return "Storage";
       case app::SettingsCategory::reset:
         return "Reset";
     }
@@ -345,6 +352,11 @@ namespace {
     return lines;
   }
 
+  /**
+   * @brief Describe the selected category and its supported settings.
+   * @param state Current settings and saved-file state.
+   * @return Context lines for the settings detail panel.
+   */
   std::vector<std::string> settings_body_lines(const app::ClientState &state) {
     std::vector<std::string> lines = {
       std::string("Category: ") + settings_category_label(state.settings.selectedCategory),
@@ -370,8 +382,13 @@ namespace {
       }
       return lines;
     }
-    if (state.settings.selectedCategory == app::SettingsCategory::streaming) {
-      lines.emplace_back("Display options will be added here.");
+    if (state.settings.selectedCategory == app::SettingsCategory::display) {
+      lines.emplace_back("Choose stream video, audio and performance statistics options.");
+      return lines;
+    }
+
+    if (state.settings.selectedCategory == app::SettingsCategory::storage) {
+      lines.emplace_back("Choose where screenshots are saved.");
       return lines;
     }
 
@@ -407,11 +424,14 @@ namespace {
     if (id == "settings-category:logging") {
       return "icons\\scroll-text.svg";
     }
-    if (id == "settings-category:streaming") {
+    if (id == "settings-category:display") {
       return "icons\\monitor.svg";
     }
     if (id == "settings-category:input") {
       return "icons\\gamepad-2.svg";
+    }
+    if (id == "settings-category:storage") {
+      return "icons\\save.svg";
     }
     if (id == "settings-category:reset") {
       return "icons\\rotate-ccw.svg";

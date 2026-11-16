@@ -155,11 +155,11 @@ namespace {
   }
 
   /**
-   * @brief Navigates from the initial hosts toolbar selection to the streaming settings options.
+   * @brief Navigates from the initial hosts toolbar selection to the display settings options.
    *
-   * @param state Client state to drive through the streaming settings commands.
+   * @param state Client state to drive through the display settings commands.
    */
-  void open_streaming_settings_options(app::ClientState &state) {
+  void open_display_settings_options(app::ClientState &state) {
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
@@ -167,7 +167,7 @@ namespace {
 
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::activate);
-    ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::streaming);
+    ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::display);
     ASSERT_EQ(state.settings.focusArea, app::SettingsFocusArea::options);
   }
 
@@ -842,6 +842,7 @@ namespace {
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::reset);
     ASSERT_EQ(state.settings.focusArea, app::SettingsFocusArea::options);
@@ -865,6 +866,7 @@ namespace {
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.shell.activeScreen, app::ScreenId::settings);
 
+    app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
@@ -1289,7 +1291,7 @@ namespace {
     EXPECT_TRUE(state.hosts.active.apps.front().favorite);
   }
 
-  TEST(ClientStateTest, StreamingSettingsCanBeActivatedAndBackNavigationReturnsFocusToCategories) {
+  TEST(ClientStateTest, DisplaySettingsCanBeActivatedAndBackNavigationReturnsFocusToCategories) {
     app::ClientState state = app::create_initial_state();
     state.settings.availableVideoModes = {
       VIDEO_MODE {640, 480, 32, 60},
@@ -1304,7 +1306,7 @@ namespace {
 
     app::handle_command(state, input::UiCommand::move_down);
     app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
-    EXPECT_EQ(update.navigation.activatedItemId, "settings-category:streaming");
+    EXPECT_EQ(update.navigation.activatedItemId, "settings-category:display");
     EXPECT_EQ(state.settings.focusArea, app::SettingsFocusArea::options);
 
     update = app::handle_command(state, input::UiCommand::activate);
@@ -1321,7 +1323,7 @@ namespace {
   /**
    * @brief Changing stream resolution resets custom bitrate, persists both values and refreshes the menu.
    */
-  TEST(ClientStateTest, StreamingSettingsCanCycleXboxVideoModeStreamChoices) {
+  TEST(ClientStateTest, DisplaySettingsCanCycleXboxVideoModeStreamChoices) {
     app::ClientState state = app::create_initial_state();
     state.settings.availableVideoModes = {
       VIDEO_MODE {640, 480, 32, 60},
@@ -1332,7 +1334,7 @@ namespace {
     state.settings.preferredVideoModeSet = true;
     state.settings.streamBitrateKbps = 750;
 
-    ASSERT_NO_FATAL_FAILURE(open_streaming_settings_options(state));
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
 
     app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(update.navigation.activatedItemId, "cycle-stream-video-mode");
@@ -1357,13 +1359,13 @@ namespace {
   /**
    * @brief Cycling an unchanged or unavailable resolution preserves a manually selected bitrate.
    */
-  TEST(ClientStateTest, StreamingSettingsPreserveCustomBitrateWithoutAResolutionChange) {
+  TEST(ClientStateTest, DisplaySettingsPreserveCustomBitrateWithoutAResolutionChange) {
     app::ClientState state = app::create_initial_state();
     state.settings.availableVideoModes = {VIDEO_MODE {1280, 720, 32, 60}};
     state.settings.preferredVideoMode = state.settings.availableVideoModes.front();
     state.settings.preferredVideoModeSet = true;
     state.settings.streamBitrateKbps = 750;
-    ASSERT_NO_FATAL_FAILURE(open_streaming_settings_options(state));
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
 
     app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(state.settings.streamBitrateKbps, 750);
@@ -1382,13 +1384,13 @@ namespace {
   /**
    * @brief FPS changes reset bitrate using the selected stream dimensions rather than display refresh.
    */
-  TEST(ClientStateTest, StreamingSettingsCanCycleStreamFramerateThroughSixtyFps) {
+  TEST(ClientStateTest, DisplaySettingsCanCycleStreamFramerateThroughSixtyFps) {
     app::ClientState state = app::create_initial_state();
     state.settings.preferredVideoMode = VIDEO_MODE {1280, 720, 32, 50};
     state.settings.preferredVideoModeSet = true;
     state.settings.streamBitrateKbps = 750;
 
-    ASSERT_NO_FATAL_FAILURE(open_streaming_settings_options(state));
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
 
     ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-stream-framerate"));
     app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
@@ -1418,9 +1420,9 @@ namespace {
   /**
    * @brief FPS changes before mode detection use the normal 640x480 default dimensions.
    */
-  TEST(ClientStateTest, StreamingSettingsUseDefaultResolutionForFramerateChangesBeforeDetection) {
+  TEST(ClientStateTest, DisplaySettingsUseDefaultResolutionForFramerateChangesBeforeDetection) {
     app::ClientState state = app::create_initial_state();
-    ASSERT_NO_FATAL_FAILURE(open_streaming_settings_options(state));
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-stream-framerate"));
 
     app::handle_command(state, input::UiCommand::activate);
@@ -1431,10 +1433,10 @@ namespace {
   /**
    * @brief Manual bitrate adjustment covers all Xbox defaults, wraps and formats fractional Mbps.
    */
-  TEST(ClientStateTest, StreamingSettingsCycleManualBitrateInMbpsThroughTheHighestDefault) {
+  TEST(ClientStateTest, DisplaySettingsCycleManualBitrateInMbpsThroughTheHighestDefault) {
     app::ClientState state = app::create_initial_state();
     state.settings.streamBitrateKbps = 7000;
-    ASSERT_NO_FATAL_FAILURE(open_streaming_settings_options(state));
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-stream-bitrate"));
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Stream Bitrate: 7 Mbps");
 
@@ -1463,10 +1465,10 @@ namespace {
   /**
    * @brief Other display controls leave a manually selected bitrate unchanged.
    */
-  TEST(ClientStateTest, StreamingSettingsPreserveManualBitrateWhenOtherOptionsChange) {
+  TEST(ClientStateTest, DisplaySettingsPreserveManualBitrateWhenOtherOptionsChange) {
     app::ClientState state = app::create_initial_state();
     state.settings.streamBitrateKbps = 1500;
-    ASSERT_NO_FATAL_FAILURE(open_streaming_settings_options(state));
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     constexpr std::array<const char *, 3> controls {"toggle-play-audio-on-pc", "toggle-play-audio-on-xbox", "toggle-show-performance-stats"};
     for (const char *control : controls) {
       ASSERT_TRUE(state.detailMenu.select_item_by_id(control));
@@ -1475,12 +1477,12 @@ namespace {
     }
   }
 
-  TEST(ClientStateTest, StreamingSettingsCanToggleXboxAudioAndPerformanceStats) {
+  TEST(ClientStateTest, DisplaySettingsCanToggleXboxAudioAndPerformanceStats) {
     app::ClientState state = app::create_initial_state();
     ASSERT_TRUE(state.settings.playAudioOnXbox);
     ASSERT_FALSE(state.settings.showPerformanceStats);
 
-    ASSERT_NO_FATAL_FAILURE(open_streaming_settings_options(state));
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
 
     ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-play-audio-on-xbox"));
     app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
@@ -1506,6 +1508,7 @@ namespace {
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);

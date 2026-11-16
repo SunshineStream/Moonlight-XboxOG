@@ -80,14 +80,21 @@ namespace {
     return field == app::AddHostField::address ? "edit-address" : "edit-port";
   }
 
+  /**
+   * @brief Map each independent settings category to its stable navigation identifier.
+   * @param category Settings section to identify.
+   * @return Menu identifier for Logging, Display, Input, Storage or Reset.
+   */
   std::string settings_category_menu_id(app::SettingsCategory category) {
     switch (category) {
       case app::SettingsCategory::logging:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "logging";
-      case app::SettingsCategory::streaming:
-        return std::string(SETTINGS_CATEGORY_PREFIX) + "streaming";
+      case app::SettingsCategory::display:
+        return std::string(SETTINGS_CATEGORY_PREFIX) + "display";
       case app::SettingsCategory::input:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "input";
+      case app::SettingsCategory::storage:
+        return std::string(SETTINGS_CATEGORY_PREFIX) + "storage";
       case app::SettingsCategory::reset:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "reset";
     }
@@ -95,12 +102,20 @@ namespace {
     return std::string(SETTINGS_CATEGORY_PREFIX) + "logging";
   }
 
+  /**
+   * @brief Resolve a category identifier while defaulting unknown identifiers to Logging.
+   * @param itemId Selected navigation identifier.
+   * @return Corresponding settings category.
+   */
   app::SettingsCategory settings_category_from_menu_id(std::string_view itemId) {
-    if (itemId == settings_category_menu_id(app::SettingsCategory::streaming)) {
-      return app::SettingsCategory::streaming;
+    if (itemId == settings_category_menu_id(app::SettingsCategory::display)) {
+      return app::SettingsCategory::display;
     }
     if (itemId == settings_category_menu_id(app::SettingsCategory::input)) {
       return app::SettingsCategory::input;
+    }
+    if (itemId == settings_category_menu_id(app::SettingsCategory::storage)) {
+      return app::SettingsCategory::storage;
     }
     if (itemId == settings_category_menu_id(app::SettingsCategory::reset)) {
       return app::SettingsCategory::reset;
@@ -108,14 +123,21 @@ namespace {
     return app::SettingsCategory::logging;
   }
 
+  /**
+   * @brief Describe the options owned by a settings category.
+   * @param category Section whose scope should be explained.
+   * @return Category guidance, keeping file destinations separate from Display.
+   */
   const char *settings_category_description(app::SettingsCategory category) {
     switch (category) {
       case app::SettingsCategory::logging:
         return "Control the runtime log file, the in-app log viewer, and xemu debugger output verbosity.";
-      case app::SettingsCategory::streaming:
-        return "Set stream video, audio, performance statistics and screenshot storage.";
+      case app::SettingsCategory::display:
+        return "Tune streaming video resolution, frame rate, bitrate, audio playback and performance statistics.";
       case app::SettingsCategory::input:
         return "Input options will live here when controller and navigation customization is added.";
+      case app::SettingsCategory::storage:
+        return "Choose the folder used to save stream screenshots.";
       case app::SettingsCategory::reset:
         return "Review and delete Moonlight saved data, or remove everything with a full factory reset.";
     }
@@ -495,7 +517,7 @@ namespace {
   }
 
   /**
-   * @brief Build navigation actions, exposing host operations only after an address is supplied.
+   * @brief Build screen actions and settings categories, exposing host operations after an address is supplied.
    *
    * @param state Current screen and entered host information.
    * @return Menu entries available for the current task.
@@ -505,8 +527,9 @@ namespace {
       case app::ScreenId::settings:
         return {
           {settings_category_menu_id(app::SettingsCategory::logging), "Logging", settings_category_description(app::SettingsCategory::logging), true},
-          {settings_category_menu_id(app::SettingsCategory::streaming), "Streaming", settings_category_description(app::SettingsCategory::streaming), true},
+          {settings_category_menu_id(app::SettingsCategory::display), "Display", settings_category_description(app::SettingsCategory::display), true},
           {settings_category_menu_id(app::SettingsCategory::input), "Input", settings_category_description(app::SettingsCategory::input), true},
+          {settings_category_menu_id(app::SettingsCategory::storage), "Storage", settings_category_description(app::SettingsCategory::storage), true},
           {settings_category_menu_id(app::SettingsCategory::reset), "Reset", settings_category_description(app::SettingsCategory::reset), true},
         };
       case app::ScreenId::add_host:
@@ -555,7 +578,7 @@ namespace {
           {"cycle-log-level", std::string("File Logging Level: ") + logging::to_string(state.settings.loggingLevel), "Choose the minimum severity written to moonlight.log. Lower levels produce more detail but increase disk writes.", true},
           {"cycle-xemu-console-log-level", std::string("xemu Console Level: ") + logging::to_string(state.settings.xemuConsoleLoggingLevel), "Choose the minimum severity mirrored to xemu through DbgPrint() when you launch xemu with a serial console.", true},
         };
-      case app::SettingsCategory::streaming:
+      case app::SettingsCategory::display:
         return {
           {
             "cycle-stream-video-mode",
@@ -593,6 +616,9 @@ namespace {
             "Show performance statistics during playback and after the stream ends.",
             true,
           },
+        };
+      case app::SettingsCategory::storage:
+        return {
           {"screenshot-directory", "Screenshot Folder: " + (state.settings.screenshotDirectory.empty() ? std::string("Default") : state.settings.screenshotDirectory), "Choose or create a folder for stream screenshots. Default: " + startup::default_storage_path("screenshots"), true},
         };
       case app::SettingsCategory::input:
