@@ -34,6 +34,15 @@ namespace input {
   };
 
   /**
+   * @brief Explicit outcome of the three-button stream exit dialog.
+   */
+  enum class StreamDisconnectAction {
+    cancel,  ///< Resume the current stream.
+    disconnect,  ///< Disconnect and leave the app running on the PC.
+    quit_app,  ///< Disconnect and ask the PC to terminate the running app.
+  };
+
+  /**
    * @brief A keyboard cell with an unshifted and shifted label.
    */
   struct StreamKeyboardKey {
@@ -127,10 +136,11 @@ namespace input {
     void key_sent();
     /**
      * @brief Complete the disconnect dialog directly, without directional selection.
-     * @param accept True for A/Enter to disconnect; false for B/Escape to cancel.
-     * @return True only for an accepted disconnect on the confirmation page.
+     * @param action Cancel, disconnect or quit the host app.
+     * @return True for either confirmed exit action on the confirmation page; false for cancellation.
      */
-    bool confirm_disconnect(bool accept);
+    bool confirm_disconnect(StreamDisconnectAction action);
+    StreamDisconnectAction disconnectAction = StreamDisconnectAction::cancel;  ///< Confirmed exit intent, retained until session cleanup.
     StreamMenuPage page = StreamMenuPage::closed;  ///< Current screen.
     StreamAction selected = StreamAction::none;  ///< Highlighted wheel action.
     int owner = -1;  ///< Controller that opened local controls.

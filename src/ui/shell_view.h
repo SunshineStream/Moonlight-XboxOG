@@ -157,7 +157,7 @@ namespace ui {
   struct ShellModalView {
     bool visible = false;  ///< True when a modal dialog should be rendered.
     bool busy = false;  ///< Show progress instead of dismissal controls while work is pending.
-    bool folderBrowser = false;  ///< Retain the folder dialog while only list focus changes.
+    bool folderBrowser = false;  ///< Directory-dialog style; all static action dialogs share retained focus repainting.
     std::string title;  ///< Modal dialog title.
     std::string iconAssetPath;  ///< Optional status icon beside the dialog title.
     std::vector<std::string> lines;  ///< Modal dialog body lines.
@@ -166,12 +166,18 @@ namespace ui {
   };
 
   /**
-   * @brief Check whether folder-dialog pixels can be retained while list selection changes.
+   * @brief Check whether any action dialog can retain its pixels while list selection changes.
    * @param previous Previously painted dialog.
-   * @param current Current dialog, including path, error, entries and input helpers.
+   * @param current Current dialog, including guidance, action rows and input helpers.
    * @return True when every visible property except the focused action is unchanged.
    */
-  bool same_folder_dialog_content(const ShellModalView &previous, const ShellModalView &current);
+  bool same_action_dialog_content(const ShellModalView &previous, const ShellModalView &current);
+  /**
+   * @brief Identify views whose visible contents animate without input or a completed task.
+   * @param state Current shell and workflow state.
+   * @return True for diagnostics and active progress indicators; static pages retain their frame.
+   */
+  bool shell_requires_animation(const app::ClientState &state);
 
   /**
    * @brief Embedded log viewer state surfaced by the log-file modal.

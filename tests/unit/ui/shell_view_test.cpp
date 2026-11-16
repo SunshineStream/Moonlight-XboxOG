@@ -552,12 +552,12 @@ namespace {
     EXPECT_EQ(viewModel.content.appTiles[0].name, "Steam");
     EXPECT_TRUE(viewModel.content.appTiles[0].selected);
     EXPECT_TRUE(viewModel.content.bodyLines.empty());
-    EXPECT_EQ(viewModel.content.appTiles[0].detail, "Running now");
+    EXPECT_EQ(viewModel.content.appTiles[0].detail, "In progress / Resume");
     EXPECT_EQ(viewModel.content.appTiles[0].badgeLabel, "HDR");
     EXPECT_TRUE(viewModel.content.appTiles[0].boxArtCached);
     EXPECT_TRUE(viewModel.content.appTiles[1].detail.empty());
     ASSERT_EQ(viewModel.frame.footerActions.size(), 3U);
-    EXPECT_EQ(viewModel.frame.footerActions[0].label, "Launch");
+    EXPECT_EQ(viewModel.frame.footerActions[0].label, "Resume");
     EXPECT_EQ(viewModel.frame.footerActions[1].label, "App Menu");
     EXPECT_EQ(viewModel.frame.footerActions[2].label, "Back");
   }
@@ -892,12 +892,12 @@ TEST(ShellViewTest, InvalidatesRetainedFolderContentsForEveryVisibleChange) {
   auto changed = original;
   changed.actions[0].selected = false;
   changed.actions[4].selected = true;
-  EXPECT_TRUE(ui::same_folder_dialog_content(original, changed));
+  EXPECT_TRUE(ui::same_action_dialog_content(original, changed));
   const auto reject = [&](auto mutate) {
     auto other = original;
     mutate(other);
-    EXPECT_FALSE(ui::same_folder_dialog_content(original, other));
-    EXPECT_FALSE(ui::same_folder_dialog_content(other, original));
+    EXPECT_FALSE(ui::same_action_dialog_content(original, other));
+    EXPECT_FALSE(ui::same_action_dialog_content(other, original));
   };
   reject([](auto &view) {
     view.visible = false;
@@ -963,5 +963,5 @@ TEST(ShellViewTest, InvalidatesRetainedFolderContentsForEveryVisibleChange) {
     view.footerActions[0].secondaryKeyLabel = "Space";
   });
   state.shell.inputDevice = input::UiInputDevice::keyboard;
-  EXPECT_FALSE(ui::same_folder_dialog_content(original, ui::build_shell_view_model(state, {}).modal));
+  EXPECT_FALSE(ui::same_action_dialog_content(original, ui::build_shell_view_model(state, {}).modal));
 }

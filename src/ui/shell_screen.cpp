@@ -270,7 +270,7 @@ namespace {
    */
   struct KeypadModalLayoutCache {
     SDL_Window *window = nullptr;  ///< Shared window; needed only for validated partial Xbox framebuffer presentation.
-    FolderDialogCache folder;  ///< Retained folder browser, sharing the local-dialog lifetime.
+    FolderDialogCache folder;  ///< Shared retained rows for host/app menus, other action dialogs and the folder browser.
     ScreenshotTextureCache screenshot;  ///< At most one decoded capture is retained.
     int modalInnerWidth = 0;  ///< Last modal content width used to build the cached line layout.
     int modalTextHeight = 0;  ///< Cached combined height of the modal body text.
@@ -1292,7 +1292,13 @@ namespace {
         draw_rect(renderer, {rect.x - inset, rect.y - inset, rect.w + inset * 2, rect.h + inset * 2}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
       }
     }
-    const std::string badge = tile.running ? "PLAYING" : tile.badgeLabel;
+    if (tile.running) {
+      const int size = std::min(42, std::max(24, rect.w / 3));
+      const SDL_Rect paused {rect.x + rect.w - size - 8, rect.y + rect.h - size - 8, size, size};
+      fill_rounded_rect(renderer, paused, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xEF}, 6);
+      render_asset_icon(renderer, assetCache, "icons\\pause.svg", {paused.x + 4, paused.y + 4, size - 8, size - 8});
+    }
+    const std::string badge = tile.badgeLabel;
     if (!badge.empty()) {
       const int badgeHeight = TTF_FontLineSkip(labelFont) + 8;
       const int badgeWidth = std::min(rect.w - 12, static_cast<int>(badge.size()) * std::max(7, TTF_FontHeight(labelFont) / 2) + 16);
@@ -2804,6 +2810,17 @@ namespace {
     network::HostPairingServerInfo serverInfo {};  ///< Metadata returned by the host.
   };
 
+  /**
+   * @brief One confirmed host quit operation, isolated from UI selection changes.
+   */
+  struct AppQuitTaskState {
+    SDL_Thread *thread = nullptr;  ///< Owned background HTTP worker.
+    std::atomic<bool> completed = false;  ///< Publishes success and error detail to the shell.
+    app::AppQuitState target;  ///< Server and app confirmed by the user.
+    bool success = false;  ///< True after the host verified termination.
+    std::string message;  ///< Host error or completion detail.
+  };
+
   struct AppListTaskState {
     SDL_Thread *thread = nullptr;
     std::atomic<bool> completed = false;
@@ -4233,9 +4250,9 @@ namespace {
     const float horizontalScale = static_cast<float>(framebufferWidth) / static_cast<float>(screenWidth);
 
     auto *folder = keypadModalLayoutCache != nullptr ? &keypadModalLayoutCache->folder : nullptr;
-    const bool folderBrowser = viewModel.modal.folderBrowser && !viewModel.overlay.visible && !viewModel.keypad.visible;
+    const bool folderBrowser = viewModel.modal.visible && !viewModel.modal.busy && !viewModel.modal.actions.empty() && !viewModel.logViewer.visible && !viewModel.screenshot.visible && !viewModel.overlay.visible && !viewModel.keypad.visible;
     if (folder != nullptr) {
-      const bool reusable = folderBrowser && folder->valid && folder->logicalWidth == screenWidth && folder->framebufferWidth == framebufferWidth && folder->framebufferHeight == framebufferHeight && folder->titleFont == titleFont && folder->bodyFont == bodyFont && folder->smallFont == smallFont && ui::same_folder_dialog_content(folder->content, viewModel.modal);
+      const bool reusable = folderBrowser && folder->valid && folder->logicalWidth == screenWidth && folder->framebufferWidth == framebufferWidth && folder->framebufferHeight == framebufferHeight && folder->titleFont == titleFont && folder->bodyFont == bodyFont && folder->smallFont == smallFont && ui::same_action_dialog_content(folder->content, viewModel.modal);
       if (reusable) {
         std::size_t selected = 0;
         for (std::size_t i = 0; i < viewModel.modal.actions.size(); ++i) {
@@ -4762,7 +4779,8 @@ namespace {
     SDL_GameController **controller,
     ShellInputState *inputState,
     const ProcessCommand &processCommand,
-    bool *skipPolledControllerNavigation
+    bool *skipPolledControllerNavigation,
+    bool *redrawRequested = nullptr
   ) {
     SDL_Event event;
     if (skipPolledControllerNavigation != nullptr) {
@@ -4773,6 +4791,9 @@ namespace {
     }
 
     do {
+      if (redrawRequested != nullptr && (event.type == SDL_KEYDOWN || event.type == SDL_TEXTINPUT || event.type == SDL_WINDOWEVENT || event.type == SDL_CONTROLLERBUTTONDOWN || event.type == SDL_CONTROLLERDEVICEADDED || event.type == SDL_CONTROLLERDEVICEREMOVED)) {
+        *redrawRequested = true;
+      }
       const input::UiCommand command = handle_shell_event(state, event, controller, inputState);
       if (event.type == SDL_CONTROLLERAXISMOTION && inputState != nullptr) {
         update_trigger_repeat_tick(command, SDL_GetTicks(), &inputState->leftTriggerRepeatTick, &inputState->rightTriggerRepeatTick);
@@ -4835,7 +4856,58 @@ namespace {
   }
 
   /**
-   * @brief Stores the SDL resources and render caches owned by the shell loop.
+   * @brief Perform the authenticated quit request on a worker using only its copied target.
+   * @param context AppQuitTaskState retained until this callback completes.
+   * @return Zero after publishing the result to the shell.
+   */
+  int run_app_quit_task(void *context) {  // NOSONAR(cpp:S5008) SDL thread callback ABI
+    auto &task = *static_cast<AppQuitTaskState *>(context);
+    network::PairingIdentity identity {};
+    if (load_saved_pairing_identity_for_streaming(&identity, &task.message)) {
+      task.success = network::quit_host_app(task.target.address, task.target.port, identity, task.target.appId, &task.message);
+    }
+    task.completed.store(true, std::memory_order_release);
+    return 0;
+  }
+
+  /**
+   * @brief Start a confirmed quit operation without blocking navigation or rendering on HTTP.
+   * @param state Retained target and progress dialog.
+   * @param task Worker slot owned by the shell runtime.
+   */
+  void start_app_quit_task(app::ClientState &state, AppQuitTaskState &task) {
+    if (task.thread != nullptr || !state.appQuit.inProgress) {
+      return;
+    }
+    task.target = state.appQuit;
+    task.success = false;
+    task.message.clear();
+    task.completed.store(false, std::memory_order_relaxed);
+    task.thread = SDL_CreateThread(run_app_quit_task, "quit-host-app", &task);
+    if (task.thread == nullptr) {
+      app::apply_app_quit_result(state, false, std::string("Could not start quit request: ") + SDL_GetError());
+    }
+  }
+
+  /**
+   * @brief Apply and persist a completed host quit without waiting on unfinished workers.
+   * @param state Local host library and progress dialog.
+   * @param task Runtime-owned quit worker.
+   */
+  void finish_app_quit_task(app::ClientState &state, AppQuitTaskState &task) {
+    if (task.thread == nullptr || !task.completed.load(std::memory_order_acquire)) {
+      return;
+    }
+    SDL_WaitThread(task.thread, nullptr);
+    task.thread = nullptr;
+    app::apply_app_quit_result(state, task.success, task.message);
+    app::AppUpdate update;
+    update.persistence.hostsChanged = task.success;
+    persist_hosts_if_needed(state, update);
+  }
+
+  /**
+   * @brief Stores renderer resources and retained menu and screenshot caches.
    */
   struct ShellResources {
     SDL_Renderer *renderer = nullptr;  ///< Renderer used for all shell drawing.
@@ -4856,7 +4928,7 @@ namespace {
    */
   struct ShellRuntimeState {
     bool running = true;  ///< False when the shell should stop processing frames.
-    bool keypadRedrawRequested = true;  ///< True when a retained local input dialog needs a new frame.
+    bool keypadRedrawRequested = true;  ///< True when visible shell state changed since its last retained frame.
     ShellInputState inputState {};  ///< Current controller and trigger input state.
     Uint32 nextHostDiscoveryTick = 0;  ///< Next scheduled host auto-discovery time.
     Uint32 nextHostProbeTick = 0;  ///< Next scheduled host probe time.
@@ -4864,6 +4936,7 @@ namespace {
     PairingTaskState pairingTask {};  ///< Background pairing workflow state.
     ConnectionTestTaskState connectionTestTask {};  ///< Background manual connection test.
     AppListTaskState appListTask {};  ///< Background app-list fetch state.
+    AppQuitTaskState appQuitTask {};  ///< Background termination of a confirmed running host app.
     AppArtTaskState appArtTask {};  ///< Background box-art download state.
     HostDiscoveryTaskState hostDiscoveryTask {};  ///< Background host auto-discovery state.
     HostProbeTaskState hostProbeTask {};  ///< Background host probe state.
@@ -5083,9 +5156,22 @@ namespace {
       return;
     }
 
+    const auto ready = [](const auto &task) {
+      return task.thread != nullptr && task.completed.load(std::memory_order_acquire);
+    };
+    bool changed = ready(runtime->connectionTestTask) || ready(runtime->appListTask) || ready(runtime->appArtTask) || ready(runtime->hostDiscoveryTask) || ready(runtime->appQuitTask);
+    if (runtime->pairingTask.activeAttempt != nullptr) {
+      changed = changed || ready(*runtime->pairingTask.activeAttempt);
+    }
+    for (const auto &worker : runtime->hostProbeTask.workers) {
+      changed = changed || (worker != nullptr && ready(*worker));
+    }
+    runtime->keypadRedrawRequested = runtime->keypadRedrawRequested || changed;
+
     finish_pairing_task_if_ready(state, &runtime->pairingTask);
     finish_connection_test_if_ready(state, &runtime->connectionTestTask);
     finish_app_list_task_if_ready(state, &runtime->appListTask);
+    finish_app_quit_task(state, runtime->appQuitTask);
     finish_app_art_task_if_ready(state, &runtime->appArtTask, &resources->coverArtTextureCache);
     finish_host_discovery_task_if_ready(state, &runtime->hostDiscoveryTask, &runtime->nextHostProbeTick);
     finish_host_probe_task_if_ready(state, &runtime->hostProbeTask);
@@ -5221,6 +5307,20 @@ namespace {
     const app::ScreenId previousScreen = state.shell.activeScreen;
     app::AppUpdate update = app::handle_command(state, command);
     process_directory_picker_requests(state, update);
+    if (update.requests.quitAppRequested) {
+      start_app_quit_task(state, runtime->appQuitTask);
+    }
+    if (update.requests.screenshotDeleteRequested && !state.screenshotViewer.entries.empty()) {
+      auto &viewer = state.screenshotViewer;
+      const auto &entry = viewer.entries[std::min(viewer.selectedIndex, viewer.entries.size() - 1)];
+      std::string error;
+      const bool deleted = app::delete_screenshot(entry, app::screenshot_library_path(), error);
+      if (deleted) {
+        destroy_texture(resources->keypadModalLayoutCache.screenshot.texture);
+        resources->keypadModalLayoutCache.screenshot = {};
+      }
+      app::apply_screenshot_delete_result(state, deleted, std::move(error));
+    }
     if (update.requests.screenshotsRequested) {
       auto result = app::load_screenshots(state.screenshotViewer.source, app::screenshot_library_path());
       state.screenshotViewer.entries = std::move(result.entries);
@@ -5256,13 +5356,13 @@ namespace {
     if ((previousScreen != state.shell.activeScreen || update.navigation.screenChanged) && !draw_current_shell_frame(activeVideoMode, state, resources, runtime)) {
       return;
     }
-    if (!(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) && state.modal.id != app::ModalId::directory_picker && state.modal.id != app::ModalId::screenshot_viewer) {
+    if (!(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) && state.modal.id == app::ModalId::none) {
       clear_keypad_modal_layout_cache(&resources->keypadModalLayoutCache);
     }
   }
 
   /**
-   * @brief Process shell input and background tasks, retaining idle local dialogs and screenshot frames.
+   * @brief Process shell input and background tasks, retaining every static screen until visible state changes.
    *
    * @param window Shared SDL window reused for shell and streaming rendering.
    * @param videoMode Active output mode used by the shell renderer.
@@ -5277,7 +5377,9 @@ namespace {
     }
 
     const Uint32 notificationNow = SDL_GetTicks();
+    const auto notificationCount = state.shell.notifications.size();
     app::advance_notifications(state, notificationNow - runtime->notificationTick);
+    runtime->keypadRedrawRequested = runtime->keypadRedrawRequested || state.shell.notifications.size() != notificationCount;
     runtime->notificationTick = notificationNow;
 
     const auto processCommand = [window, &state, videoMode, resources, runtime](input::UiCommand command) {
@@ -5292,7 +5394,7 @@ namespace {
     update_exit_combo_hold(state, &runtime->inputState);
     const auto previousInputDevice = state.shell.inputDevice;
     bool skipPolledControllerNavigation = false;
-    process_polled_shell_events(state, &resources->controller, &runtime->inputState, processCommand, &skipPolledControllerNavigation);
+    process_polled_shell_events(state, &resources->controller, &runtime->inputState, processCommand, &skipPolledControllerNavigation, &runtime->keypadRedrawRequested);
     if (state.shell.inputDevice == input::UiInputDevice::keyboard) {
       processCommand(runtime->inputState.keyboardNavigation.poll(SDL_GetTicks()));
     } else {
@@ -5306,8 +5408,7 @@ namespace {
     finish_shell_background_tasks(state, resources, runtime);
     start_shell_background_tasks_if_needed(state, runtime, SDL_GetTicks());
 
-    const bool retainedInputDialog = (state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) || (state.modal.id == app::ModalId::directory_picker && !state.directoryPicker.creating && !state.shell.overlayVisible) || (state.modal.id == app::ModalId::screenshot_viewer && !state.shell.overlayVisible);
-    if ((!retainedInputDialog || runtime->keypadRedrawRequested) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
+    if ((runtime->keypadRedrawRequested || ui::shell_requires_animation(state)) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
       return false;
     }
 
@@ -5338,6 +5439,8 @@ namespace {
     }
 
     wait_for_thread(runtime->appListTask.thread);
+    wait_for_thread(runtime->appQuitTask.thread);
+    runtime->appQuitTask.thread = nullptr;
     wait_for_thread(runtime->connectionTestTask.thread);
     runtime->connectionTestTask.thread = nullptr;
     wait_for_thread(runtime->appArtTask.thread);

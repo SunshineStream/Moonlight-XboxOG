@@ -208,17 +208,24 @@ TEST(StreamMenuTest, SendsSymbolsAndDesktopCombinations) {
  */
 TEST(StreamMenuTest, RequiresExplicitDisconnectAndCancelsDirectly) {
   input::StreamMenu menu;
-  EXPECT_FALSE(menu.confirm_disconnect(true));
+  EXPECT_FALSE(menu.confirm_disconnect(input::StreamDisconnectAction::disconnect));
   menu.open(1);
-  EXPECT_FALSE(menu.confirm_disconnect(true));
+  EXPECT_FALSE(menu.confirm_disconnect(input::StreamDisconnectAction::disconnect));
   menu.page = input::StreamMenuPage::quit_confirmation;
   menu.navigate(1, 0);
   menu.navigate(0, -1);
   EXPECT_EQ(menu.page, input::StreamMenuPage::quit_confirmation);
-  EXPECT_FALSE(menu.confirm_disconnect(false));
+  EXPECT_FALSE(menu.confirm_disconnect(input::StreamDisconnectAction::cancel));
   EXPECT_EQ(menu.page, input::StreamMenuPage::radial);
   menu.page = input::StreamMenuPage::quit_confirmation;
-  EXPECT_TRUE(menu.confirm_disconnect(true));
+  EXPECT_TRUE(menu.confirm_disconnect(input::StreamDisconnectAction::disconnect));
+  EXPECT_EQ(menu.disconnectAction, input::StreamDisconnectAction::disconnect);
+  menu.open(1);
+  EXPECT_EQ(menu.disconnectAction, input::StreamDisconnectAction::cancel);
+  menu.page = input::StreamMenuPage::quit_confirmation;
+  EXPECT_TRUE(menu.confirm_disconnect(input::StreamDisconnectAction::quit_app));
+  EXPECT_EQ(menu.disconnectAction, input::StreamDisconnectAction::quit_app);
+  EXPECT_STREQ(input::stream_action_label(input::StreamAction::quit, false, false), "Exit");
 }
 
 /**

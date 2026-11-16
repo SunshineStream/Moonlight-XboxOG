@@ -154,6 +154,7 @@ namespace input {
   }};
 
   void StreamMenu::open(int device) {
+    disconnectAction = StreamDisconnectAction::cancel;
     owner = device;
     page = StreamMenuPage::radial;
     selected = StreamAction::none;
@@ -289,14 +290,15 @@ namespace input {
     return modifiers | key.modifiers | (upper ? MODIFIER_SHIFT : 0);
   }
 
-  bool StreamMenu::confirm_disconnect(bool accept) {
+  bool StreamMenu::confirm_disconnect(StreamDisconnectAction action) {
     if (page != StreamMenuPage::quit_confirmation) {
       return false;
     }
-    if (!accept) {
+    disconnectAction = action;
+    if (action == StreamDisconnectAction::cancel) {
       page = StreamMenuPage::radial;
     }
-    return accept;
+    return action != StreamDisconnectAction::cancel;
   }
 
   void StreamMenu::toggle_shift() {
@@ -451,7 +453,7 @@ namespace input {
       case StreamAction::logs:
         return "View logs";
       case StreamAction::quit:
-        return "Quit stream";
+        return "Exit";
       case StreamAction::guide:
         return "Guide";
       case StreamAction::share:

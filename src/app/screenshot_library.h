@@ -34,6 +34,7 @@ namespace app {
     ScreenshotSource source;  ///< Host and app responsible for this capture.
     std::string path;  ///< Original bitmap location, retained when the capture folder changes.
     std::int64_t capturedAt = 0;  ///< Capture time in UTC seconds since the Unix epoch.
+    bool deleted = false;  ///< Journal tombstone; never returned as a visible capture.
   };
 
   /**
@@ -83,6 +84,14 @@ namespace app {
    * @return True when the record was finalized successfully.
    */
   bool append_screenshot(const ScreenshotRecord &record, const std::string &journalPath, std::string &error);
+  /**
+   * @brief Delete a selected bitmap and append its removal to the journal without rewriting other captures.
+   * @param record Indexed capture selected by the user.
+   * @param journalPath Persistent screenshot journal.
+   * @param error Receives deletion or index failures; an already absent bitmap can still be removed from the index.
+   * @return True when both the bitmap and its library entry have been removed.
+   */
+  bool delete_screenshot(const ScreenshotRecord &record, const std::string &journalPath, std::string &error);
   /**
    * @brief Read locally indexed captures for an app without contacting the host.
    * @param source Server and app to match.

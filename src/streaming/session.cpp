@@ -1616,6 +1616,14 @@ namespace streaming {
     finalStatistics.showPerformanceMetrics = resources.statisticsEnabled;
 
     std::string finalMessage = describe_session_end(connectionState, app.name);
+    if (resources.controller.quit_app_requested()) {
+      std::string quitError;
+      if (network::quit_host_app(host.address, host.port, clientIdentity, app.id, &quitError)) {
+        finalMessage = "Quit " + app.name + " on " + host.displayName;
+      } else {
+        finalMessage += " | Couldn't quit app: " + quitError;
+      }
+    }
     if (!acceleration.fallbackReason.empty()) {
       finalMessage += " | SOFTWARE FALLBACK USED";
     }

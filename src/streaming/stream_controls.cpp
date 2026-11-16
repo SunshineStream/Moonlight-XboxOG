@@ -271,7 +271,16 @@ namespace streaming {
   }
 
   StreamControls::StreamControls():
-      router_(send_packet) {}
+      router_([this](const input::StreamPacket &packet) {
+        auto outgoing = packet;
+        if (packet.type == input::StreamPacketType::controller && packet.slot >= 0 && packet.slot < 4) {
+          latestHostController_[packet.slot] = packet.controller;
+          if (packet.slot == pulseSlot_) {
+            outgoing.controller.buttonFlags |= pulseButtons_;
+          }
+        }
+        send_packet(outgoing);
+      }) {}
 
   StreamControls::~StreamControls() {
     close();
@@ -294,6 +303,20 @@ namespace streaming {
 
   bool StreamControls::keyboard_docked_top() const {
     return keyboardTop_;
+  }
+
+  bool StreamControls::quit_app_requested() const {
+    return menu_.disconnectAction == input::StreamDisconnectAction::quit_app;
+  }
+
+  void StreamControls::release_pulse() {
+    if (pulseSlot_ >= 0) {
+      input::StreamPacket packet {input::StreamPacketType::controller, pulseSlot_, router_.active_mask()};
+      packet.controller = latestHostController_[pulseSlot_];
+      pulseSlot_ = -1;
+      pulseButtons_ = 0;
+      send_packet(packet);
+    }
   }
 
   void StreamControls::close() {
@@ -330,10 +353,7 @@ namespace streaming {
   }
 
   void StreamControls::close_if_removed(int instance) {
-    if (pulseSlot_ >= 0) {
-      send_packet({input::StreamPacketType::controller, pulseSlot_, router_.active_mask()});
-      pulseSlot_ = -1;
-    }
+    release_pulse();
     router_.disconnect(instance);
     if (mouseDevice_ == instance) {
       mouseDevice_ = -1;
@@ -442,11 +462,14 @@ namespace streaming {
   bool StreamControls::menu_key(SDL_Keycode key, FfmpegStreamBackend &backend, bool active, bool &stats) {
     if (menu_.page == input::StreamMenuPage::quit_confirmation) {
       if (key == SDLK_RETURN) {
-        return menu_.confirm_disconnect(true);
+        return menu_.confirm_disconnect(input::StreamDisconnectAction::disconnect);
+      }
+      if (key == SDLK_q) {
+        return menu_.confirm_disconnect(input::StreamDisconnectAction::quit_app);
       }
       if (key == SDLK_ESCAPE) {
         dirty_ = true;
-        return menu_.confirm_disconnect(false);
+        return menu_.confirm_disconnect(input::StreamDisconnectAction::cancel);
       }
       return false;
     }
@@ -541,19 +564,9 @@ namespace streaming {
         break;
       case input::StreamAction::screenshot:
         {
-          const auto capturedAt = static_cast<std::int64_t>(std::time(nullptr));
-          std::string error;
-          const std::string path = app::next_screenshot_path(screenshotDirectory_, capturedAt, error);
-          if (!path.empty() && backend.save_screenshot(path)) {
-            const app::ScreenshotRecord record {screenshotSource_, path, capturedAt};
-            message_ = app::append_screenshot(record, app::screenshot_library_path(), error) ? "Saved " + path : "Saved " + path + "; could not add it to the viewer.";
-          } else {
-            message_ = "Screenshot failed; check the logs.";
-          }
-          if (!error.empty()) {
-            logging::warn("stream", error);
-          }
+          message_ = backend.request_screenshot(screenshotDirectory_, screenshotSource_) ? "Saving screenshot in the background" : "Screenshot not queued; another capture may still be saving.";
           logging::info("stream", message_);
+          menu_.close();
           break;
         }
       case input::StreamAction::guide:
@@ -564,15 +577,16 @@ namespace streaming {
             message_ = "A connected controller and active stream are required.";
             break;
           }
-          if (pulseSlot_ >= 0) {
-            send_packet({input::StreamPacketType::controller, pulseSlot_, router_.active_mask()});
-          }
+          release_pulse();
           pulseSlot_ = slot;
           pulseUntil_ = SDL_GetTicks() + 120;
+          pulseButtons_ = menu_.selected == input::StreamAction::guide ? SPECIAL_FLAG : MISC_FLAG;
           input::StreamPacket packet {input::StreamPacketType::controller, slot, router_.active_mask()};
-          packet.controller.buttonFlags = menu_.selected == input::StreamAction::guide ? SPECIAL_FLAG : MISC_FLAG;
+          packet.controller = latestHostController_[slot];
+          packet.controller.buttonFlags |= pulseButtons_;
           send_packet(packet);
           message_ = menu_.selected == input::StreamAction::guide ? "Guide sent" : "Share sent (requires host support)";
+          menu_.close();
           break;
         }
       case input::StreamAction::none:
@@ -582,6 +596,9 @@ namespace streaming {
   }
 
   bool StreamControls::pump(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool active, bool &statisticsEnabled) {
+    if (const auto result = backend.take_screenshot_result(); !result.empty()) {
+      logging::info("screenshots", result);
+    }
     // Sampling and transport enqueueing share one owner so capture cannot race a stale gameplay packet.
     controllerNavigationApplied_ = false;
     SDL_PumpEvents();
@@ -697,7 +714,9 @@ namespace streaming {
               }
               break;
             case SDL_CONTROLLER_BUTTON_X:
-              if (active && menu_.page == input::StreamMenuPage::keyboard) {
+              if (menu_.page == input::StreamMenuPage::quit_confirmation) {
+                stop = menu_key(SDLK_q, backend, active, statisticsEnabled) || stop;
+              } else if (active && menu_.page == input::StreamMenuPage::keyboard) {
                 tap_key(0x08);
               }
               break;
@@ -884,9 +903,8 @@ namespace streaming {
         navigate_controller(sample, now);
       }
     }
-    if (pulseSlot_ >= 0 && (!visible() || static_cast<Sint32>(now - pulseUntil_) >= 0 || (router_.active_mask() & (1U << pulseSlot_)) == 0)) {
-      send_packet({input::StreamPacketType::controller, pulseSlot_, router_.active_mask()});
-      pulseSlot_ = -1;
+    if (pulseSlot_ >= 0 && (static_cast<Sint32>(now - pulseUntil_) >= 0 || (router_.active_mask() & (1U << pulseSlot_)) == 0)) {
+      release_pulse();
     }
     if (!visible() && (wasVisible || dirty_)) {
       keyboardNavigation_.reset();
@@ -913,10 +931,7 @@ namespace streaming {
 
   void StreamControls::release_host_input() {
     router_.release_all();
-    if (pulseSlot_ >= 0) {
-      send_packet({input::StreamPacketType::controller, pulseSlot_, router_.active_mask()});
-      pulseSlot_ = -1;
-    }
+    release_pulse();
   }
 
   bool StreamControls::render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip) {
@@ -1185,7 +1200,7 @@ namespace streaming {
             const int top = std::min(area.y, clip.y);
             panelDamage_.push_back({left, top, std::max(area.x + area.width, clip.x + clip.width) - left, std::max(area.y + area.height, clip.y + clip.height) - top});
           }
-          constexpr std::array<const char *, 8> icons {"keyboard.svg", "mouse.svg", "scroll-text.svg", "power.svg", "button-guide.svg", "button-share.svg", "camera.svg", "chart-no-axes-combined.svg"};
+          constexpr std::array<const char *, 8> icons {"keyboard.svg", "mouse.svg", "scroll-text.svg", "log-out.svg", "button-guide.svg", "button-share.svg", "camera.svg", "chart-no-axes-combined.svg"};
           render_icon(renderer.get(), icons[wheel * 4 + sector], {x + (labelWidth - iconSize) / 2, groupY, iconSize, iconSize});
           label(renderer.get(), font, input::stream_action_label(action, mouseDevice_ >= 0, stats), {x, groupY + iconSize + 2, labelWidth, line * 2}, false, false);
         }
@@ -1223,16 +1238,19 @@ namespace streaming {
       render_hint(renderer.get(), font, "button-left-stick.svg", "Arrows", menu_.logOffset == 0 ? "Live / scroll" : "Scroll", {card.x + 8, card.y + card.h - line - 12, card.w / 2 - 16, line});
       render_hint(renderer.get(), font, "button-b.svg", "Esc", "Back", {card.x + card.w / 2, card.y + card.h - line - 12, card.w / 2 - 16, line});
     } else {
-      const int cardWidth = std::min(width - 32, std::max(380, width * 3 / 5));
+      const int cardWidth = std::min(width - 32, std::max(560, width * 4 / 5));
       const int cardHeight = line * 7;
       const SDL_Rect card {(width - cardWidth) / 2, (height - cardHeight) / 2, cardWidth, cardHeight};
       ui::draw_dialog_surface(renderer.get(), card);
-      label(renderer.get(), font, "Disconnect from stream?", {card.x + 20, card.y + 28, card.w - 40, line}, false, false);
-      label(renderer.get(), font, "The app will keep running on your PC.", {card.x + 20, card.y + 28 + line, card.w - 40, line * 2}, false, false);
-      for (int i = 0; i < 2; ++i) {
-        SDL_Rect button {card.x + 20 + i * (card.w - 32) / 2, card.y + card.h - line * 2, (card.w - 48) / 2, line + 12};
+      label(renderer.get(), font, "Exit stream?", {card.x + 20, card.y + 28, card.w - 40, line}, false, false);
+      label(renderer.get(), font, "Disconnect keeps the app running. Quit app closes it on the PC; unsaved progress may be lost.", {card.x + 20, card.y + 28 + line, card.w - 40, line * 2}, false, false);
+      constexpr std::array<const char *, 3> buttons {"button-b.svg", "button-a.svg", "button-x.svg"};
+      constexpr std::array<const char *, 3> keys {"Esc", "Enter", "Q"};
+      constexpr std::array<const char *, 3> labels {"Cancel", "Disconnect", "Quit app"};
+      for (int i = 0; i < 3; ++i) {
+        SDL_Rect button {card.x + 16 + i * (card.w - 24) / 3, card.y + card.h - line * 2, (card.w - 48) / 3, line + 12};
         ui::draw_dialog_round_rect(renderer.get(), button, {28, 40, 61, 255}, 6);
-        render_hint(renderer.get(), font, i == 0 ? "button-b.svg" : "button-a.svg", i == 0 ? "Esc" : "Enter", i == 0 ? "Cancel" : "Disconnect", {button.x + 4, button.y, button.w - 8, button.h});
+        render_hint(renderer.get(), font, buttons[i], keys[i], labels[i], {button.x + 4, button.y, button.w - 8, button.h});
       }
     }
     if (!focusOnly && !message_.empty() && menu_.page == input::StreamMenuPage::radial) {

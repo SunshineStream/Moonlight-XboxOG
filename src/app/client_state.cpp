@@ -767,7 +767,7 @@ namespace {
       case app::ModalId::host_actions:
         return 4U;
       case app::ModalId::app_actions:
-        return 4U;
+        return app::selected_app(state) != nullptr && app::selected_app(state)->running ? 5U : 4U;
       case app::ModalId::confirmation:
         return 2U;
       case app::ModalId::directory_picker:
@@ -779,6 +779,7 @@ namespace {
       case app::ModalId::log_viewer:
       case app::ModalId::connection_test:
       case app::ModalId::screenshot_viewer:
+      case app::ModalId::quit_progress:
         return 0U;
     }
     return 0U;
@@ -790,7 +791,7 @@ namespace {
       return false;
     }
 
-    const std::size_t current = state.modal.selectedActionIndex % count;
+    const std::size_t current = state.modal.id == app::ModalId::app_actions ? std::min(state.modal.selectedActionIndex, count - 1) : state.modal.selectedActionIndex % count;
     state.modal.selectedActionIndex = direction < 0 ? (current + count - 1U) % count : (current + 1U) % count;
     return state.modal.selectedActionIndex != current;
   }
@@ -1411,7 +1412,12 @@ namespace {
     const bool confirmed = state.modal.selectedActionIndex % 2U == 0U;
     const app::ConfirmationAction action = state.confirmation.action;
     const std::string targetPath = state.confirmation.targetPath;
+    const auto parent = state.confirmation.returnModal;
+    const auto parentIndex = state.confirmation.returnActionIndex;
     close_modal_and_mark_closed(state, update);
+    if (parent != app::ModalId::none) {
+      open_modal(state, parent, parentIndex);
+    }
     if (!confirmed) {
       state.shell.statusMessage = "Cancelled the pending reset action";
       return true;
@@ -1426,6 +1432,14 @@ namespace {
     }
     if (action == app::ConfirmationAction::factory_reset) {
       update->persistence.factoryResetRequested = true;
+    }
+    if (action == app::ConfirmationAction::delete_screenshot) {
+      update->requests.screenshotDeleteRequested = true;
+    }
+    if (action == app::ConfirmationAction::quit_app) {
+      state.appQuit.inProgress = true;
+      open_modal(state, app::ModalId::quit_progress);
+      update->requests.quitAppRequested = true;
     }
     return true;
   }
@@ -1444,7 +1458,7 @@ namespace {
       return true;
     }
 
-    switch (state.modal.selectedActionIndex % 4U) {
+    switch (state.modal.selectedActionIndex % modal_action_count(state)) {
       case 0:
         close_modal_and_mark_closed(state, update);
         if (host->pairingState == app::PairingState::paired) {
@@ -1497,7 +1511,7 @@ namespace {
     }
 
     app::HostAppRecord &appRecord = mutableHost->apps[indices[state.apps.selectedAppIndex]];
-    switch (state.modal.selectedActionIndex % 4U) {
+    switch (state.modal.selectedActionIndex) {
       case 0:
         appRecord.hidden = !appRecord.hidden;
         state.hosts.dirty = true;
@@ -1526,6 +1540,16 @@ namespace {
           update->requests.screenshotsRequested = true;
         }
         return true;
+      case 4:
+        if (appRecord.running) {
+          state.appQuit = {host->address, host->port, appRecord.id, appRecord.name, false};
+          open_confirmation(state, app::ConfirmationAction::quit_app, "Quit " + appRecord.name + "?", {"The app will close on your PC. Unsaved progress may be lost."});
+          state.confirmation.returnModal = app::ModalId::app_actions;
+          state.confirmation.returnActionIndex = 4;
+        } else {
+          state.modal.selectedActionIndex = 3;
+        }
+        return true;
       default:
         return true;
     }
@@ -1549,6 +1573,7 @@ namespace {
       case app::ModalId::log_viewer:
       case app::ModalId::directory_picker:
       case app::ModalId::screenshot_viewer:
+      case app::ModalId::quit_progress:
         return true;
       case app::ModalId::confirmation:
         return handle_confirmation_modal_activation(state, update);
@@ -1684,12 +1709,27 @@ namespace {
     if (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress) {
       return true;
     }
+    if (state.modal.id == app::ModalId::quit_progress) {
+      return true;
+    }
+    if (state.modal.id == app::ModalId::confirmation && command == input::UiCommand::back && state.confirmation.returnModal != app::ModalId::none) {
+      const auto parent = state.confirmation.returnModal;
+      const auto index = state.confirmation.returnActionIndex;
+      close_modal_and_mark_closed(state, update);
+      open_modal(state, parent, index);
+      return true;
+    }
 
     if (state.modal.id == app::ModalId::screenshot_viewer) {
       auto &viewer = state.screenshotViewer;
       if (command == input::UiCommand::back) {
         viewer = {};
         open_modal(state, app::ModalId::app_actions, 3U);
+      } else if (command == input::UiCommand::delete_character && !viewer.entries.empty()) {
+        viewer.selectedIndex = std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+        const auto &entry = viewer.entries[viewer.selectedIndex];
+        open_confirmation(state, app::ConfirmationAction::delete_screenshot, "Delete screenshot?", {"This permanently deletes the saved image.", app::screenshot_time_label(entry.capturedAt)}, entry.path);
+        state.confirmation.returnModal = app::ModalId::screenshot_viewer;
       } else if (!viewer.entries.empty()) {
         const auto count = viewer.entries.size();
         viewer.selectedIndex = std::min(viewer.selectedIndex, count - 1);
@@ -2833,6 +2873,56 @@ namespace app {
     }
     close_modal_and_mark_closed(state, &update);
     rebuild_menu(state, "screenshot-directory");
+  }
+
+  void apply_screenshot_delete_result(ClientState &state, bool succeeded, std::string error) {
+    auto &viewer = state.screenshotViewer;
+    if (state.modal.id != ModalId::screenshot_viewer || viewer.entries.empty()) {
+      return;
+    }
+    viewer.selectedIndex = std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+    if (succeeded) {
+      viewer.entries.erase(viewer.entries.begin() + viewer.selectedIndex);
+      viewer.selectedIndex = viewer.entries.empty() ? 0 : std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+      viewer.error.clear();
+    } else {
+      viewer.error = std::move(error);
+    }
+  }
+
+  void apply_app_quit_result(ClientState &state, bool succeeded, std::string message) {
+    const auto target = state.appQuit;
+    if (!target.inProgress) {
+      return;
+    }
+    if (succeeded) {
+      const auto clearRunning = [&](HostRecord &host) {
+        if (!host_matches_endpoint(host, target.address, target.port)) {
+          return;
+        }
+        if (host.runningGameId == static_cast<uint32_t>(target.appId)) {
+          host.runningGameId = 0;
+        }
+        for (auto &application : host.apps) {
+          if (application.id == target.appId) {
+            application.running = false;
+          }
+        }
+      };
+      for (auto &host : state.hosts.items) {
+        clearRunning(host);
+      }
+      if (state.hosts.activeLoaded) {
+        clearRunning(state.hosts.active);
+        state.hosts.active.lastAppListRefreshTick = 0;
+      }
+      state.hosts.dirty = true;
+    }
+    if (state.modal.id == ModalId::quit_progress) {
+      close_modal(state);
+    }
+    show_notification(state, succeeded ? NotificationKind::success : NotificationKind::error, succeeded ? "App closed" : "Couldn't quit app", message.empty() ? target.appName : std::move(message), succeeded ? 5000 : 0);
+    state.appQuit = {};
   }
 
   AppUpdate handle_command(ClientState &state, input::UiCommand command) {

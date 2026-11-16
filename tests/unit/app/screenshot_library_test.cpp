@@ -228,10 +228,10 @@ namespace {
     EXPECT_EQ(state.screenshotViewer.selectedIndex, 0U);
     state.shell.inputDevice = input::UiInputDevice::keyboard;
     view = ui::build_shell_view_model(state, {});
-    ASSERT_EQ(view.modal.footerActions.size(), 3U);
+    ASSERT_EQ(view.modal.footerActions.size(), 4U);
     EXPECT_EQ(view.modal.footerActions[0].keyLabel, "PgUp");
     EXPECT_EQ(view.modal.footerActions[1].keyLabel, "PgDn");
-    EXPECT_EQ(view.modal.footerActions[2].keyLabel, "Esc");
+    EXPECT_EQ(view.modal.footerActions[3].keyLabel, "Esc");
     app::handle_command(state, input::UiCommand::back);
     EXPECT_EQ(state.modal.id, app::ModalId::app_actions);
     EXPECT_EQ(state.modal.selectedActionIndex, 3U);
@@ -240,5 +240,76 @@ namespace {
     EXPECT_EQ(state.modal.id, app::ModalId::none);
     app::handle_command(state, input::UiCommand::move_right);
     EXPECT_EQ(state.apps.selectedAppIndex, 1U);
+  }
+
+  /**
+   * @brief Deletion removes the selected bitmap and persists only its removal across library reloads.
+   */
+  TEST_F(ScreenshotLibraryTest, DeletesOnlyTheChosenCaptureAndCanReuseItsFilename) {
+    std::string error;
+    const auto first = app::next_screenshot_path(root + "/shots", 10, error);
+    const auto otherPath = root + "/other.bmp";
+    {
+      std::ofstream image(first);
+      image << "first image";
+    }
+    {
+      std::ofstream image(otherPath);
+      image << "other app image";
+    }
+    const app::ScreenshotRecord record {source, first, 10};
+    auto other = source;
+    other.appId = 8;
+    ASSERT_TRUE(app::append_screenshot(record, journal, error));
+    ASSERT_TRUE(app::append_screenshot({other, otherPath, 11}, journal, error));
+    ASSERT_TRUE(app::delete_screenshot(record, journal, error)) << error;
+    EXPECT_FALSE(std::filesystem::exists(first));
+    EXPECT_TRUE(std::filesystem::exists(otherPath));
+    EXPECT_TRUE(app::load_screenshots(source, journal).entries.empty());
+    EXPECT_EQ(app::load_screenshots(other, journal).entries.size(), 1U);
+    EXPECT_TRUE(app::load_screenshots(source, journal).error.empty());
+    EXPECT_TRUE(app::delete_screenshot(record, journal, error));
+    {
+      std::ofstream replacement(first);
+      replacement << "replacement capture";
+    }
+    ASSERT_TRUE(app::append_screenshot({source, first, 20}, journal, error));
+    const auto reloaded = app::load_screenshots(source, journal);
+    ASSERT_EQ(reloaded.entries.size(), 1U);
+    EXPECT_EQ(reloaded.entries[0].capturedAt, 20);
+    EXPECT_FALSE(reloaded.entries[0].deleted);
+    auto tombstone = record;
+    tombstone.deleted = true;
+    const auto parsed = app::parse_screenshot(app::serialize_screenshot(tombstone));
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_TRUE(parsed->deleted);
+  }
+
+  /**
+   * @brief Invalid metadata, an unavailable index and filesystem errors never silently remove a visible capture.
+   */
+  TEST_F(ScreenshotLibraryTest, ReportsDeletionFailuresWithoutLosingOtherCaptures) {
+    std::string error;
+    const auto first = app::next_screenshot_path(root, 10, error);
+    {
+      std::ofstream image(first);
+      image << "capture";
+    }
+    const app::ScreenshotRecord record {source, first, 10};
+    ASSERT_TRUE(app::append_screenshot(record, journal, error));
+    EXPECT_FALSE(app::delete_screenshot({}, journal, error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_FALSE(app::delete_screenshot(record, root + "/missing/index.tsv", error));
+    EXPECT_TRUE(std::filesystem::exists(first));
+    std::filesystem::create_directory(root + "/protected.bmp");
+    {
+      std::ofstream child(root + "/protected.bmp/child.txt");
+      child << "keep";
+    }
+    EXPECT_FALSE(app::delete_screenshot({source, root + "/protected.bmp", 10}, journal, error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_TRUE(std::filesystem::exists(root + "/protected.bmp/child.txt"));
+    EXPECT_EQ(app::load_screenshots(source, journal).entries.size(), 1U);
+    EXPECT_TRUE(std::filesystem::exists(first));
   }
 }  // namespace

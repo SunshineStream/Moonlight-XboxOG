@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdarg>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -405,37 +406,83 @@ namespace streaming {
     }
   }
 
-  bool FfmpegStreamBackend::save_screenshot(const std::string &path) {
-    // renderFrame belongs exclusively to the event thread and contains no composited UI.
+  bool FfmpegStreamBackend::request_screenshot(const std::string &directory, const app::ScreenshotSource &source) {
+    if (const auto result = take_screenshot_result(); !result.empty()) {
+      logging::info("screenshots", result);
+    }
+    if (screenshot_.thread != nullptr || video_.renderFrame.width <= 0 || video_.renderFrame.height <= 0) {
+      logging::warn("screenshots", "Capture not queued: another screenshot is pending or no video frame is available");
+      return false;
+    }
+    // The event thread owns renderFrame. Copy only its planar YUV payload here;
+    // conversion, directory creation, BMP writes and indexing belong to the worker.
     const auto &frame = video_.renderFrame;
-    if (frame.width <= 0 || frame.height <= 0) {
-      logging::warn("stream", "Cannot take a screenshot before the first video frame is presented");
-      return false;
+    auto &snapshot = screenshot_.frame;
+    snapshot.width = frame.width;
+    snapshot.height = frame.height;
+    snapshot.yPitch = frame.yPitch;
+    snapshot.uPitch = frame.uPitch;
+    snapshot.vPitch = frame.vPitch;
+    snapshot.matrix = frame.matrix;
+    snapshot.fullRange = frame.fullRange;
+    const std::array<const AlignedMediaBuffer *, 3> sources {&frame.yPlane, &frame.uPlane, &frame.vPlane};
+    const std::array<AlignedMediaBuffer *, 3> destinations {&snapshot.yPlane, &snapshot.uPlane, &snapshot.vPlane};
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+      destinations[i]->resize(sources[i]->size());
+      std::memcpy(destinations[i]->data(), sources[i]->data(), sources[i]->size());
     }
-    if (!platform::ensure_directory_exists(platform::parent_directory(path))) {
-      return false;
+    screenshot_.source = source;
+    screenshot_.directory = directory;
+    screenshot_.capturedAt = static_cast<std::int64_t>(std::time(nullptr));
+    screenshot_.result.clear();
+    screenshot_.complete.store(false, std::memory_order_relaxed);
+    screenshot_.thread = SDL_CreateThread(save_screenshot_worker, "save-screenshot", &screenshot_);
+    if (screenshot_.thread == nullptr) {
+      screenshot_.frame = {};
+      logging::warn("screenshots", std::string("Cannot start screenshot worker: ") + SDL_GetError());
     }
-    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, frame.width, frame.height, 24, SDL_PIXELFORMAT_BGR24);
-    if (surface == nullptr) {
-      return false;
+    return screenshot_.thread != nullptr;
+  }
+
+  std::string FfmpegStreamBackend::take_screenshot_result() {
+    if (screenshot_.thread == nullptr || !screenshot_.complete.load(std::memory_order_acquire)) {
+      return {};
     }
-    SwsContext *conversion = sws_getContext(frame.width, frame.height, AV_PIX_FMT_YUV420P, frame.width, frame.height, AV_PIX_FMT_BGR24, SWS_POINT, nullptr, nullptr, nullptr);
+    SDL_WaitThread(screenshot_.thread, nullptr);
+    screenshot_.thread = nullptr;
+    return std::exchange(screenshot_.result, {});
+  }
+
+  int FfmpegStreamBackend::save_screenshot_worker(void *context) {
+    auto &job = *static_cast<ScreenshotTask *>(context);
+    // Stay below the high-priority streaming event loop without starving behind
+    // ongoing USB/audio work on the Xbox's single CPU.
+    SDL_SetThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
+    std::string error;
+    const std::string path = app::next_screenshot_path(job.directory, job.capturedAt, error);
+    const auto &frame = job.frame;
+    SDL_Surface *surface = path.empty() ? nullptr : SDL_CreateRGBSurfaceWithFormat(0, frame.width, frame.height, 24, SDL_PIXELFORMAT_BGR24);
+    SwsContext *conversion = surface == nullptr ? nullptr : sws_getContext(frame.width, frame.height, AV_PIX_FMT_YUV420P, frame.width, frame.height, AV_PIX_FMT_BGR24, SWS_POINT, nullptr, nullptr, nullptr);
     bool saved = false;
     if (conversion != nullptr) {
       const int *coefficients = sws_getCoefficients(frame.matrix == VideoColorMatrix::bt709 ? SWS_CS_ITU709 : SWS_CS_ITU601);
       sws_setColorspaceDetails(conversion, coefficients, frame.fullRange, coefficients, 1, 0, 1 << 16, 1 << 16);
-      const std::array<const std::uint8_t *, 4> source {frame.yPlane.data(), frame.uPlane.data(), frame.vPlane.data(), nullptr};
-      const std::array<int, 4> sourcePitch {frame.yPitch, frame.uPitch, frame.vPitch, 0};
-      std::array<std::uint8_t *, 4> destination {static_cast<std::uint8_t *>(surface->pixels), nullptr, nullptr, nullptr};
-      const std::array<int, 4> destinationPitch {surface->pitch, 0, 0, 0};
-      saved = sws_scale(conversion, source.data(), sourcePitch.data(), 0, frame.height, destination.data(), destinationPitch.data()) == frame.height && SDL_SaveBMP(surface, path.c_str()) == 0;
+      const std::array<const std::uint8_t *, 4> pixels {frame.yPlane.data(), frame.uPlane.data(), frame.vPlane.data(), nullptr};
+      const std::array<int, 4> pitch {frame.yPitch, frame.uPitch, frame.vPitch, 0};
+      std::array<std::uint8_t *, 4> output {static_cast<std::uint8_t *>(surface->pixels), nullptr, nullptr, nullptr};
+      const std::array<int, 4> outputPitch {surface->pitch, 0, 0, 0};
+      saved = sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height && SDL_SaveBMP(surface, path.c_str()) == 0;
       sws_freeContext(conversion);
     }
     SDL_FreeSurface(surface);
-    if (!saved) {
-      logging::warn("stream", "Failed to save screenshot: " + path);
+    if (saved) {
+      job.result = app::append_screenshot({job.source, path, job.capturedAt}, app::screenshot_library_path(), error) ? "Saved " + path : "Saved " + path + "; could not update the screenshot library: " + error;
+    } else {
+      job.result = "Screenshot failed: " + (error.empty() ? std::string(SDL_GetError()) : error);
     }
-    return saved;
+    job.frame = {};
+    job.complete.store(true, std::memory_order_release);
+    return 0;
   }
 
   FfmpegStreamBackend::~FfmpegStreamBackend() {
@@ -476,6 +523,12 @@ namespace streaming {
   void FfmpegStreamBackend::shutdown() {
     cleanup_audio_decoder();
     cleanup_video_decoder();
+    if (screenshot_.thread != nullptr) {
+      SDL_WaitThread(screenshot_.thread, nullptr);
+      screenshot_.thread = nullptr;
+      logging::info("screenshots", screenshot_.result);
+      screenshot_.frame = {};
+    }
   }
 
   bool FfmpegStreamBackend::has_decoded_video() const {

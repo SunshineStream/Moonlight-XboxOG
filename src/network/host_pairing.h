@@ -257,6 +257,17 @@ namespace network {
   );
 
   /**
+   * @brief Quit a confirmed in-progress host app through authenticated HTTPS and verify it stopped.
+   * @param address Saved host address.
+   * @param preferredHttpPort Saved HTTP port override.
+   * @param clientIdentity Paired client credentials used for the cancel request.
+   * @param expectedAppId App the user confirmed; a different running app is never intentionally canceled.
+   * @param errorMessage Receives transport, authorization or host rejection details.
+   * @return True when the host reports no running app, including an already stopped app.
+   */
+  bool quit_host_app(const std::string &address, uint16_t preferredHttpPort, const PairingIdentity &clientIdentity, int expectedAppId, std::string *errorMessage = nullptr);
+
+  /**
    * @brief Pair the client with a host using the provided request parameters.
    *
    * @param request Pairing parameters and client identity.

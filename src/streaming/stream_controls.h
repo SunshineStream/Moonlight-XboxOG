@@ -58,6 +58,11 @@ namespace streaming {
      */
     bool keyboard_docked_top() const;
     /**
+     * @brief Read whether exit confirmation requested terminating the host app.
+     * @return True only for the explicit Quit app action.
+     */
+    bool quit_app_requested() const;
+    /**
      * @brief Close all owned SDL references.
      */
     void close();
@@ -213,6 +218,10 @@ namespace streaming {
      * @param code Virtual key code.
      */
     void tap_key(int code);
+    /**
+     * @brief End a Guide/Share pulse while restoring the latest gameplay state.
+     */
+    void release_pulse();
     std::array<Device, 4> devices_ {};  ///< Stable local controller slots.
     input::StreamInput router_;  ///< Ordered event-thread host input.
     input::StreamMenu menu_;  ///< Local menu state.
@@ -228,6 +237,8 @@ namespace streaming {
     Uint32 lastTick_ = 0;  ///< Pointer integration clock.
     int pulseSlot_ = -1;  ///< Controller with a pending guide/share release.
     Uint32 pulseUntil_ = 0;  ///< Guide/share pulse deadline.
+    std::uint32_t pulseButtons_ = 0;  ///< Button held across normal packets after the wheel closes.
+    std::array<input::ControllerState, 4> latestHostController_ {};  ///< Latest unmodified transport state for pulse release.
     std::string message_;  ///< Last action result.
     std::vector<std::string> logs_;  ///< Snapshot of runtime log lines.
     int menuWidth_ = 0;  ///< Last video rectangle width used for local controls.

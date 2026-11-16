@@ -15,6 +15,7 @@
 #include <SDL.h>
 
 // local includes
+#include "src/app/screenshot_library.h"
 #include "src/streaming/aligned_media_buffer.h"
 #include "src/streaming/pvideo_presenter.h"
 #include "src/streaming/stats_overlay.h"
@@ -71,7 +72,7 @@ namespace streaming {
     void set_audio_playback_enabled(bool enabled);
 
     /**
-     * @brief Release all FFmpeg, SDL, and cached frame resources.
+     * @brief Drain any pending screenshot and release FFmpeg, SDL, and cached frame resources.
      */
     void shutdown();
 
@@ -132,11 +133,17 @@ namespace streaming {
     void render_local_overlay(SDL_Renderer *renderer, int width, int height);
 
     /**
-     * @brief Save the current clean decoded frame as a BMP, independently of presentation path.
-     * @param path Destination file under writable Moonlight storage.
-     * @return True when conversion and file writing succeed.
+     * @brief Snapshot the displayed host frame and save it on a bounded background worker.
+     * @param directory Configured screenshot destination, or empty for the default.
+     * @param source Server and app identity captured at request time.
+     * @return True when queued; false before the first frame or while another capture is pending.
      */
-    bool save_screenshot(const std::string &path);
+    bool request_screenshot(const std::string &directory, const app::ScreenshotSource &source);
+    /**
+     * @brief Reap a completed screenshot worker without blocking the streaming event loop.
+     * @return Completion or error detail, or empty when no result is ready.
+     */
+    std::string take_screenshot_result();
 
     /**
      * @brief Resolve the video rectangle available to shared GPU/software controls.
@@ -373,6 +380,26 @@ namespace streaming {
     };
 
     /**
+     * @brief Own one bounded screenshot job independently of live rendering and decoding.
+     */
+    struct ScreenshotTask {
+      SDL_Thread *thread = nullptr;  ///< Owned worker, joined after completion or at shutdown.
+      std::atomic<bool> complete = false;  ///< Release/acquire publication of the completed result.
+      LatestVideoFrame frame;  ///< Independently owned snapshot of the uncomposited YUV frame.
+      app::ScreenshotSource source;  ///< Original host and app identity.
+      std::string directory;  ///< Destination at request time.
+      std::int64_t capturedAt = 0;  ///< UTC capture time.
+      std::string result;  ///< Detail read only after the worker completes.
+    };
+
+    /**
+     * @brief Convert and save an owned YUV snapshot with lower priority than streaming.
+     * @param context ScreenshotTask owned by this backend until the worker is joined.
+     * @return Zero after publishing a completion result.
+     */
+    static int save_screenshot_worker(void *context);
+
+    /**
      * @brief Hold FFmpeg and SDL state used by the video path.
      */
     struct VideoState {  // NOSONAR(cpp:S1820) Owned video pipeline state intentionally groups FFmpeg, SDL, queue, and metric lifetimes.
@@ -442,6 +469,7 @@ namespace streaming {
 
     VideoState video_ {};
     AudioState audio_ {};
+    ScreenshotTask screenshot_ {};  ///< Single capture slot, bounded to one additional YUV frame.
     PvideoPresenter presenter_;  ///< Main-thread GPU presentation resources.
     VideoOverlay statisticsOverlay_;  ///< Shared cached panel for all presentation paths.
     VideoStatistics statistics_;  ///< Cumulative decode and presentation telemetry.

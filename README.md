@@ -125,9 +125,11 @@ In the numeric address/port keypad, **Space** types the focused key and **Enter*
 **PgUp / PgDn** change the address section.
 
 Stream logs appear in a live side panel with severity colors and a scrollbar. Scroll upward to read
-older entries; return to the bottom to follow new entries. The disconnect dialog uses the same modal
-surface as the main menus, accepts **A / Enter** to disconnect and **B / Esc** to cancel, and leaves
-the host app running after disconnecting.
+older entries; return to the bottom to follow new entries. **Exit** opens a three-button dialog:
+**B / Esc** cancels, **A / Enter** disconnects while leaving the app running on the PC, and **X / Q**
+quits the app on the PC. Quitting can lose unsaved progress. An in-progress app has a pause icon on
+its poster and can be selected to resume; its app action menu also offers **Quit app**, with confirmation.
+The pause marker describes a resumable streaming session; the PC app continues running after disconnecting.
 Returning from the stream resets local keyboard/controller holds before library navigation resumes.
 
 Screenshots default to `E:\UDATA\<title-id>\screenshots` and omit local controls. Open
@@ -144,12 +146,17 @@ The same section stores `keyboard_dock_top = false` (bottom) or `true` (top).
 Open a game or app's action menu and choose **Screenshots** to view its captures. The viewer works
 offline and shows the newest capture first; use **LB / RB** or **PgUp / PgDn** to browse, and
 **B / Esc** to return to the app's actions. Left and right navigation also changes images.
+Use **X / Backspace / Delete** in the viewer to delete the selected image after confirmation.
 New screenshots are linked to the server UUID and app ID in the title-scoped `screenshots.tsv` index;
 servers without a UUID use their saved address and port. Renaming a server or app does not change its
 library. Changing the screenshot folder preserves access to previously indexed locations. Keep the
 index with your save data, and keep the bitmap files in their original locations. Moved or deleted
 files display an unavailable message. Captures saved before this index was introduced remain on disk
 and are not automatically assigned to an app.
+
+Taking a screenshot snapshots the currently displayed host frame and saves it in the background.
+Only one capture saves at a time; completion and errors are written to the log. The wheels close
+automatically after screenshot, Guide, Share, statistics and mouse-mode actions.
 
 Mouse mode uses the invoking controller's **left stick** for movement and **A / B** for left / right
 clicks. Stick-driven mouse movement is reported at up to 125 Hz, while button presses and releases

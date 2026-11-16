@@ -63,6 +63,7 @@ namespace app {
     connection_test,  ///< Progress and result of a manual connection test.
     directory_picker,  ///< Screenshot destination browser and local folder-name keyboard.
     screenshot_viewer,  ///< Local captures associated with the selected server and app.
+    quit_progress,  ///< Authenticated host-app quit operation running in the background.
   };
 
   /**
@@ -100,6 +101,8 @@ namespace app {
     none,  ///< No destructive action is pending confirmation.
     delete_saved_file,  ///< Delete one saved file or directory.
     factory_reset,  ///< Remove all persisted Moonlight state.
+    delete_screenshot,  ///< Remove the selected screenshot and its journal entry.
+    quit_app,  ///< Terminate the selected in-progress app on its host.
   };
 
   /**
@@ -172,6 +175,8 @@ namespace app {
     std::string targetPath;  ///< File or directory path targeted by the action, when applicable.
     std::string title;  ///< Modal title presented to the user.
     std::vector<std::string> lines;  ///< Body lines describing the consequence of the action.
+    ModalId returnModal = ModalId::none;  ///< Dialog restored after confirmation or cancellation.
+    std::size_t returnActionIndex = 0;  ///< Focus to restore in the parent dialog.
   };
 
   /**
@@ -403,7 +408,18 @@ namespace app {
   };
 
   /**
-   * @brief Complete local application state, including transient screenshot browsing.
+   * @brief Retain the user-confirmed host and app until its quit operation completes.
+   */
+  struct AppQuitState {
+    std::string address;  ///< Saved server endpoint captured before confirmation.
+    uint16_t port = 0;  ///< Saved HTTP port override.
+    int appId = 0;  ///< Expected running app; prevents quitting a different session.
+    std::string appName;  ///< App label for progress and completion feedback.
+    bool inProgress = false;  ///< True while the background quit request owns the progress dialog.
+  };
+
+  /**
+   * @brief Complete local application state, including transient dialogs and screenshot browsing.
    */
   struct ClientState {
     ShellState shell;  ///< Shell-wide status and overlay state.
@@ -418,6 +434,7 @@ namespace app {
     SettingsState settings;  ///< Settings, log viewer, and saved-file workflow state.
     DirectoryPickerState directoryPicker;  ///< Pending screenshot-directory workflow.
     ScreenshotViewerState screenshotViewer;  ///< Local app screenshot library, released when browsing ends.
+    AppQuitState appQuit;  ///< Retained target for a confirmed host-app quit operation.
     ConfirmationDialogState confirmation;  ///< Confirmation dialog content for destructive actions.
   };
 
@@ -454,6 +471,8 @@ namespace app {
     bool directoryCreateRequested = false;  ///< Create the named child of the current picker directory.
     bool directorySelectRequested = false;  ///< Check destination writability before accepting the picker directory.
     bool screenshotsRequested = false;  ///< Load captures for the viewer's retained server and app identity.
+    bool screenshotDeleteRequested = false;  ///< Delete the selected capture after confirmation.
+    bool quitAppRequested = false;  ///< Start the retained host-app quit request in a background task.
   };
 
   /**
@@ -703,6 +722,21 @@ namespace app {
    * @return Summary of the resulting state transition.
    */
   AppUpdate handle_command(ClientState &state, input::UiCommand command);
+
+  /**
+   * @brief Apply a completed quit operation and clear only the confirmed app's in-progress state.
+   * @param state Client state containing the retained quit target.
+   * @param succeeded True after the host confirmed that no app is running.
+   * @param message Completion or actionable failure detail.
+   */
+  void apply_app_quit_result(ClientState &state, bool succeeded, std::string message);
+  /**
+   * @brief Remove a deleted capture from the open viewer and keep its selection in range.
+   * @param state Viewer that requested deletion.
+   * @param succeeded True when the bitmap and index deletion both succeeded.
+   * @param error Failure detail to keep visible without hiding the selected image.
+   */
+  void apply_screenshot_delete_result(ClientState &state, bool succeeded, std::string error);
 
   /**
    * @brief Insert printable text into the local folder-name draft, without forwarding it to a host.

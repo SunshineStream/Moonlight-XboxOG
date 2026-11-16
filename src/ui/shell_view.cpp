@@ -161,7 +161,7 @@ namespace {
         continue;
       }
 
-      const std::string detail = appRecord.running ? "Running now" : std::string {};
+      const std::string detail = appRecord.running ? "In progress / Resume" : std::string {};
 
       std::string badgeLabel;
       if (appRecord.favorite) {
@@ -570,13 +570,17 @@ namespace {
    */
   void fill_app_actions_modal_view(const app::ClientState &state, ui::ShellViewModel *viewModel) {
     if (const app::HostAppRecord *appRecord = app::selected_app(state); appRecord != nullptr) {
+      const auto selection = std::min(state.modal.selectedActionIndex, appRecord->running ? std::size_t {4} : std::size_t {3});
       viewModel->modal.title = appRecord->name;
       viewModel->modal.actions = {
-        {"toggle-hidden-app", "Hide app", true, state.modal.selectedActionIndex == 0U, appRecord->hidden, {}, true},
-        {"view-app-details", "View details", true, state.modal.selectedActionIndex == 1U, false},
-        {"toggle-favorite", "Set favorite", true, state.modal.selectedActionIndex == 2U, appRecord->favorite, {}, true},
-        {"view-screenshots", "Screenshots", true, state.modal.selectedActionIndex == 3U, false, "icons\\camera.svg"},
+        {"toggle-hidden-app", "Hide app", true, selection == 0U, appRecord->hidden, {}, true},
+        {"view-app-details", "View details", true, selection == 1U, false},
+        {"toggle-favorite", "Set favorite", true, selection == 2U, appRecord->favorite, {}, true},
+        {"view-screenshots", "Screenshots", true, selection == 3U, false, "icons\\camera.svg"},
       };
+      if (appRecord->running) {
+        viewModel->modal.actions.push_back({"quit-app", "Quit app", true, state.modal.selectedActionIndex == 4U, false, "icons\\power.svg"});
+      }
     }
   }
 
@@ -707,6 +711,12 @@ namespace {
       case app::ModalId::app_details:
         fill_app_details_modal_view(state, viewModel);
         return;
+      case app::ModalId::quit_progress:
+        viewModel->modal.title = "Quitting " + state.appQuit.appName;
+        viewModel->modal.lines = {"Waiting for the PC to close the app..."};
+        viewModel->modal.busy = true;
+        viewModel->modal.iconAssetPath = "icons\\loader-circle.svg";
+        return;
       case app::ModalId::log_viewer:
         fill_log_viewer_modal_view(state, viewModel);
         return;
@@ -732,6 +742,7 @@ namespace {
             viewModel->modal.footerActions = {
               {"previous-screenshot", "Previous", "icons\\button-lb.svg", {}, false},
               {"next-screenshot", "Next", "icons\\button-rb.svg", {}, false},
+              {"delete-screenshot", "Delete", "icons\\button-x.svg", {}, false},
             };
           }
           viewModel->modal.footerActions.push_back({"back", "Back", "icons\\button-b.svg", {}, false});
@@ -778,7 +789,7 @@ namespace {
         {
           std::vector<ui::ShellFooterAction> actions;
           if (app::selected_app(state) != nullptr) {
-            actions.emplace_back(ui::ShellFooterAction {"launch", "Launch", "icons\\button-a.svg", {}, true});
+            actions.emplace_back(ui::ShellFooterAction {"launch", app::selected_app(state)->running ? "Resume" : "Launch", "icons\\button-a.svg", {}, true});
             actions.emplace_back(ui::ShellFooterAction {"app-menu", "App Menu", "icons\\button-y.svg", {}, false});
           }
           actions.emplace_back(ui::ShellFooterAction {"back", "Back", "icons\\button-b.svg", {}, false});
@@ -902,8 +913,22 @@ namespace {
 }  // namespace
 
 namespace ui {
-  bool same_folder_dialog_content(const ShellModalView &previous, const ShellModalView &current) {
-    if (!previous.folderBrowser || !current.folderBrowser || !previous.visible || !current.visible || previous.busy || current.busy || previous.title != current.title || previous.iconAssetPath != current.iconAssetPath || previous.lines != current.lines || previous.actions.size() != current.actions.size() || previous.footerActions.size() != current.footerActions.size()) {
+  bool shell_requires_animation(const app::ClientState &state) {
+    if (state.shell.overlayVisible || state.modal.id == app::ModalId::quit_progress || (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress)) {
+      return true;
+    }
+    if (state.modal.active()) {
+      return false;
+    }
+    if (state.shell.activeScreen == app::ScreenId::pair_host) {
+      return true;
+    }
+    const auto *host = app::apps_host(state);
+    return state.shell.activeScreen == app::ScreenId::apps && host != nullptr && host->appListState == app::HostAppListState::loading;
+  }
+
+  bool same_action_dialog_content(const ShellModalView &previous, const ShellModalView &current) {
+    if (previous.folderBrowser != current.folderBrowser || !previous.visible || !current.visible || previous.busy || current.busy || previous.title != current.title || previous.iconAssetPath != current.iconAssetPath || previous.lines != current.lines || previous.actions.size() != current.actions.size() || previous.footerActions.size() != current.footerActions.size()) {
       return false;
     }
     for (std::size_t i = 0; i < current.actions.size(); ++i) {

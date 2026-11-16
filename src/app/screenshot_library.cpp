@@ -88,7 +88,7 @@ namespace app {
     if (record.path.empty() || record.capturedAt < 0 || record.source.appId <= 0 || (record.source.hostUuid.empty() && record.source.hostAddress.empty())) {
       return {};
     }
-    std::string result = "1\t" + std::to_string(record.capturedAt) + "\t" + std::to_string(record.source.appId) + "\t" + std::to_string(effective_host_port(record.source.hostPort));
+    std::string result = std::string(record.deleted ? "D\t" : "1\t") + std::to_string(record.capturedAt) + "\t" + std::to_string(record.source.appId) + "\t" + std::to_string(effective_host_port(record.source.hostPort));
     for (const auto *field : {&record.source.hostUuid, &record.source.hostAddress, &record.source.hostName, &record.source.appName, &record.path}) {
       if (field->find('\0') != std::string::npos) {
         return {};
@@ -134,10 +134,11 @@ namespace app {
         fields.back() += c;
       }
     }
-    if (escaped || fields.size() != 10 || fields[0] != "1" || fields[9] != "end") {
+    if (escaped || fields.size() != 10 || (fields[0] != "1" && fields[0] != "D") || fields[9] != "end") {
       return std::nullopt;
     }
     ScreenshotRecord record;
+    record.deleted = fields[0] == "D";
     unsigned int port = 0;
     std::istringstream numbers(fields[1] + " " + fields[2] + " " + fields[3]);
     if (!(numbers >> record.capturedAt >> record.source.appId >> port) || !(numbers >> std::ws).eof() || port == 0 || port > 65535) {
@@ -210,7 +211,15 @@ namespace app {
       }
       if (auto record = parse_screenshot(line); record.has_value()) {
         if (screenshot_source_matches(record->source, source)) {
-          result.entries.push_back(std::move(*record));
+          if (record->deleted) {
+            auto &entries = result.entries;
+            entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const ScreenshotRecord &entry) {
+                            return entry.path == record->path;
+                          }),
+                          entries.end());
+          } else {
+            result.entries.push_back(std::move(*record));
+          }
         }
       } else {
         result.error = "Some incomplete or damaged screenshot records were skipped.";
@@ -226,6 +235,38 @@ namespace app {
       return a.capturedAt > b.capturedAt;
     });
     return result;
+  }
+
+  bool delete_screenshot(const ScreenshotRecord &record, const std::string &journalPath, std::string &error) {
+    auto tombstone = record;
+    tombstone.deleted = true;
+    const std::string line = serialize_screenshot(tombstone);
+    error.clear();
+    if (line.empty()) {
+      error = "Invalid screenshot metadata.";
+      return false;
+    }
+    // Open the index before deleting the image, so a read-only index cannot turn
+    // an ordinary delete into a missing image that still appears in the library.
+    FILE *file = std::fopen(journalPath.c_str(), "ab");
+    if (file == nullptr) {
+      error = "Cannot open the screenshot index for deletion.";
+      return false;
+    }
+    platform::try_get_file_size(record.path);  // Mount a saved Xbox drive on cold boot.
+    if (std::remove(record.path.c_str()) != 0 && errno != ENOENT) {
+      error = "Cannot delete screenshot: " + std::string(std::strerror(errno));
+      std::fclose(file);
+      return false;
+    }
+    const std::string append = "\n" + line + "\n";
+    const bool written = std::fwrite(append.data(), 1, append.size(), file) == append.size();
+    const bool closed = std::fclose(file) == 0;
+    if (!written || !closed) {
+      error = "Screenshot deleted, but its index could not be updated.";
+      return false;
+    }
+    return true;
   }
 
   std::string next_screenshot_path(std::string_view directory, std::int64_t capturedAt, std::string &error) {
