@@ -47,6 +47,7 @@
 #include "src/ui/asset_path.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/host_probe_result_queue.h"
+#include "src/ui/screenshot_image.h"
 #include "src/ui/shell_layout.h"
 #include "src/ui/shell_view.h"
 #include "src/ui/svg_assets.h"
@@ -256,11 +257,21 @@ namespace {
   };
 
   /**
-   * @brief Stores reusable layout, text and retained folder-dialog state for local input modals.
+   * @brief Retains one decoded screenshot and its load result for the current renderer.
+   */
+  struct ScreenshotTextureCache {
+    SDL_Texture *texture = nullptr;  ///< Single open bitmap, released before a different image is decoded.
+    std::string path;  ///< Last attempted image path, including failed loads.
+    std::string error;  ///< User-facing unavailable or decoding error for this path.
+  };
+
+  /**
+   * @brief Renderer-owned resources retained across local input and image dialogs.
    */
   struct KeypadModalLayoutCache {
     SDL_Window *window = nullptr;  ///< Shared window; needed only for validated partial Xbox framebuffer presentation.
     FolderDialogCache folder;  ///< Retained folder browser, sharing the local-dialog lifetime.
+    ScreenshotTextureCache screenshot;  ///< At most one decoded capture is retained.
     int modalInnerWidth = 0;  ///< Last modal content width used to build the cached line layout.
     int modalTextHeight = 0;  ///< Cached combined height of the modal body text.
     std::vector<std::string> lines;  ///< Last body lines used to populate the cache.
@@ -374,6 +385,8 @@ namespace {
     }
 
     clear_folder_dialog_cache(cache->folder);
+    destroy_texture(cache->screenshot.texture);
+    cache->screenshot = {};
     clear_cached_text_texture(&cache->titleTexture);
     for (CachedTextTexture &lineTexture : cache->lineTextures) {
       clear_cached_text_texture(&lineTexture);
@@ -1137,6 +1150,14 @@ namespace {
     return render_text_line(renderer, font, text, color, x, y, rect.w, drawnHeight);
   }
 
+  /**
+   * @brief Fit cached artwork or a screenshot inside a square-pixel shell rectangle without cropping.
+   *
+   * @param renderer Active shell renderer.
+   * @param texture Loaded image texture.
+   * @param rect Available logical bounds before encoder correction.
+   * @return True when the fitted image was copied successfully.
+   */
   bool render_texture_fit(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_Rect &rect) {
     if (renderer == nullptr || texture == nullptr || rect.w <= 0 || rect.h <= 0) {
       return false;
@@ -1148,14 +1169,7 @@ namespace {
       return false;
     }
 
-    SDL_Rect destination = rect;
-    if ((textureWidth * rect.h) > (textureHeight * rect.w)) {
-      destination.h = std::max(1, (textureHeight * rect.w) / textureWidth);
-      destination.y = rect.y + std::max(0, (rect.h - destination.h) / 2);
-    } else {
-      destination.w = std::max(1, (textureWidth * rect.h) / textureHeight);
-      destination.x = rect.x + std::max(0, (rect.w - destination.w) / 2);
-    }
+    const SDL_Rect destination = sdl_rect(ui::fit_screenshot({textureWidth, textureHeight}, {rect.x, rect.y, rect.w, rect.h}));
 
     return SDL_RenderCopy(renderer, texture, nullptr, &destination) == 0;
   }
@@ -3182,6 +3196,11 @@ namespace {
       return;
     }
 
+    if (host->reachability == app::HostReachability::offline && host->pairingState == app::PairingState::paired && !host->apps.empty()) {
+      app::begin_selected_host_app_browse(state, update.requests.appsBrowseShowHidden);
+      return;
+    }
+
     const std::string address = host->address;
     const uint16_t port = host->resolvedHttpPort == 0 ? app::effective_host_port(host->port) : host->resolvedHttpPort;
     network::PairingIdentity clientIdentity {};
@@ -4094,7 +4113,90 @@ namespace {
   }
 
   /**
-   * @brief Compose the shell or update retained folder rows without rebuilding unchanged page pixels.
+   * @brief Load a different capture once, bounding allocations before decoding its BMP pixels.
+   * @param renderer Renderer that owns the single image texture.
+   * @param path Current capture path, or empty for an empty library.
+   * @param cache Image and any load error retained until selection changes.
+   */
+  void load_screenshot_texture(SDL_Renderer *renderer, const std::string &path, ScreenshotTextureCache &cache) {
+    if (cache.path == path) {
+      return;
+    }
+    destroy_texture(cache.texture);
+    cache = {};
+    cache.path = path;
+    if (path.empty()) {
+      return;
+    }
+    std::uint64_t size = 0;
+    if (!platform::try_get_file_size(path, &size)) {
+      cache.error = "Screenshot unavailable. The file may have been moved or deleted.";
+      return;
+    }
+    FILE *file = std::fopen(path.c_str(), "rb");
+    std::array<char, 54> header {};
+    const bool read = file != nullptr && std::fread(header.data(), 1, header.size(), file) == header.size();
+    if (file != nullptr) {
+      std::fclose(file);
+    }
+    const auto image = read ? ui::screenshot_bitmap_size({header.data(), header.size()}, size) : ui::ScreenshotImageSize {};
+    if (image.width == 0) {
+      cache.error = "Cannot open this screenshot. The bitmap is damaged or unsupported.";
+      return;
+    }
+    SDL_Surface *surface = SDL_LoadBMP(path.c_str());
+    if (surface != nullptr) {
+      cache.texture = SDL_CreateTextureFromSurface(renderer, surface);
+      SDL_FreeSurface(surface);
+    }
+    if (cache.texture == nullptr) {
+      cache.error = "Cannot load the screenshot. Close the viewer and try again.";
+      logging::warn("screenshots", "Failed to load " + path + ": " + SDL_GetError());
+    }
+  }
+
+  /**
+   * @brief Present an app capture with the shell's existing image fitting and input glyphs.
+   * @param renderer Active software renderer, also used by the Xbox framebuffer path.
+   * @param bodyFont Heading and error font.
+   * @param smallFont Caption and helper font.
+   * @param assets Shared main-menu SVG textures.
+   * @param view Current capture, metadata and input hints.
+   * @param bounds Television-safe logical content area.
+   * @param cache Single retained capture texture.
+   * @return True when the viewer frame was presented successfully.
+   */
+  bool render_screenshot_viewer(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assets, const ui::ShellViewModel &view, const SDL_Rect &bounds, ScreenshotTextureCache &cache) {
+    load_screenshot_texture(renderer, view.screenshot.path, cache);
+    const SDL_Color text {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
+    const SDL_Color muted {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
+    const int heading = TTF_FontLineSkip(bodyFont) + 8;
+    const int caption = TTF_FontLineSkip(smallFont) + 6;
+    const int footer = measure_footer_actions_height(smallFont, view.modal.footerActions, bounds.w);
+    const SDL_Rect picture {bounds.x, bounds.y + heading + caption, bounds.w, std::max(1, bounds.h - heading - caption * 2 - footer - 12)};
+    if (!render_text_line_simple(renderer, bodyFont, view.modal.title, text, bounds.x, bounds.y, bounds.w) || !render_text_line_simple(renderer, smallFont, view.screenshot.caption, muted, bounds.x, bounds.y + heading, bounds.w)) {
+      return false;
+    }
+    if (cache.texture != nullptr) {
+      if (!render_texture_fit(renderer, cache.texture, picture)) {
+        return false;
+      }
+    } else {
+      const std::string message = !cache.error.empty() ? cache.error : view.screenshot.status;
+      if (!render_bounded_text(renderer, bodyFont, message, text, picture)) {
+        return false;
+      }
+    }
+    const std::string details = !view.screenshot.status.empty() && !view.screenshot.path.empty() ? view.screenshot.status : view.screenshot.path;
+    if (!render_text_line_simple(renderer, smallFont, details, muted, bounds.x, picture.y + picture.h + 6, bounds.w) || !render_footer_actions(renderer, smallFont, assets, view.modal.footerActions, {bounds.x, bounds.y + bounds.h - footer, bounds.w, footer})) {
+      return false;
+    }
+    SDL_RenderPresent(renderer);
+    return true;
+  }
+
+  /**
+   * @brief Compose the shell, show a capture, or update retained folder rows without rebuilding unchanged page pixels.
    *
    * @param renderer Active SDL renderer, including the software fallback.
    * @param videoMode Output resolution and pixel aspect information.
@@ -4174,6 +4276,10 @@ namespace {
     SDL_SetRenderDrawColor(renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
     if (SDL_RenderClear(renderer) != 0 || SDL_RenderSetScale(renderer, horizontalScale, 1.0f) != 0) {
       return false;
+    }
+
+    if (viewModel.screenshot.visible && !viewModel.overlay.visible && keypadModalLayoutCache != nullptr) {
+      return render_screenshot_viewer(renderer, bodyFont, smallFont, assetCache, viewModel, {outerMargin, outerMargin, screenWidth - outerMargin * 2, screenHeight - outerMargin * 2}, keypadModalLayoutCache->screenshot);
     }
 
     const int logoSize = std::max(26, headerRect.h - 12);
@@ -5115,6 +5221,14 @@ namespace {
     const app::ScreenId previousScreen = state.shell.activeScreen;
     app::AppUpdate update = app::handle_command(state, command);
     process_directory_picker_requests(state, update);
+    if (update.requests.screenshotsRequested) {
+      auto result = app::load_screenshots(state.screenshotViewer.source, app::screenshot_library_path());
+      state.screenshotViewer.entries = std::move(result.entries);
+      state.screenshotViewer.error = std::move(result.error);
+      // The image viewer draws no app tiles, so their textures can be released
+      // before allocating a full stream-sized capture on a 64 MB Xbox.
+      clear_cover_art_texture_cache(&resources->coverArtTextureCache);
+    }
     logging::set_file_minimum_level(state.settings.loggingLevel);
     logging::set_debugger_console_minimum_level(state.settings.xemuConsoleLoggingLevel);
     log_app_update(state, update);
@@ -5142,13 +5256,13 @@ namespace {
     if ((previousScreen != state.shell.activeScreen || update.navigation.screenChanged) && !draw_current_shell_frame(activeVideoMode, state, resources, runtime)) {
       return;
     }
-    if (!(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) && state.modal.id != app::ModalId::directory_picker) {
+    if (!(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) && state.modal.id != app::ModalId::directory_picker && state.modal.id != app::ModalId::screenshot_viewer) {
       clear_keypad_modal_layout_cache(&resources->keypadModalLayoutCache);
     }
   }
 
   /**
-   * @brief Process shell input, notification lifetimes, background tasks and redraws.
+   * @brief Process shell input and background tasks, retaining idle local dialogs and screenshot frames.
    *
    * @param window Shared SDL window reused for shell and streaming rendering.
    * @param videoMode Active output mode used by the shell renderer.
@@ -5192,7 +5306,7 @@ namespace {
     finish_shell_background_tasks(state, resources, runtime);
     start_shell_background_tasks_if_needed(state, runtime, SDL_GetTicks());
 
-    const bool retainedInputDialog = (state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) || (state.modal.id == app::ModalId::directory_picker && !state.directoryPicker.creating && !state.shell.overlayVisible);
+    const bool retainedInputDialog = (state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) || (state.modal.id == app::ModalId::directory_picker && !state.directoryPicker.creating && !state.shell.overlayVisible) || (state.modal.id == app::ModalId::screenshot_viewer && !state.shell.overlayVisible);
     if ((!retainedInputDialog || runtime->keypadRedrawRequested) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
       return false;
     }

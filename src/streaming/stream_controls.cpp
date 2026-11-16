@@ -6,7 +6,6 @@
 
 #include "src/logging/log_file.h"
 #include "src/logging/logger.h"
-#include "src/startup/storage_paths.h"
 #include "src/streaming/ffmpeg_stream_backend.h"
 #include "src/ui/asset_path.h"
 #include "src/ui/dialog_surface.h"
@@ -15,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <memory>
 #include <utility>
 
@@ -286,9 +286,10 @@ namespace streaming {
     poll();
   }
 
-  void StreamControls::configure(std::string screenshotDirectory, bool keyboardTop) {
+  void StreamControls::configure(std::string screenshotDirectory, bool keyboardTop, app::ScreenshotSource source) {
     screenshotDirectory_ = std::move(screenshotDirectory);
     keyboardTop_ = keyboardTop;
+    screenshotSource_ = std::move(source);
   }
 
   bool StreamControls::keyboard_docked_top() const {
@@ -540,8 +541,18 @@ namespace streaming {
         break;
       case input::StreamAction::screenshot:
         {
-          const std::string path = startup::screenshot_storage_path(screenshotDirectory_, "screenshot-" + std::to_string(SDL_GetTicks()) + ".bmp");
-          message_ = backend.save_screenshot(path) ? "Saved " + path : "Screenshot failed; check the logs.";
+          const auto capturedAt = static_cast<std::int64_t>(std::time(nullptr));
+          std::string error;
+          const std::string path = app::next_screenshot_path(screenshotDirectory_, capturedAt, error);
+          if (!path.empty() && backend.save_screenshot(path)) {
+            const app::ScreenshotRecord record {screenshotSource_, path, capturedAt};
+            message_ = app::append_screenshot(record, app::screenshot_library_path(), error) ? "Saved " + path : "Saved " + path + "; could not add it to the viewer.";
+          } else {
+            message_ = "Screenshot failed; check the logs.";
+          }
+          if (!error.empty()) {
+            logging::warn("stream", error);
+          }
           logging::info("stream", message_);
           break;
         }

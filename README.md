@@ -141,6 +141,16 @@ saved, and an empty value restores the default.
 Use a TOML literal string for Xbox paths, for example `screenshot_directory = 'F:\Screenshots'`.
 The same section stores `keyboard_dock_top = false` (bottom) or `true` (top).
 
+Open a game or app's action menu and choose **Screenshots** to view its captures. The viewer works
+offline and shows the newest capture first; use **LB / RB** or **PgUp / PgDn** to browse, and
+**B / Esc** to return to the app's actions. Left and right navigation also changes images.
+New screenshots are linked to the server UUID and app ID in the title-scoped `screenshots.tsv` index;
+servers without a UUID use their saved address and port. Renaming a server or app does not change its
+library. Changing the screenshot folder preserves access to previously indexed locations. Keep the
+index with your save data, and keep the bitmap files in their original locations. Moved or deleted
+files display an unavailable message. Captures saved before this index was introduced remain on disk
+and are not automatically assigned to an app.
+
 Mouse mode uses the invoking controller's **left stick** for movement and **A / B** for left / right
 clicks. Stick-driven mouse movement is reported at up to 125 Hz, while button presses and releases
 are sent immediately. That controller's gameplay input stays suppressed until mouse mode is disabled through the menu;

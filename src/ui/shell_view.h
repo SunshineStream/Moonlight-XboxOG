@@ -202,6 +202,16 @@ namespace ui {
   };
 
   /**
+   * @brief Current screenshot and captions for the local full-screen image viewer.
+   */
+  struct ShellScreenshotView {
+    bool visible = false;  ///< True while the app screenshot viewer owns the display.
+    std::string path;  ///< Current bitmap path; empty when no captures are indexed.
+    std::string caption;  ///< Capture time and position within this app's library.
+    std::string status;  ///< Empty-library guidance or a recoverable journal warning.
+  };
+
+  /**
    * @brief Render-ready shell state derived from the app model.
    */
   struct ShellViewModel {
@@ -212,6 +222,7 @@ namespace ui {
     ShellModalView modal;  ///< Modal dialog content.
     ShellLogViewerView logViewer;  ///< Embedded log viewer surfaced by the log modal.
     ShellKeypadModalView keypad;  ///< Add-host keypad modal content.
+    ShellScreenshotView screenshot;  ///< Single-image local viewer with app-specific navigation.
   };
 
   /**

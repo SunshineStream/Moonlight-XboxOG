@@ -563,7 +563,7 @@ namespace {
   }
 
   /**
-   * @brief Build app actions with explicit hidden and favorite checkbox states.
+   * @brief Build app actions with hidden/favorite checkboxes and the local screenshot viewer entry.
    *
    * @param state Current app and modal selection.
    * @param viewModel Receives the modal action rows.
@@ -575,6 +575,7 @@ namespace {
         {"toggle-hidden-app", "Hide app", true, state.modal.selectedActionIndex == 0U, appRecord->hidden, {}, true},
         {"view-app-details", "View details", true, state.modal.selectedActionIndex == 1U, false},
         {"toggle-favorite", "Set favorite", true, state.modal.selectedActionIndex == 2U, appRecord->favorite, {}, true},
+        {"view-screenshots", "Screenshots", true, state.modal.selectedActionIndex == 3U, false, "icons\\camera.svg"},
       };
     }
   }
@@ -715,6 +716,27 @@ namespace {
       case app::ModalId::directory_picker:
         fill_directory_picker_view(state, viewModel);
         return;
+      case app::ModalId::screenshot_viewer:
+        {
+          const auto &viewer = state.screenshotViewer;
+          viewModel->modal.title = viewer.source.appName + " / " + viewer.source.hostName;
+          viewModel->screenshot.visible = true;
+          viewModel->screenshot.status = viewer.error;
+          if (viewer.entries.empty()) {
+            viewModel->screenshot.status = viewer.error.empty() ? "No screenshots for this app yet. Take one from the stream controls." : viewer.error;
+          } else {
+            const auto selected = std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+            const auto &entry = viewer.entries[selected];
+            viewModel->screenshot.path = entry.path;
+            viewModel->screenshot.caption = std::to_string(selected + 1) + " / " + std::to_string(viewer.entries.size()) + "    " + app::screenshot_time_label(entry.capturedAt);
+            viewModel->modal.footerActions = {
+              {"previous-screenshot", "Previous", "icons\\button-lb.svg", {}, false},
+              {"next-screenshot", "Next", "icons\\button-rb.svg", {}, false},
+            };
+          }
+          viewModel->modal.footerActions.push_back({"back", "Back", "icons\\button-b.svg", {}, false});
+          return;
+        }
       case app::ModalId::connection_test:
         viewModel->modal.busy = state.connectionTest.inProgress;
         viewModel->modal.title = state.connectionTest.inProgress ? "Testing connection" : (state.connectionTest.succeeded ? "Connection successful" : "Connection failed");

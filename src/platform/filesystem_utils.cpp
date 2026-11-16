@@ -349,6 +349,9 @@ namespace platform {
   }
 
   bool try_get_file_size(std::string_view path, std::uint64_t *sizeBytes) {
+#ifdef NXDK
+    mount_directory_drive(path);
+#endif
 #if defined(_WIN32) || defined(NXDK)
     WIN32_FILE_ATTRIBUTE_DATA fileData {};
     if (const std::string ownedPath(path); !GetFileAttributesExA(ownedPath.c_str(), GetFileExInfoStandard, &fileData)) {

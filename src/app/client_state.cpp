@@ -679,6 +679,9 @@ namespace {
     if (state.modal.id == app::ModalId::directory_picker) {
       state.directoryPicker = {};
     }
+    if (state.modal.id == app::ModalId::screenshot_viewer) {
+      state.screenshotViewer = {};
+    }
     state.modal = {};
     reset_confirmation(state);
   }
@@ -764,7 +767,7 @@ namespace {
       case app::ModalId::host_actions:
         return 4U;
       case app::ModalId::app_actions:
-        return 3U;
+        return 4U;
       case app::ModalId::confirmation:
         return 2U;
       case app::ModalId::directory_picker:
@@ -775,6 +778,7 @@ namespace {
       case app::ModalId::app_details:
       case app::ModalId::log_viewer:
       case app::ModalId::connection_test:
+      case app::ModalId::screenshot_viewer:
         return 0U;
     }
     return 0U;
@@ -1187,7 +1191,7 @@ namespace {
   }
 
   /**
-   * @brief Open a paired PC's library or notify the user why it cannot be opened.
+   * @brief Open a paired PC's library, retaining offline access to cached apps and screenshots.
    *
    * @param state Mutable client state.
    * @param showHiddenApps Include hidden apps in the library.
@@ -1198,7 +1202,7 @@ namespace {
     if (host == nullptr) {
       return false;
     }
-    if (host->reachability == app::HostReachability::offline) {
+    if (host->reachability == app::HostReachability::offline && host->apps.empty()) {
       state.shell.statusMessage = "Host is offline. Bring it online before opening apps.";
       app::show_notification(state, app::NotificationKind::error, "PC is offline", "Turn on the PC and make sure Sunshine is running to open its apps.");
       return false;
@@ -1214,8 +1218,9 @@ namespace {
     state.apps.selectedAppIndex = 0U;
     state.apps.scrollPage = 0U;
     state.apps.refreshFailureNotified = false;
-    state.hosts.active.appListState = app::HostAppListState::loading;
-    state.hosts.active.appListStatusMessage = (state.hosts.active.apps.empty() ? "Loading apps for " : "Refreshing apps for ") + state.hosts.active.displayName + "...";
+    const bool offline = state.hosts.active.reachability == app::HostReachability::offline;
+    state.hosts.active.appListState = offline ? app::HostAppListState::ready : app::HostAppListState::loading;
+    state.hosts.active.appListStatusMessage = offline ? "PC offline. Showing saved apps and local screenshots." : (state.hosts.active.apps.empty() ? "Loading apps for " : "Refreshing apps for ") + state.hosts.active.displayName + "...";
     state.shell.statusMessage.clear();
     set_screen(state, app::ScreenId::apps);
     return true;
@@ -1492,7 +1497,7 @@ namespace {
     }
 
     app::HostAppRecord &appRecord = mutableHost->apps[indices[state.apps.selectedAppIndex]];
-    switch (state.modal.selectedActionIndex % 3U) {
+    switch (state.modal.selectedActionIndex % 4U) {
       case 0:
         appRecord.hidden = !appRecord.hidden;
         state.hosts.dirty = true;
@@ -1511,6 +1516,14 @@ namespace {
         close_modal_and_mark_closed(state, update);
         if (update != nullptr) {
           update->persistence.hostsChanged = true;
+        }
+        return true;
+      case 3:
+        state.screenshotViewer = {};
+        state.screenshotViewer.source = app::screenshot_source(*host, appRecord);
+        open_modal(state, app::ModalId::screenshot_viewer);
+        if (update != nullptr) {
+          update->requests.screenshotsRequested = true;
         }
         return true;
       default:
@@ -1535,6 +1548,7 @@ namespace {
         return true;
       case app::ModalId::log_viewer:
       case app::ModalId::directory_picker:
+      case app::ModalId::screenshot_viewer:
         return true;
       case app::ModalId::confirmation:
         return handle_confirmation_modal_activation(state, update);
@@ -1668,6 +1682,23 @@ namespace {
     }
 
     if (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress) {
+      return true;
+    }
+
+    if (state.modal.id == app::ModalId::screenshot_viewer) {
+      auto &viewer = state.screenshotViewer;
+      if (command == input::UiCommand::back) {
+        viewer = {};
+        open_modal(state, app::ModalId::app_actions, 3U);
+      } else if (!viewer.entries.empty()) {
+        const auto count = viewer.entries.size();
+        viewer.selectedIndex = std::min(viewer.selectedIndex, count - 1);
+        if (command == input::UiCommand::move_left || command == input::UiCommand::previous_page) {
+          viewer.selectedIndex = (viewer.selectedIndex + count - 1) % count;
+        } else if (command == input::UiCommand::move_right || command == input::UiCommand::next_page) {
+          viewer.selectedIndex = (viewer.selectedIndex + 1) % count;
+        }
+      }
       return true;
     }
 

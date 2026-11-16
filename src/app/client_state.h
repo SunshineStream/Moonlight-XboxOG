@@ -18,6 +18,7 @@
 // standard includes
 #include "src/app/host_records.h"
 #include "src/app/pairing_flow.h"
+#include "src/app/screenshot_library.h"
 #include "src/input/navigation_input.h"
 #include "src/input/stream_menu.h"
 #include "src/input/ui_input.h"
@@ -61,6 +62,7 @@ namespace app {
     log_viewer,  ///< Dedicated log viewer modal.
     connection_test,  ///< Progress and result of a manual connection test.
     directory_picker,  ///< Screenshot destination browser and local folder-name keyboard.
+    screenshot_viewer,  ///< Local captures associated with the selected server and app.
   };
 
   /**
@@ -391,7 +393,17 @@ namespace app {
   };
 
   /**
-   * @brief Serializable app state for the menu-driven client shell.
+   * @brief Transient captures and selection for one app's local screenshot viewer.
+   */
+  struct ScreenshotViewerState {
+    ScreenshotSource source;  ///< Stable app and host identity captured when the viewer opens.
+    std::vector<ScreenshotRecord> entries;  ///< Matching captures ordered newest first.
+    std::size_t selectedIndex = 0;  ///< Image currently displayed; zero for an empty library.
+    std::string error;  ///< Any recoverable journal warning or read error.
+  };
+
+  /**
+   * @brief Complete local application state, including transient screenshot browsing.
    */
   struct ClientState {
     ShellState shell;  ///< Shell-wide status and overlay state.
@@ -405,6 +417,7 @@ namespace app {
     ModalState modal;  ///< Context modal currently stacked over the shell.
     SettingsState settings;  ///< Settings, log viewer, and saved-file workflow state.
     DirectoryPickerState directoryPicker;  ///< Pending screenshot-directory workflow.
+    ScreenshotViewerState screenshotViewer;  ///< Local app screenshot library, released when browsing ends.
     ConfirmationDialogState confirmation;  ///< Confirmation dialog content for destructive actions.
   };
 
@@ -440,6 +453,7 @@ namespace app {
     bool directoryListRequested = false;  ///< Read the picker's current directory or mounted drives.
     bool directoryCreateRequested = false;  ///< Create the named child of the current picker directory.
     bool directorySelectRequested = false;  ///< Check destination writability before accepting the picker directory.
+    bool screenshotsRequested = false;  ///< Load captures for the viewer's retained server and app identity.
   };
 
   /**

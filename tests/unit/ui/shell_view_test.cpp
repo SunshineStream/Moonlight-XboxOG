@@ -512,7 +512,7 @@ namespace {
     state.hosts.active.apps = {{"Desktop", 1}};
     state.modal.id = app::ModalId::app_actions;
     auto view = ui::build_shell_view_model(state, {});
-    ASSERT_EQ(view.modal.actions.size(), 3U);
+    ASSERT_EQ(view.modal.actions.size(), 4U);
     EXPECT_TRUE(view.modal.actions[0].checkable);
     EXPECT_FALSE(view.modal.actions[0].checked);
     EXPECT_FALSE(view.modal.actions[1].checkable);
@@ -524,7 +524,7 @@ namespace {
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.hostsChanged);
     app::handle_command(state, input::UiCommand::open_context_menu);
     view = ui::build_shell_view_model(state, {});
-    ASSERT_EQ(view.modal.actions.size(), 3U);
+    ASSERT_EQ(view.modal.actions.size(), 4U);
     EXPECT_TRUE(view.modal.actions[2].checked);
     EXPECT_EQ(view.modal.actions[2].label, "Set favorite");
   }

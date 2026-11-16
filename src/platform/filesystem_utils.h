@@ -107,7 +107,7 @@ namespace platform {
   bool ensure_directory_exists(const std::string &directoryPath, std::string *errorMessage = nullptr);
 
   /**
-   * @brief Try to read the size of a regular file.
+   * @brief Try to read the size of a regular file, mounting its standard Xbox drive when necessary.
    *
    * @param path File path to inspect.
    * @param sizeBytes Optional output for the file size in bytes.

@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "src/app/screenshot_library.h"
 #include "src/input/stream_exit.h"
 #include "src/input/stream_input.h"
 #include "src/input/stream_menu.h"
@@ -48,8 +49,9 @@ namespace streaming {
      * @brief Apply persisted local-control preferences for this session.
      * @param screenshotDirectory Screenshot folder, or empty for the title-scoped default.
      * @param keyboardTop True to dock the keyboard to the top edge.
+     * @param source Stable host and app metadata for saved screenshots.
      */
-    void configure(std::string screenshotDirectory, bool keyboardTop);
+    void configure(std::string screenshotDirectory, bool keyboardTop, app::ScreenshotSource source = {});
     /**
      * @brief Read the placement selected while streaming.
      * @return True for top docking.
@@ -234,6 +236,7 @@ namespace streaming {
     bool keyboardDockTriggerDown_ = false;  ///< Edge latch for right-trigger keyboard docking.
     bool keyboardTop_ = false;  ///< Dock the keyboard flush with the top edge.
     std::string screenshotDirectory_;  ///< Configured screenshot folder, empty for the default.
+    app::ScreenshotSource screenshotSource_;  ///< Stream identity retained with each capture.
     Uint32 logRefreshTick_ = 0;  ///< Last live log refresh.
     std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Surface>> icons_;  ///< Cached SVG rasters survive panel renderer replacement.
     std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> panel_ {nullptr, SDL_FreeSurface};  ///< Retained software composition target.

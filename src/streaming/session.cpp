@@ -1505,7 +1505,7 @@ namespace streaming {
       logging::error("stream", initializationError);
       return false;
     }
-    resources.controller.configure(settings.screenshotDirectory, settings.keyboardDockTop);
+    resources.controller.configure(settings.screenshotDirectory, settings.keyboardDockTop, app::screenshot_source(host, app));
     ScopedThreadPriority streamThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 
     startup::log_memory_statistics();
