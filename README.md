@@ -131,7 +131,7 @@ the host app running after disconnecting.
 Returning from the stream resets local keyboard/controller holds before library navigation resumes.
 
 Screenshots default to `E:\UDATA\<title-id>\screenshots` and omit local controls. Open
-**Settings > Display > Screenshot Folder** to browse drives and subfolders, select the current folder,
+**Settings > Streaming > Screenshot Folder** to browse drives and subfolders, select the current folder,
 or create a new folder with the on-screen keyboard or a USB keyboard. **Use default location** restores
 the title-scoped screenshot folder. **B / Esc** cancels without changing the saved destination.
 New folder names use up to 42 printable characters; **Start / Enter** creates the folder. The destination

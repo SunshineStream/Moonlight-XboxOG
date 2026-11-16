@@ -11,6 +11,16 @@
 
 namespace ui {
 
+  /**
+   * @brief Keep list focus visible without scrolling rows that already contain it.
+   * @param count Total rows.
+   * @param selected Focused row; oversized values clamp to the final row.
+   * @param visible Maximum number of visible rows.
+   * @param previousFirst First row of the last rendered window.
+   * @return First visible row, or zero for an empty list or viewport.
+   */
+  std::size_t stable_list_first_row(std::size_t count, std::size_t selected, std::size_t visible, std::size_t previousFirst);
+
   inline constexpr std::size_t MAX_VISIBLE_NOTIFICATIONS = 3U;  ///< Maximum number of simultaneous notification cards.
 
   /**
@@ -22,6 +32,16 @@ namespace ui {
     int w = 0;  ///< Width.
     int h = 0;  ///< Height.
   };
+
+  /**
+   * @brief Map a logical repaint to clipped framebuffer pixels with a small raster-rounding guard.
+   * @param logical Logical rectangle, with unscaled vertical coordinates.
+   * @param logicalWidth Logical display width before encoder correction.
+   * @param framebufferWidth Physical framebuffer width.
+   * @param framebufferHeight Physical framebuffer height.
+   * @return Bounded physical rectangle; empty for invalid or wholly offscreen input.
+   */
+  ShellRect framebuffer_repaint_rect(ShellRect logical, int logicalWidth, int framebufferWidth, int framebufferHeight);
 
   /**
    * @brief Shared screen regions with television-safe margins.

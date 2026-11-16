@@ -875,3 +875,91 @@ namespace {
   }
 
 }  // namespace
+
+/**
+ * @brief Folder focus changes can reuse retained pixels; path, listing, error and input-device changes invalidate them.
+ */
+TEST(ShellViewTest, InvalidatesRetainedFolderContentsForEveryVisibleChange) {
+  auto state = app::create_initial_state();
+  state.modal.id = app::ModalId::directory_picker;
+  state.directoryPicker.path = "E:\\Shots";
+  state.directoryPicker.available = true;
+  state.directoryPicker.folders = {"E:\\Shots\\Game"};
+  const auto original = ui::build_shell_view_model(state, {}).modal;
+  ASSERT_TRUE(original.folderBrowser);
+  auto changed = original;
+  changed.actions[0].selected = false;
+  changed.actions[4].selected = true;
+  EXPECT_TRUE(ui::same_folder_dialog_content(original, changed));
+  const auto reject = [&](auto mutate) {
+    auto other = original;
+    mutate(other);
+    EXPECT_FALSE(ui::same_folder_dialog_content(original, other));
+    EXPECT_FALSE(ui::same_folder_dialog_content(other, original));
+  };
+  reject([](auto &view) {
+    view.visible = false;
+  });
+  reject([](auto &view) {
+    view.folderBrowser = false;
+  });
+  reject([](auto &view) {
+    view.busy = true;
+  });
+  reject([](auto &view) {
+    view.title += " changed";
+  });
+  reject([](auto &view) {
+    view.iconAssetPath = "icons\\info.svg";
+  });
+  reject([](auto &view) {
+    view.lines.push_back("Read-only folder");
+  });
+  reject([](auto &view) {
+    view.actions.pop_back();
+  });
+  reject([](auto &view) {
+    view.actions[0].id += "-new";
+  });
+  reject([](auto &view) {
+    view.actions[0].label += " changed";
+  });
+  reject([](auto &view) {
+    view.actions[0].enabled = false;
+  });
+  reject([](auto &view) {
+    view.actions[0].checked = true;
+  });
+  reject([](auto &view) {
+    view.actions[0].checkable = true;
+  });
+  reject([](auto &view) {
+    view.actions[0].iconAssetPath = "icons\\info.svg";
+  });
+  reject([](auto &view) {
+    view.footerActions.pop_back();
+  });
+  reject([](auto &view) {
+    view.footerActions[0].id += "-new";
+  });
+  reject([](auto &view) {
+    view.footerActions[0].label += " changed";
+  });
+  reject([](auto &view) {
+    view.footerActions[0].iconAssetPath.clear();
+  });
+  reject([](auto &view) {
+    view.footerActions[0].secondaryIconAssetPath = "icons\\button-b.svg";
+  });
+  reject([](auto &view) {
+    view.footerActions[0].emphasized = false;
+  });
+  reject([](auto &view) {
+    view.footerActions[0].keyLabel = "Enter";
+  });
+  reject([](auto &view) {
+    view.footerActions[0].secondaryKeyLabel = "Space";
+  });
+  state.shell.inputDevice = input::UiInputDevice::keyboard;
+  EXPECT_FALSE(ui::same_folder_dialog_content(original, ui::build_shell_view_model(state, {}).modal));
+}

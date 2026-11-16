@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -236,9 +237,30 @@ namespace {
   };
 
   /**
-   * @brief Stores reusable layout and text textures for the add-host keypad modal.
+   * @brief Retained folder-dialog pixels and text for only the visible list window.
+   */
+  struct FolderDialogCache {
+    ui::ShellModalView content;  ///< Static dialog content, excluding the changing selection.
+    std::map<std::size_t, CachedTextTexture> labels;  ///< Visible row labels; offscreen textures are released.
+    SDL_Rect rows {};  ///< Logical list rectangle inside the dialog.
+    int rowHeight = 0;  ///< Painted row height, excluding the six-pixel gap.
+    std::size_t first = 0;  ///< First visible row, retained until focus leaves the window.
+    std::size_t selected = 0;  ///< Previously painted selection.
+    int logicalWidth = 0;  ///< Logical output width used to paint the retained frame.
+    int framebufferWidth = 0;  ///< Actual output width before encoder correction.
+    int framebufferHeight = 0;  ///< Actual output height.
+    TTF_Font *titleFont = nullptr;  ///< Font identity used for the retained heading.
+    TTF_Font *bodyFont = nullptr;  ///< Font identity used for row labels.
+    TTF_Font *smallFont = nullptr;  ///< Font identity used for guidance and helpers.
+    bool valid = false;  ///< A complete frame has been presented for these dependencies.
+  };
+
+  /**
+   * @brief Stores reusable layout, text and retained folder-dialog state for local input modals.
    */
   struct KeypadModalLayoutCache {
+    SDL_Window *window = nullptr;  ///< Shared window; needed only for validated partial Xbox framebuffer presentation.
+    FolderDialogCache folder;  ///< Retained folder browser, sharing the local-dialog lifetime.
     int modalInnerWidth = 0;  ///< Last modal content width used to build the cached line layout.
     int modalTextHeight = 0;  ///< Cached combined height of the modal body text.
     std::vector<std::string> lines;  ///< Last body lines used to populate the cache.
@@ -330,7 +352,19 @@ namespace {
   }
 
   /**
-   * @brief Releases every cached text texture stored for the keypad modal.
+   * @brief Release the folder window's labels and invalidate its retained frame.
+   * @param cache Folder cache owned by the current renderer.
+   */
+  void clear_folder_dialog_cache(FolderDialogCache &cache) {
+    for (auto &[index, label] : cache.labels) {
+      (void) index;
+      clear_cached_text_texture(&label);
+    }
+    cache = {};
+  }
+
+  /**
+   * @brief Releases every cached text texture and retained frame stored for local dialogs.
    *
    * @param cache Keypad modal cache to clear.
    */
@@ -339,6 +373,7 @@ namespace {
       return;
     }
 
+    clear_folder_dialog_cache(cache->folder);
     clear_cached_text_texture(&cache->titleTexture);
     for (CachedTextTexture &lineTexture : cache->lineTextures) {
       clear_cached_text_texture(&lineTexture);
@@ -1450,6 +1485,8 @@ namespace {
    * @param rowHeight Height of an action row.
    * @param assetCache Optional cache for menu icons.
    * @param active Whether this list currently owns controller focus.
+   * @param folder Optional retained folder viewport and visible label textures.
+   * @param repaint Repaint affected rows in the retained frame instead of the complete list.
    * @return True when visible labels rendered successfully.
    */
   bool render_action_rows(
@@ -1459,7 +1496,9 @@ namespace {
     const SDL_Rect &rect,
     int rowHeight,
     AssetTextureCache *assetCache = nullptr,
-    bool active = true
+    bool active = true,
+    FolderDialogCache *folder = nullptr,
+    bool repaint = false
   ) {
     if (rows.empty()) {
       return true;
@@ -1487,13 +1526,41 @@ namespace {
         startIndex = maxStartIndex;
       }
     }
+    if (folder != nullptr) {
+      startIndex = ui::stable_list_first_row(rows.size(), selectedIndex, visibleRowCount, folder->first);
+    }
+    const bool windowChanged = folder != nullptr && startIndex != folder->first;
     const std::size_t endIndex = std::min(rows.size(), startIndex + visibleRowCount);
     const bool overflow = rows.size() > visibleRowCount;
     const int scrollBarWidth = overflow ? 8 : 0;
     const int contentWidth = std::max(1, rect.w - (overflow ? scrollBarWidth + 10 : 0));
 
-    int y = rect.y;
+    if (folder != nullptr) {
+      if (repaint) {
+        if (windowChanged) {
+          fill_rect(renderer, rect, 0x15, 0x1E, 0x2E);
+        } else {
+          for (const auto index : {folder->selected, selectedIndex}) {
+            if (index >= startIndex && index < endIndex) {
+              fill_rect(renderer, {rect.x, rect.y + static_cast<int>(index - startIndex) * rowStep, contentWidth, rowHeight}, 0x15, 0x1E, 0x2E);
+            }
+          }
+        }
+      }
+      for (auto it = folder->labels.begin(); it != folder->labels.end();) {
+        if (it->first < startIndex || it->first >= endIndex) {
+          clear_cached_text_texture(&it->second);
+          it = folder->labels.erase(it);
+        } else {
+          ++it;
+        }
+      }
+    }
     for (std::size_t index = startIndex; index < endIndex; ++index) {
+      if (folder != nullptr && repaint && !windowChanged && index != folder->selected && index != selectedIndex) {
+        continue;
+      }
+      const int y = rect.y + static_cast<int>(index - startIndex) * rowStep;
       const ui::ShellActionRow &row = rows[index];
       const SDL_Rect rowRect {rect.x, y, contentWidth, rowHeight};
       if (row.selected) {
@@ -1522,14 +1589,20 @@ namespace {
           draw_rounded_rect_outline(renderer, checkbox, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, 4);
         }
       }
-      if (const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}; !render_text_line_simple(renderer, font, row.label, color, labelX, rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2, rowRect.x + rowRect.w - labelX - 12 - (row.checkable ? checkboxSize + 16 : 0))) {
+      const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
+      const int labelWidth = rowRect.x + rowRect.w - labelX - 12 - (row.checkable ? checkboxSize + 16 : 0);
+      const int labelY = rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2;
+      if (folder != nullptr) {
+        auto &label = folder->labels[index];
+        if (!ensure_single_line_text_texture(renderer, font, row.label, color, labelWidth, &label) || !render_cached_text_texture(renderer, label, labelX, labelY)) {
+          return false;
+        }
+      } else if (!render_text_line_simple(renderer, font, row.label, color, labelX, labelY, labelWidth)) {
         return false;
       }
-
-      y += rowStep;
     }
 
-    if (overflow) {
+    if (overflow && (!repaint || windowChanged)) {
       render_vertical_scrollbar(
         renderer,
         {rect.x + rect.w - scrollBarWidth, rect.y, scrollBarWidth, rect.h},
@@ -1539,6 +1612,10 @@ namespace {
       );
     }
 
+    if (folder != nullptr) {
+      folder->first = startIndex;
+      folder->selected = selectedIndex;
+    }
     return true;
   }
 
@@ -3821,9 +3898,10 @@ namespace {
    * @param modal Dialog content.
    * @param width Logical display width.
    * @param height Framebuffer height.
+   * @param folder Optional folder cache to populate for incremental navigation.
    * @return True when the dialog rendered successfully.
    */
-  bool render_shell_dialog(SDL_Renderer *renderer, TTF_Font *titleFont, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellModalView &modal, int width, int height) {
+  bool render_shell_dialog(SDL_Renderer *renderer, TTF_Font *titleFont, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellModalView &modal, int width, int height, FolderDialogCache *folder = nullptr) {
     const int padding = std::max(18, height / 40);
     const int dialogWidth = std::min(760, width * 3 / 4);
     const int innerWidth = dialogWidth - padding * 2;
@@ -3857,7 +3935,12 @@ namespace {
       }
       cursorY += drawnHeight + 8;
     }
-    if (!modal.actions.empty() && !render_action_rows(renderer, bodyFont, modal.actions, {bounds.x + padding, cursorY + 4, innerWidth, footerY - cursorY - 12}, rowHeight, assetCache)) {
+    const SDL_Rect rows {bounds.x + padding, cursorY + 4, innerWidth, footerY - cursorY - 12};
+    if (folder != nullptr) {
+      folder->rows = rows;
+      folder->rowHeight = rowHeight;
+    }
+    if (!modal.actions.empty() && !render_action_rows(renderer, bodyFont, modal.actions, rows, rowHeight, assetCache, true, folder)) {
       return false;
     }
     draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
@@ -3963,7 +4046,55 @@ namespace {
   }
 
   /**
-   * @brief Compose a television-safe shell frame from compact navigation and page content.
+   * @brief Present changed folder rows without the Xbox SDL driver's full-screen copy, retaining SDL fallback.
+   * @param renderer Software shell renderer to flush.
+   * @param window Shared window backing the renderer, or null for ordinary SDL presentation.
+   * @param logicalDamage Repainted rows in logical display coordinates.
+   * @param logicalWidth Logical width before encoder correction.
+   */
+  void present_folder_damage(SDL_Renderer *renderer, SDL_Window *window, const SDL_Rect &logicalDamage, int logicalWidth) {
+#ifdef NXDK
+    SDL_RendererInfo info {};
+    if (window != nullptr && SDL_GetRendererInfo(renderer, &info) == 0 && (info.flags & SDL_RENDERER_SOFTWARE) != 0) {
+      SDL_RenderFlush(renderer);
+      SDL_Surface *surface = SDL_GetWindowSurface(window);
+      const VIDEO_MODE mode = XVideoGetMode();
+      void *framebuffer = XVideoGetFB();
+      const Uint32 format = mode.bpp == 32 ? SDL_PIXELFORMAT_RGB888 : mode.bpp == 16 ? SDL_PIXELFORMAT_RGB565 :
+                                                                                       SDL_PIXELFORMAT_RGB555;
+      const int bytes = mode.bpp == 32 ? 4 : mode.bpp == 15 || mode.bpp == 16 ? 2 :
+                                                                                0;
+      // The Xbox software window surface uses the video mode's RGB format.
+      // Validate that relationship before copying into write-combined scanout.
+      if (surface != nullptr && framebuffer != nullptr && bytes > 0 && surface->w == mode.width && surface->h == mode.height && surface->format->format == format && surface->format->BytesPerPixel == bytes && surface->pitch >= mode.width * bytes) {
+        const auto area = ui::framebuffer_repaint_rect({logicalDamage.x, logicalDamage.y, logicalDamage.w, logicalDamage.h}, logicalWidth, mode.width, mode.height);
+        const bool locked = SDL_MUSTLOCK(surface) != 0;
+        if (locked && SDL_LockSurface(surface) != 0) {
+          SDL_RenderPresent(renderer);
+          return;
+        }
+        for (int y = area.y; y < area.y + area.h; ++y) {
+          const auto *source = static_cast<const std::uint8_t *>(surface->pixels) + static_cast<std::size_t>(y) * surface->pitch + area.x * bytes;
+          auto *destination = static_cast<std::uint8_t *>(framebuffer) + (static_cast<std::size_t>(y) * mode.width + area.x) * bytes;
+          std::memcpy(destination, source, static_cast<std::size_t>(area.w) * bytes);
+        }
+        if (locked) {
+          SDL_UnlockSurface(surface);
+        }
+        XVideoFlushFB();
+        return;
+      }
+    }
+#else
+    (void) window;
+    (void) logicalDamage;
+    (void) logicalWidth;
+#endif
+    SDL_RenderPresent(renderer);
+  }
+
+  /**
+   * @brief Compose the shell or update retained folder rows without rebuilding unchanged page pixels.
    *
    * @param renderer Active SDL renderer, including the software fallback.
    * @param videoMode Output resolution and pixel aspect information.
@@ -3999,6 +4130,38 @@ namespace {
     const int screenWidth = splash::calculate_display_width(screenHeight, videoMode, encoderSettings);
     const float horizontalScale = static_cast<float>(framebufferWidth) / static_cast<float>(screenWidth);
 
+    auto *folder = keypadModalLayoutCache != nullptr ? &keypadModalLayoutCache->folder : nullptr;
+    const bool folderBrowser = viewModel.modal.folderBrowser && !viewModel.overlay.visible && !viewModel.keypad.visible;
+    if (folder != nullptr) {
+      const bool reusable = folderBrowser && folder->valid && folder->logicalWidth == screenWidth && folder->framebufferWidth == framebufferWidth && folder->framebufferHeight == framebufferHeight && folder->titleFont == titleFont && folder->bodyFont == bodyFont && folder->smallFont == smallFont && ui::same_folder_dialog_content(folder->content, viewModel.modal);
+      if (reusable) {
+        std::size_t selected = 0;
+        for (std::size_t i = 0; i < viewModel.modal.actions.size(); ++i) {
+          if (viewModel.modal.actions[i].selected) {
+            selected = i;
+            break;
+          }
+        }
+        if (selected == folder->selected) {
+          return true;
+        }
+        SDL_RenderSetScale(renderer, horizontalScale, 1.0f);
+        const auto oldFirst = folder->first;
+        const auto oldSelected = folder->selected;
+        const bool painted = render_action_rows(renderer, bodyFont, viewModel.modal.actions, folder->rows, folder->rowHeight, assetCache, true, folder, true);
+        SDL_Rect damage = folder->rows;
+        if (oldFirst == folder->first) {
+          const auto top = std::min(oldSelected, selected) - folder->first;
+          const auto bottom = std::max(oldSelected, selected) - folder->first;
+          damage.y += static_cast<int>(top) * (folder->rowHeight + 6);
+          damage.h = static_cast<int>(bottom - top) * (folder->rowHeight + 6) + folder->rowHeight;
+        }
+        present_folder_damage(renderer, keypadModalLayoutCache->window, damage, screenWidth);
+        SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+        return painted;
+      }
+      clear_folder_dialog_cache(*folder);
+    }
     SDL_RenderSetScale(renderer, 1.0f, 1.0f);
 
     const ui::ShellLayout layout = ui::calculate_shell_layout(screenWidth, screenHeight);
@@ -4163,7 +4326,7 @@ namespace {
         render_text_line_simple(renderer, smallFont, (viewModel.modal.footerActions.empty() || viewModel.modal.footerActions.back().keyLabel.empty() ? "Press B to close." : "Press Esc to close."), {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_FontLineSkip(smallFont) + 8, modalRect.w - 32);
       }
     } else if (viewModel.modal.visible) {
-      if (!render_shell_dialog(renderer, titleFont, bodyFont, smallFont, assetCache, viewModel.modal, screenWidth, screenHeight)) {
+      if (!render_shell_dialog(renderer, titleFont, bodyFont, smallFont, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
         return false;
       }
     }
@@ -4172,6 +4335,16 @@ namespace {
     }
 
     SDL_RenderPresent(renderer);
+    if (folder != nullptr && folderBrowser) {
+      folder->content = viewModel.modal;
+      folder->logicalWidth = screenWidth;
+      folder->framebufferWidth = framebufferWidth;
+      folder->framebufferHeight = framebufferHeight;
+      folder->titleFont = titleFont;
+      folder->bodyFont = bodyFont;
+      folder->smallFont = smallFont;
+      folder->valid = true;
+    }
     SDL_RenderSetScale(renderer, 1.0f, 1.0f);
     return true;
   }
@@ -4577,7 +4750,7 @@ namespace {
    */
   struct ShellRuntimeState {
     bool running = true;  ///< False when the shell should stop processing frames.
-    bool keypadRedrawRequested = true;  ///< True when the add-host keypad must redraw immediately.
+    bool keypadRedrawRequested = true;  ///< True when a retained local input dialog needs a new frame.
     ShellInputState inputState {};  ///< Current controller and trigger input state.
     Uint32 nextHostDiscoveryTick = 0;  ///< Next scheduled host auto-discovery time.
     Uint32 nextHostProbeTick = 0;  ///< Next scheduled host probe time.
@@ -4710,6 +4883,7 @@ namespace {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 
     resources->renderer = SDL_CreateRenderer(window, -1, 0);
+    resources->keypadModalLayoutCache.window = window;
     if (resources->renderer == nullptr) {
       failure->category = "sdl";
       failure->message = std::string("SDL_CreateRenderer failed: ") + SDL_GetError();
@@ -4968,7 +5142,7 @@ namespace {
     if ((previousScreen != state.shell.activeScreen || update.navigation.screenChanged) && !draw_current_shell_frame(activeVideoMode, state, resources, runtime)) {
       return;
     }
-    if (!(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) && !(state.modal.id == app::ModalId::directory_picker && state.directoryPicker.creating)) {
+    if (!(state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) && state.modal.id != app::ModalId::directory_picker) {
       clear_keypad_modal_layout_cache(&resources->keypadModalLayoutCache);
     }
   }
@@ -5018,7 +5192,8 @@ namespace {
     finish_shell_background_tasks(state, resources, runtime);
     start_shell_background_tasks_if_needed(state, runtime, SDL_GetTicks());
 
-    if ((state.shell.activeScreen != app::ScreenId::add_host || !state.addHostDraft.keypad.visible || runtime->keypadRedrawRequested) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
+    const bool retainedInputDialog = (state.shell.activeScreen == app::ScreenId::add_host && state.addHostDraft.keypad.visible) || (state.modal.id == app::ModalId::directory_picker && !state.directoryPicker.creating && !state.shell.overlayVisible);
+    if ((!retainedInputDialog || runtime->keypadRedrawRequested) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
       return false;
     }
 

@@ -157,12 +157,21 @@ namespace ui {
   struct ShellModalView {
     bool visible = false;  ///< True when a modal dialog should be rendered.
     bool busy = false;  ///< Show progress instead of dismissal controls while work is pending.
+    bool folderBrowser = false;  ///< Retain the folder dialog while only list focus changes.
     std::string title;  ///< Modal dialog title.
     std::string iconAssetPath;  ///< Optional status icon beside the dialog title.
     std::vector<std::string> lines;  ///< Modal dialog body lines.
     std::vector<ShellActionRow> actions;  ///< Modal action rows.
     std::vector<ShellFooterAction> footerActions;  ///< Footer actions displayed while a modal is open.
   };
+
+  /**
+   * @brief Check whether folder-dialog pixels can be retained while list selection changes.
+   * @param previous Previously painted dialog.
+   * @param current Current dialog, including path, error, entries and input helpers.
+   * @return True when every visible property except the focused action is unchanged.
+   */
+  bool same_folder_dialog_content(const ShellModalView &previous, const ShellModalView &current);
 
   /**
    * @brief Embedded log viewer state surfaced by the log-file modal.

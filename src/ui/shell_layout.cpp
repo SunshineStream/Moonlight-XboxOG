@@ -10,6 +10,29 @@
 
 namespace ui {
 
+  ShellRect framebuffer_repaint_rect(ShellRect logical, int logicalWidth, int framebufferWidth, int framebufferHeight) {
+    if (logical.w <= 0 || logical.h <= 0 || logicalWidth <= 0 || framebufferWidth <= 0 || framebufferHeight <= 0) {
+      return {};
+    }
+    const auto left = std::clamp<std::int64_t>(static_cast<std::int64_t>(logical.x) * framebufferWidth / logicalWidth - 2, 0, framebufferWidth);
+    const auto right = std::clamp<std::int64_t>(((static_cast<std::int64_t>(logical.x) + logical.w) * framebufferWidth + logicalWidth - 1) / logicalWidth + 2, 0, framebufferWidth);
+    const auto top = std::clamp<std::int64_t>(static_cast<std::int64_t>(logical.y) - 1, 0, framebufferHeight);
+    const auto bottom = std::clamp<std::int64_t>(static_cast<std::int64_t>(logical.y) + logical.h + 1, 0, framebufferHeight);
+    return right > left && bottom > top ? ShellRect {static_cast<int>(left), static_cast<int>(top), static_cast<int>(right - left), static_cast<int>(bottom - top)} : ShellRect {};
+  }
+
+  std::size_t stable_list_first_row(std::size_t count, std::size_t selected, std::size_t visible, std::size_t previousFirst) {
+    if (count == 0 || visible == 0 || count <= visible) {
+      return 0;
+    }
+    selected = std::min(selected, count - 1);
+    const auto first = std::min(previousFirst, count - visible);
+    if (selected < first) {
+      return selected;
+    }
+    return selected - first >= visible ? selected - visible + 1 : first;
+  }
+
   ShellLayout calculate_shell_layout(int width, int height) {
     // A five-percent inset keeps controls clear of overscan on CRT televisions.
     const int marginX = width / 20;

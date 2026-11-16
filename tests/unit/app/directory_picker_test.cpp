@@ -53,6 +53,8 @@ namespace {
 TEST(DirectoryPickerTest, StagesConfiguredAndDefaultLocationsUntilAccepted) {
   for (const std::string configured : {std::string {}, std::string("F:\\Shots")}) {
     auto state = open_picker(configured);
+    EXPECT_EQ(state.settings.selectedCategory, app::SettingsCategory::streaming);
+    EXPECT_EQ(state.menu.items()[1].label, "Streaming");
     EXPECT_EQ(state.directoryPicker.path, configured.empty() ? startup::default_storage_path("screenshots") : configured);
     auto view = ui::build_shell_view_model(state, {});
     EXPECT_EQ(view.modal.title, "Screenshot Folder");

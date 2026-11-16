@@ -84,8 +84,8 @@ namespace {
     switch (category) {
       case app::SettingsCategory::logging:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "logging";
-      case app::SettingsCategory::display:
-        return std::string(SETTINGS_CATEGORY_PREFIX) + "display";
+      case app::SettingsCategory::streaming:
+        return std::string(SETTINGS_CATEGORY_PREFIX) + "streaming";
       case app::SettingsCategory::input:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "input";
       case app::SettingsCategory::reset:
@@ -96,8 +96,8 @@ namespace {
   }
 
   app::SettingsCategory settings_category_from_menu_id(std::string_view itemId) {
-    if (itemId == settings_category_menu_id(app::SettingsCategory::display)) {
-      return app::SettingsCategory::display;
+    if (itemId == settings_category_menu_id(app::SettingsCategory::streaming)) {
+      return app::SettingsCategory::streaming;
     }
     if (itemId == settings_category_menu_id(app::SettingsCategory::input)) {
       return app::SettingsCategory::input;
@@ -112,8 +112,8 @@ namespace {
     switch (category) {
       case app::SettingsCategory::logging:
         return "Control the runtime log file, the in-app log viewer, and xemu debugger output verbosity.";
-      case app::SettingsCategory::display:
-        return "Tune streaming video resolution, frame rate, bitrate, audio playback, and the in-stream diagnostics overlay.";
+      case app::SettingsCategory::streaming:
+        return "Set stream video, audio, performance statistics and screenshot storage.";
       case app::SettingsCategory::input:
         return "Input options will live here when controller and navigation customization is added.";
       case app::SettingsCategory::reset:
@@ -505,7 +505,7 @@ namespace {
       case app::ScreenId::settings:
         return {
           {settings_category_menu_id(app::SettingsCategory::logging), "Logging", settings_category_description(app::SettingsCategory::logging), true},
-          {settings_category_menu_id(app::SettingsCategory::display), "Display", settings_category_description(app::SettingsCategory::display), true},
+          {settings_category_menu_id(app::SettingsCategory::streaming), "Streaming", settings_category_description(app::SettingsCategory::streaming), true},
           {settings_category_menu_id(app::SettingsCategory::input), "Input", settings_category_description(app::SettingsCategory::input), true},
           {settings_category_menu_id(app::SettingsCategory::reset), "Reset", settings_category_description(app::SettingsCategory::reset), true},
         };
@@ -555,7 +555,7 @@ namespace {
           {"cycle-log-level", std::string("File Logging Level: ") + logging::to_string(state.settings.loggingLevel), "Choose the minimum severity written to moonlight.log. Lower levels produce more detail but increase disk writes.", true},
           {"cycle-xemu-console-log-level", std::string("xemu Console Level: ") + logging::to_string(state.settings.xemuConsoleLoggingLevel), "Choose the minimum severity mirrored to xemu through DbgPrint() when you launch xemu with a serial console.", true},
         };
-      case app::SettingsCategory::display:
+      case app::SettingsCategory::streaming:
         return {
           {
             "cycle-stream-video-mode",

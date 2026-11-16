@@ -9,6 +9,7 @@
 #include "src/platform/filesystem_utils.h"
 
 #include <algorithm>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -207,8 +208,8 @@ namespace {
     switch (category) {
       case app::SettingsCategory::logging:
         return "Logging";
-      case app::SettingsCategory::display:
-        return "Display";
+      case app::SettingsCategory::streaming:
+        return "Streaming";
       case app::SettingsCategory::input:
         return "Input";
       case app::SettingsCategory::reset:
@@ -369,7 +370,7 @@ namespace {
       }
       return lines;
     }
-    if (state.settings.selectedCategory == app::SettingsCategory::display) {
+    if (state.settings.selectedCategory == app::SettingsCategory::streaming) {
       lines.emplace_back("Display options will be added here.");
       return lines;
     }
@@ -406,7 +407,7 @@ namespace {
     if (id == "settings-category:logging") {
       return "icons\\scroll-text.svg";
     }
-    if (id == "settings-category:display") {
+    if (id == "settings-category:streaming") {
       return "icons\\monitor.svg";
     }
     if (id == "settings-category:input") {
@@ -634,6 +635,7 @@ namespace {
     }
     auto &view = viewModel->modal;
     view.title = "Screenshot Folder";
+    view.folderBrowser = true;
     const auto path = picker.path.empty() ? std::string("Choose a drive") : picker.path;
     view.lines = {path.size() > 72 ? "..." + path.substr(path.size() - 69) : path};
     if (!picker.error.empty()) {
@@ -858,6 +860,26 @@ namespace {
 }  // namespace
 
 namespace ui {
+  bool same_folder_dialog_content(const ShellModalView &previous, const ShellModalView &current) {
+    if (!previous.folderBrowser || !current.folderBrowser || !previous.visible || !current.visible || previous.busy || current.busy || previous.title != current.title || previous.iconAssetPath != current.iconAssetPath || previous.lines != current.lines || previous.actions.size() != current.actions.size() || previous.footerActions.size() != current.footerActions.size()) {
+      return false;
+    }
+    for (std::size_t i = 0; i < current.actions.size(); ++i) {
+      const auto &a = previous.actions[i];
+      const auto &b = current.actions[i];
+      if (std::tie(a.id, a.label, a.enabled, a.checked, a.iconAssetPath, a.checkable) != std::tie(b.id, b.label, b.enabled, b.checked, b.iconAssetPath, b.checkable)) {
+        return false;
+      }
+    }
+    for (std::size_t i = 0; i < current.footerActions.size(); ++i) {
+      const auto &a = previous.footerActions[i];
+      const auto &b = current.footerActions[i];
+      if (std::tie(a.id, a.label, a.iconAssetPath, a.secondaryIconAssetPath, a.emphasized, a.keyLabel, a.secondaryKeyLabel) != std::tie(b.id, b.label, b.iconAssetPath, b.secondaryIconAssetPath, b.emphasized, b.keyLabel, b.secondaryKeyLabel)) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   /**
    * @brief Return whether a screen uses the split menu-and-detail layout.
