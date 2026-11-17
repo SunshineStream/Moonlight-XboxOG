@@ -350,37 +350,35 @@ namespace {
 
 }  // namespace
 
-// SDL file callbacks require C linkage at global scope; static keeps them private to this file.
-extern "C" {
-  /**
-   * @brief Delegate a BMP file seek while keeping progress accounting in sync.
-   * @param stream Progress-decorated SDL file.
-   * @param offset Byte offset relative to whence.
-   * @param whence SDL seek origin.
-   * @return New byte position or a negative value on error.
-   */
-  static Sint64 screenshot_file_seek(SDL_RWops *stream, Sint64 offset, int whence) {
-    auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
-    writer.position = SDL_RWseek(writer.file, offset, whence);
-    return writer.position;
-  }
+// SDL file callbacks use C linkage; project-prefixed names avoid global symbol collisions.
+/**
+ * @brief Delegate a BMP file seek while keeping progress accounting in sync.
+ * @param stream Progress-decorated SDL file.
+ * @param offset Byte offset relative to whence.
+ * @param whence SDL seek origin.
+ * @return New byte position or a negative value on error.
+ */
+extern "C" Sint64 moonlight_screenshot_file_seek(SDL_RWops *stream, Sint64 offset, int whence) {
+  auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
+  writer.position = SDL_RWseek(writer.file, offset, whence);
+  return writer.position;
+}
 
-  /**
-   * @brief Forward one BMP write and publish progress only for bytes actually written.
-   * @param stream Progress-decorated SDL file.
-   * @param pixels Header or pixel bytes supplied by the SDL C writer callback.
-   * @param size Bytes per object.
-   * @param count Requested object count.
-   * @return Number of complete objects written.
-   */
-  static std::size_t screenshot_file_write(SDL_RWops *stream, const void *pixels, std::size_t size, std::size_t count) {
-    auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
-    const auto written = SDL_RWwrite(writer.file, pixels, size, count);
-    writer.position += static_cast<Sint64>(written * size);
-    writer.written = std::max(writer.written, writer.position);
-    writer.progress.store(10 + static_cast<int>(85 * std::min(writer.written, writer.expected) / writer.expected));
-    return written;
-  }
+/**
+ * @brief Forward one BMP write and publish progress only for bytes actually written.
+ * @param stream Progress-decorated SDL file.
+ * @param pixels Header or pixel bytes supplied by the SDL C writer callback.
+ * @param size Bytes per object.
+ * @param count Requested object count.
+ * @return Number of complete objects written.
+ */
+extern "C" std::size_t moonlight_screenshot_file_write(SDL_RWops *stream, const void *pixels, std::size_t size, std::size_t count) {
+  auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
+  const auto written = SDL_RWwrite(writer.file, pixels, size, count);
+  writer.position += static_cast<Sint64>(written * size);
+  writer.written = std::max(writer.written, writer.position);
+  writer.progress.store(10 + static_cast<int>(85 * std::min(writer.written, writer.expected) / writer.expected));
+  return written;
 }
 
 namespace streaming {
@@ -532,8 +530,8 @@ namespace streaming {
     ScreenshotFileProgress writer {file, progress, 54 + static_cast<Sint64>((surface.w * 3 + 3) & ~3) * surface.h};
     SDL_RWops progressFile {};
     progressFile.hidden.unknown.data1 = &writer;
-    progressFile.seek = screenshot_file_seek;
-    progressFile.write = screenshot_file_write;
+    progressFile.seek = moonlight_screenshot_file_seek;
+    progressFile.write = moonlight_screenshot_file_write;
     const bool encoded = SDL_SaveBMP_RW(&surface, &progressFile, 0) == 0;
     const bool closed = SDL_RWclose(file) == 0;
     const bool saved = encoded && closed;
