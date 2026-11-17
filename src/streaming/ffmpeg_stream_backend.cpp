@@ -337,7 +337,51 @@ namespace {
     }
   }
 
+  /**
+   * @brief Track actual completed BMP writes while retaining SDL's platform file implementation.
+   */
+  struct ScreenshotFileProgress {
+    SDL_RWops *file;  ///< Worker-owned file, closed after SDL finalizes the BMP header.
+    std::atomic<int> &progress;  ///< UI-readable percentage independent of file and surface lifetimes.
+    Sint64 expected;  ///< Final 24-bit BMP length, including scanline padding and header.
+    Sint64 position = 0;  ///< Current file position, including SDL's header fixup seeks.
+    Sint64 written = 0;  ///< Highest written position, preventing header fixups from reducing progress.
+  };
+
 }  // namespace
+
+// SDL file callbacks require C linkage at global scope; static keeps them private to this file.
+extern "C" {
+  /**
+   * @brief Delegate a BMP file seek while keeping progress accounting in sync.
+   * @param stream Progress-decorated SDL file.
+   * @param offset Byte offset relative to whence.
+   * @param whence SDL seek origin.
+   * @return New byte position or a negative value on error.
+   */
+  static Sint64 screenshot_file_seek(SDL_RWops *stream, Sint64 offset, int whence) {
+    auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
+    writer.position = SDL_RWseek(writer.file, offset, whence);
+    return writer.position;
+  }
+
+  /**
+   * @brief Forward one BMP write and publish progress only for bytes actually written.
+   * @param stream Progress-decorated SDL file.
+   * @param pixels Header or pixel bytes supplied by the SDL C writer callback.
+   * @param size Bytes per object.
+   * @param count Requested object count.
+   * @return Number of complete objects written.
+   */
+  static std::size_t screenshot_file_write(SDL_RWops *stream, const void *pixels, std::size_t size, std::size_t count) {
+    auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
+    const auto written = SDL_RWwrite(writer.file, pixels, size, count);
+    writer.position += static_cast<Sint64>(written * size);
+    writer.written = std::max(writer.written, writer.position);
+    writer.progress.store(10 + static_cast<int>(85 * std::min(writer.written, writer.expected) / writer.expected));
+    return written;
+  }
+}
 
 namespace streaming {
 
@@ -471,47 +515,6 @@ namespace streaming {
 
   int FfmpegStreamBackend::screenshot_progress() const {
     return screenshot_.thread != nullptr ? screenshot_.progress.load() : -1;
-  }
-
-  /**
-   * @brief Track actual completed BMP writes while retaining SDL's platform file implementation.
-   */
-  struct ScreenshotFileProgress {
-    SDL_RWops *file;  ///< Worker-owned file, closed after SDL finalizes the BMP header.
-    std::atomic<int> &progress;  ///< UI-readable percentage independent of file and surface lifetimes.
-    Sint64 expected;  ///< Final 24-bit BMP length, including scanline padding and header.
-    Sint64 position = 0;  ///< Current file position, including SDL's header fixup seeks.
-    Sint64 written = 0;  ///< Highest written position, preventing header fixups from reducing progress.
-  };
-
-  /**
-   * @brief Delegate a BMP file seek while keeping progress accounting in sync.
-   * @param stream Progress-decorated SDL file.
-   * @param offset Byte offset relative to whence.
-   * @param whence SDL seek origin.
-   * @return New byte position or a negative value on error.
-   */
-  Sint64 screenshot_file_seek(SDL_RWops *stream, Sint64 offset, int whence) {
-    auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
-    writer.position = SDL_RWseek(writer.file, offset, whence);
-    return writer.position;
-  }
-
-  /**
-   * @brief Forward one BMP write and publish progress only for bytes actually written.
-   * @param stream Progress-decorated SDL file.
-   * @param pixels Header or pixel bytes supplied by the SDL C writer callback.
-   * @param size Bytes per object.
-   * @param count Requested object count.
-   * @return Number of complete objects written.
-   */
-  extern "C" std::size_t screenshot_file_write(SDL_RWops *stream, const void *pixels, std::size_t size, std::size_t count) {
-    auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
-    const auto written = SDL_RWwrite(writer.file, pixels, size, count);
-    writer.position += static_cast<Sint64>(written * size);
-    writer.written = std::max(writer.written, writer.position);
-    writer.progress.store(10 + static_cast<int>(85 * std::min(writer.written, writer.expected) / writer.expected));
-    return written;
   }
 
   /**

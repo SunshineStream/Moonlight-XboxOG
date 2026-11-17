@@ -153,15 +153,15 @@ namespace {
       return;
     }
     auto &connections = usb_state().connections;
-    const auto context = std::find_if(connections.begin(), connections.end(), [](const UsbConnection &entry) {
+    auto *context = std::find_if(connections.data(), connections.data() + connections.size(), [](const UsbConnection &entry) {
       return entry.id == 0;
     });
-    if (context == connections.end()) {
+    if (context == connections.data() + connections.size()) {
       return;
     }
     const int id = usb_state().nextDevice++;
     context->id = id;
-    device->user_data = &*context;
+    device->user_data = context;
     enqueue({id, device->bProtocolCode});
     if (usbh_hid_start_int_read(device, 0, receive) != 0) {
       enqueue({id, -1});

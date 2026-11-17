@@ -311,8 +311,7 @@ namespace app {
     if (capturedAt < 0 || static_cast<std::int64_t>(time) != capturedAt) {
       return "Capture time unavailable";
     }
-    std::tm utc {};
-    if (!screenshot_utc_time(time, utc) || std::strftime(label.data(), label.size(), "%Y-%m-%d %H:%M:%S UTC", &utc) == 0) {
+    if (std::tm utc {}; !screenshot_utc_time(time, utc) || std::strftime(label.data(), label.size(), "%Y-%m-%d %H:%M:%S UTC", &utc) == 0) {
       return "Capture time unavailable";
     }
     return label.data();
