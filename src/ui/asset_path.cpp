@@ -2,11 +2,14 @@
  * @file src/ui/asset_path.cpp
  * @brief Resolves bundled asset paths consistently across UI screens.
  */
+// class header include
 #include "src/ui/asset_path.h"
 
-#include "src/os.h"
-
+// standard includes
 #include <algorithm>
+
+// local includes
+#include "src/os.h"
 
 namespace ui {
   std::string build_asset_path(const std::string &relativePath) {

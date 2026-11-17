@@ -2,8 +2,10 @@
  * @file src/input/ui_input.cpp
  * @brief Implements repeat timing without depending on SDL or platform key repeat.
  */
+// class header include
 #include "src/input/ui_input.h"
 
+// standard includes
 #include <algorithm>
 #include <cstdlib>
 

@@ -2,9 +2,14 @@
  * @file src/ui/svg_assets.cpp
  * @brief Rasterizes shared shell and streaming SVG assets with NanoSVG.
  */
+// class header include
 #include "src/ui/svg_assets.h"
 
+// standard includes
 #include <algorithm>
+
+// lib includes
+// NanoSVG declares the image types required by the rasterizer header.
 #include <nanosvg.h>
 #include <nanosvgrast.h>
 #include <SDL.h>

@@ -4,11 +4,13 @@
  */
 #pragma once
 
-#include "src/input/navigation_input.h"
-
+// standard includes
 #include <cstdint>
 #include <map>
 #include <utility>
+
+// local includes
+#include "src/input/navigation_input.h"
 
 namespace input {
   constexpr std::uint32_t NAVIGATION_INITIAL_REPEAT_MILLISECONDS = 150;  ///< Delay shared by keyboard and controller navigation.

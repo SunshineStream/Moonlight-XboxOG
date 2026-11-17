@@ -4,8 +4,11 @@
  */
 #pragma once
 
+// standard includes
 #include <algorithm>
 #include <cmath>
+
+// lib includes
 #include <SDL.h>
 
 namespace ui {

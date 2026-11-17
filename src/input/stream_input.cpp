@@ -2,13 +2,16 @@
  * @file src/input/stream_input.cpp
  * @brief Routes ordered controller, keyboard and pointer input to Moonlight.
  */
+// class header include
 #include "src/input/stream_input.h"
 
-#include "third-party/moonlight-common-c/src/Limelight.h"
-
+// standard includes
 #include <algorithm>
 #include <cmath>
 #include <utility>
+
+// lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
 
 namespace {
   constexpr int VIRTUAL_MOUSE_SOURCE = -2;  ///< Reserved source for controller pointer buttons.

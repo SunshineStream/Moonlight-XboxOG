@@ -22,6 +22,8 @@
 #include <vector>
 
 // lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -35,9 +37,6 @@
 #include "src/network/runtime_network.h"
 #include "src/network/socket_bio.h"
 #include "src/platform/error_utils.h"
-
-// third-party includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 // platform includes
 #ifdef NXDK

@@ -9,9 +9,11 @@
 #include <array>
 #include <vector>
 
+// lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
 // local includes
 #include "src/input/stream_input.h"
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 /**
  * @brief Captures ordered transport packets without a host connection.

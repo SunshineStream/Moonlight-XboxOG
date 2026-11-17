@@ -2,21 +2,26 @@
  * @file src/streaming/stream_controls.cpp
  * @brief Implements dual-stick stream controls and SDL-to-Moonlight input routing.
  */
+// class header include
 #include "src/streaming/stream_controls.h"
 
+// standard includes
+#include <algorithm>
+#include <cmath>
+#include <ctime>
+#include <memory>
+#include <utility>
+
+// lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
+// local includes
 #include "src/logging/log_file.h"
 #include "src/logging/logger.h"
 #include "src/streaming/ffmpeg_stream_backend.h"
 #include "src/ui/asset_path.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/svg_assets.h"
-#include "third-party/moonlight-common-c/src/Limelight.h"
-
-#include <algorithm>
-#include <cmath>
-#include <ctime>
-#include <memory>
-#include <utility>
 
 namespace {
   /**

@@ -2,12 +2,15 @@
  * @file src/input/stream_menu.cpp
  * @brief Implements radial selection and host keyboard navigation.
  */
+// class header include
 #include "src/input/stream_menu.h"
 
-#include "third-party/moonlight-common-c/src/Limelight.h"
-
+// standard includes
 #include <algorithm>
 #include <cstdlib>
+
+// lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
 
 namespace {
   /**

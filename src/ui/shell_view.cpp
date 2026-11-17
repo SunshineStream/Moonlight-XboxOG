@@ -6,12 +6,13 @@
 #include "src/ui/shell_view.h"
 
 // standard includes
-#include "src/platform/filesystem_utils.h"
-
 #include <algorithm>
 #include <tuple>
 #include <utility>
 #include <vector>
+
+// local includes
+#include "src/platform/filesystem_utils.h"
 
 namespace {
 
@@ -688,7 +689,6 @@ namespace {
    * @param state Current reducer-owned modal state.
    * @param viewModel Receives render-ready dialog content.
    */
-
   void fill_modal_view(const app::ClientState &state, ui::ShellViewModel *viewModel) {
     if (!state.modal.active()) {
       return;

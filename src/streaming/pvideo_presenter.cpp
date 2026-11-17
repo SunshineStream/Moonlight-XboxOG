@@ -2,11 +2,15 @@
  * @file src/streaming/pvideo_presenter.cpp
  * @brief Submits bounded YUY2 overlay buffers using documented NV2A PVIDEO registers.
  */
+// class header include
 #include "src/streaming/pvideo_presenter.h"
 
 #ifdef NXDK
+  // standard includes
   #include <algorithm>
   #include <cstring>
+
+  // nxdk includes
   #include <hal/video.h>
   #include <pbkit/pbkit.h>
   #include <windows.h>

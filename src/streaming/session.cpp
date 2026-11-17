@@ -2,17 +2,10 @@
  * @file src/streaming/session.cpp
  * @brief Implements the Xbox streaming session runtime.
  */
+// class header include
 #include "src/streaming/session.h"
 
-#include "src/input/stream_exit.h"
-#include "src/logging/logger.h"
-#include "src/os.h"
-#include "src/startup/memory_stats.h"
-#include "src/streaming/ffmpeg_stream_backend.h"
-#include "src/streaming/stats_overlay.h"
-#include "src/streaming/stream_controls.h"
-#include "third-party/moonlight-common-c/src/Limelight.h"
-
+// standard includes
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -23,17 +16,32 @@
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <SDL.h>
-#include <SDL_ttf.h>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+// lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
+#include <SDL.h>
+#include <SDL_ttf.h>
+
+// platform includes
 #include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
 
 #if defined(NXDK) && MOONLIGHT_INPUT_DIAGNOSTICS
   #include <hal/debug.h>
 #endif
+
+// local includes
+#include "src/input/stream_exit.h"
+#include "src/logging/logger.h"
+#include "src/os.h"
+#include "src/startup/memory_stats.h"
+#include "src/streaming/ffmpeg_stream_backend.h"
+#include "src/streaming/stats_overlay.h"
+#include "src/streaming/stream_controls.h"
 
 #ifdef NXDK
 /**

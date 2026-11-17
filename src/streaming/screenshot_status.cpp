@@ -2,6 +2,7 @@
  * @file src/streaming/screenshot_status.cpp
  * @brief Implements throttled screenshot progress and automatic popup dismissal.
  */
+// class header include
 #include "src/streaming/screenshot_status.h"
 
 // standard includes

@@ -2,6 +2,7 @@
  * @file src/streaming/ffmpeg_stream_backend.cpp
  * @brief Implements the FFmpeg-backed streaming decode backend for Xbox sessions.
  */
+// class header include
 #include "src/streaming/ffmpeg_stream_backend.h"
 
 // standard includes
@@ -35,6 +36,7 @@ extern "C" {
 #include "src/logging/logger.h"
 #include "src/platform/filesystem_utils.h"
 
+// nxdk includes
 #ifdef NXDK
   #include <hal/video.h>
 #endif

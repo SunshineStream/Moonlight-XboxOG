@@ -2,20 +2,27 @@
  * @file src/platform/usb_input.cpp
  * @brief Bridges nxdk USB boot HID interfaces into SDL's keyboard and mouse event state.
  */
+// standard includes
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
+
+// lib includes
 #include <SDL.h>
+
+// nxdk includes
 #include <windows.h>
 #include <xboxkrnl/xboxkrnl.h>
 
+// lib includes
 // usb.h depends on the Xbox configuration and must precede the HID class declarations.
 extern "C" {
 #include <usbh_hid.h>
 #include <usbh_lib.h>
 }
 
+// local includes
 #include "src/input/usb_hid.h"
 
 // These are the vendored SDL2 internal event entrypoints. Calling them on the pump

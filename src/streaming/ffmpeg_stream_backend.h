@@ -12,6 +12,8 @@
 #include <vector>
 
 // lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
 #include <SDL.h>
 
 // local includes
@@ -19,7 +21,6 @@
 #include "src/streaming/aligned_media_buffer.h"
 #include "src/streaming/pvideo_presenter.h"
 #include "src/streaming/stats_overlay.h"
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 struct AVCodecContext;
 struct AVFrame;

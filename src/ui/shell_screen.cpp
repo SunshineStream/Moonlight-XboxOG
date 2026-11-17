@@ -19,11 +19,13 @@
 #include <utility>
 #include <vector>
 
-// nxdk includes
-#include <hal/debug.h>
+// lib includes
 #include <SDL.h>
 #include <SDL_image.h>
 #include <SDL_ttf.h>
+
+// nxdk includes
+#include <hal/debug.h>
 #include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
 
 // local includes
@@ -2441,7 +2443,6 @@ namespace {
    * @param state Current client state.
    * @return Settings snapshot ready for TOML serialization.
    */
-
   app::AppSettings persistent_settings_from_state(const app::ClientState &state) {
     return {
       state.settings.loggingLevel,

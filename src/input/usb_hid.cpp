@@ -2,8 +2,10 @@
  * @file src/input/usb_hid.cpp
  * @brief Decodes standard boot HID input with rollover and disconnect handling.
  */
+// class header include
 #include "src/input/usb_hid.h"
 
+// standard includes
 #include <algorithm>
 #include <utility>
 

@@ -4,6 +4,21 @@
  */
 #pragma once
 
+// standard includes
+#include <array>
+#include <cstddef>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <vector>
+
+// lib includes
+#include <SDL.h>
+#include <SDL_ttf.h>
+
+// local includes
 #include "src/app/screenshot_library.h"
 #include "src/input/stream_exit.h"
 #include "src/input/stream_input.h"
@@ -11,17 +26,6 @@
 #include "src/input/ui_input.h"
 #include "src/streaming/screenshot_status.h"
 #include "src/streaming/video_overlay.h"
-
-#include <array>
-#include <cstddef>
-#include <map>
-#include <memory>
-#include <optional>
-#include <SDL.h>
-#include <SDL_ttf.h>
-#include <string>
-#include <tuple>
-#include <vector>
 
 namespace streaming {
   class FfmpegStreamBackend;

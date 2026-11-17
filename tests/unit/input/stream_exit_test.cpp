@@ -9,9 +9,11 @@
 #include <algorithm>
 #include <array>
 
+// lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
 // local includes
 #include "src/input/stream_exit.h"
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 /**
  * @brief Back and both shoulders request the menu immediately without Start, axes or a timer.

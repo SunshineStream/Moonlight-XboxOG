@@ -14,8 +14,12 @@
   #if __has_include(<nxdk/mount.h>)
     #include <nxdk/mount.h>
   #endif
+
+  // standard includes
   #include <array>
   #include <cstdio>
+
+  // platform includes
   #include <winnt.h>
 #endif
 

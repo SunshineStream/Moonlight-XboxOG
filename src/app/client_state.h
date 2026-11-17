@@ -15,7 +15,7 @@
 // nxdk includes
 #include <hal/video.h>
 
-// standard includes
+// local includes
 #include "src/app/host_records.h"
 #include "src/app/pairing_flow.h"
 #include "src/app/screenshot_library.h"

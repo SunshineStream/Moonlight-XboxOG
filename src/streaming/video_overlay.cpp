@@ -2,8 +2,10 @@
  * @file src/streaming/video_overlay.cpp
  * @brief Converts cached UI panels for GPU scanout and software framebuffers.
  */
+// class header include
 #include "src/streaming/video_overlay.h"
 
+// standard includes
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>

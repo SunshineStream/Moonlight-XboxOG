@@ -9,9 +9,11 @@
 #include <array>
 #include <set>
 
+// lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
 // local includes
 #include "src/input/stream_menu.h"
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 /**
  * @brief Both sticks select all eight actions and never select an action in the dead zone.
