@@ -29,6 +29,7 @@
 // local includes
 #include "src/app/settings_storage.h"
 #include "src/input/navigation_input.h"
+#include "src/input/shell_controller.h"
 #include "src/input/stream_input.h"
 #include "src/logging/log_file.h"
 #include "src/logging/logger.h"
@@ -4585,13 +4586,21 @@ namespace {
     }
   }
 
-  void handle_controller_device_added(SDL_GameController **controller, const SDL_ControllerDeviceEvent &event) {
+  /**
+   * @brief Acquire an added gamepad without interrupting keyboard holds or replacing a working controller.
+   * @param controller Owned menu controller.
+   * @param event SDL device-added notification.
+   * @param inputState Holds to reset after controller ownership changes.
+   */
+  void handle_controller_device_added(SDL_GameController **controller, const SDL_ControllerDeviceEvent &event, ShellInputState *inputState) {
     if (controller == nullptr || !should_open_added_controller(*controller, event)) {
       return;
     }
 
-    *controller = SDL_GameControllerOpen(event.which);
-    if (*controller != nullptr) {
+    if (input::recover_shell_controller(controller) && *controller != nullptr) {
+      if (inputState != nullptr) {
+        inputState->reset_after_controller_change();
+      }
       logging::info("input", "Controller connected");
     }
   }
@@ -4603,7 +4612,9 @@ namespace {
 
     close_controller(*controller);
     *controller = nullptr;
-    reset_shell_input_state(inputState);
+    if (inputState != nullptr) {
+      inputState->reset_after_controller_change();
+    }
     logging::warn("input", "Controller disconnected");
   }
 
@@ -4709,7 +4720,7 @@ namespace {
         state.shell.shouldExit = true;
         return input::UiCommand::none;
       case SDL_CONTROLLERDEVICEADDED:
-        handle_controller_device_added(controller, event.cdevice);
+        handle_controller_device_added(controller, event.cdevice, inputState);
         return input::UiCommand::none;
       case SDL_CONTROLLERDEVICEREMOVED:
         handle_controller_device_removed(controller, event.cdevice, inputState);
@@ -4973,21 +4984,11 @@ namespace {
    * @return The opened controller, or nullptr when none could be opened.
    */
   SDL_GameController *open_primary_controller() {
-    for (int joystickIndex = 0; joystickIndex < SDL_NumJoysticks(); ++joystickIndex) {
-      if (!SDL_IsGameController(joystickIndex)) {
-        continue;
-      }
-
-      SDL_GameController *controller = SDL_GameControllerOpen(joystickIndex);
-      if (controller == nullptr) {
-        continue;
-      }
-
+    SDL_GameController *controller = nullptr;
+    if (input::recover_shell_controller(&controller)) {
       logging::info("input", "Opened primary controller");
-      return controller;
     }
-
-    return nullptr;
+    return controller;
   }
 
   /**
@@ -5395,6 +5396,18 @@ namespace {
     const auto previousInputDevice = state.shell.inputDevice;
     bool skipPolledControllerNavigation = false;
     process_polled_shell_events(state, &resources->controller, &runtime->inputState, processCommand, &skipPolledControllerNavigation, &runtime->keypadRedrawRequested);
+    // Sunshine can remove a virtual pad after a quit completes. Other Xbox
+    // ports may already be attached, so no new ADDED event will arrive for them.
+    // Recover during input polling, even when an idle frame is not being drawn.
+    if (input::recover_shell_controller(&resources->controller)) {
+      runtime->inputState.reset_after_controller_change();
+      runtime->keypadRedrawRequested = true;
+      if (resources->controller != nullptr) {
+        logging::info("input", "Recovered menu controller instance " + std::to_string(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(resources->controller))));
+      } else {
+        logging::warn("input", "Menu controller unavailable; waiting for an attached gamepad");
+      }
+    }
     if (state.shell.inputDevice == input::UiInputDevice::keyboard) {
       processCommand(runtime->inputState.keyboardNavigation.poll(SDL_GetTicks()));
     } else {

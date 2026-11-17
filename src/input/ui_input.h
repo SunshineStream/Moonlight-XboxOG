@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <map>
+#include <utility>
 
 namespace input {
   constexpr std::uint32_t NAVIGATION_INITIAL_REPEAT_MILLISECONDS = 150;  ///< Delay shared by keyboard and controller navigation.
@@ -153,6 +154,16 @@ namespace input {
      */
     void reset_after_stream() {
       *this = {};
+      controllerNavigationNeutralRequired = true;
+    }
+
+    /**
+     * @brief Clear a removed gamepad's holds while preserving any independent keyboard repeat.
+     */
+    void reset_after_controller_change() {
+      auto keyboard = std::move(keyboardNavigation);
+      *this = {};
+      keyboardNavigation = std::move(keyboard);
       controllerNavigationNeutralRequired = true;
     }
   };

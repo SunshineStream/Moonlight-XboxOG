@@ -135,6 +135,37 @@ TEST(ShellInputStateTest, ResumesNavigationAfterStreamingConsumesReleaseEvents) 
 }
 
 /**
+ * @brief A gamepad replacement clears stale controller input while an independently held keyboard key keeps repeating.
+ */
+TEST(ShellInputStateTest, ControllerHandoffPreservesKeyboardAndResetsGamepadHolds) {
+  input::ShellInputState state;
+  state.leftTriggerPressed = state.rightTriggerPressed = state.leftShoulderPressed = state.rightShoulderPressed = true;
+  state.controllerStartPressed = state.controllerBackPressed = state.controllerExitComboArmed = state.controllerExitComboTriggered = true;
+  state.controllerStartDownTick = state.controllerBackDownTick = state.leftShoulderRepeatTick = state.rightShoulderRepeatTick = state.leftTriggerRepeatTick = state.rightTriggerRepeatTick = 100;
+  state.moveUpHoldState = state.moveDownHoldState = state.moveLeftHoldState = state.moveRightHoldState = {true, 100, 200};
+  EXPECT_EQ(state.keyboardNavigation.press(1, input::UiCommand::move_right, 100), input::UiCommand::move_right);
+  state.reset_after_controller_change();
+  EXPECT_FALSE(state.leftTriggerPressed || state.rightTriggerPressed || state.leftShoulderPressed || state.rightShoulderPressed);
+  EXPECT_FALSE(state.controllerStartPressed || state.controllerBackPressed || state.controllerExitComboArmed || state.controllerExitComboTriggered);
+  EXPECT_EQ(state.controllerStartDownTick + state.controllerBackDownTick + state.leftShoulderRepeatTick + state.rightShoulderRepeatTick + state.leftTriggerRepeatTick + state.rightTriggerRepeatTick, 0U);
+  for (const auto &hold : {state.moveUpHoldState, state.moveDownHoldState, state.moveLeftHoldState, state.moveRightHoldState}) {
+    EXPECT_FALSE(hold.active);
+    EXPECT_EQ(hold.activatedTick, 0U);
+    EXPECT_EQ(hold.lastRepeatTick, 0U);
+  }
+  EXPECT_TRUE(state.controllerNavigationNeutralRequired);
+  EXPECT_EQ(state.keyboardNavigation.poll(249), input::UiCommand::none);
+  EXPECT_EQ(state.keyboardNavigation.poll(250), input::UiCommand::move_right);
+  state.keyboardNavigation.release(1);
+  EXPECT_EQ(state.keyboardNavigation.poll(500), input::UiCommand::none);
+  EXPECT_EQ(state.keyboardNavigation.press(2, input::UiCommand::confirm, 500), input::UiCommand::confirm);
+  state.reset_after_controller_change();
+  EXPECT_EQ(state.keyboardNavigation.press(2, input::UiCommand::confirm, 600), input::UiCommand::none);
+  state.keyboardNavigation.release(2);
+  EXPECT_EQ(state.keyboardNavigation.press(2, input::UiCommand::confirm, 700), input::UiCommand::confirm);
+}
+
+/**
  * @brief Controller direction changes respond immediately and held movement matches keyboard repeats.
  */
 TEST(DirectionNavigationTest, RespondsImmediatelyAndUsesSharedRepeatTiming) {

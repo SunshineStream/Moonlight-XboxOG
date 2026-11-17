@@ -131,6 +131,8 @@ quits the app on the PC. Quitting can lose unsaved progress. An in-progress app 
 its poster and can be selected to resume; its app action menu also offers **Quit app**, with confirmation.
 The pause marker describes a resumable streaming session; the PC app continues running after disconnecting.
 Returning from the stream resets local keyboard/controller holds before library navigation resumes.
+If the menu's gamepad disconnects, the client automatically selects another connected gamepad without
+requiring it to be unplugged or the client restarted. Keyboard navigation remains independent of this handoff.
 
 Screenshots default to `E:\UDATA\<title-id>\screenshots` and omit local controls. Open
 **Settings > Storage > Screenshot Folder** to browse drives and subfolders, select the current folder,
