@@ -500,12 +500,12 @@ namespace streaming {
   /**
    * @brief Forward one BMP write and publish progress only for bytes actually written.
    * @param stream Progress-decorated SDL file.
-   * @param pixels Header or pixel bytes.
+   * @param pixels Header or pixel bytes supplied by the SDL C writer callback.
    * @param size Bytes per object.
    * @param count Requested object count.
    * @return Number of complete objects written.
    */
-  std::size_t screenshot_file_write(SDL_RWops *stream, const void *pixels, std::size_t size, std::size_t count) {
+  extern "C" std::size_t screenshot_file_write(SDL_RWops *stream, const void *pixels, std::size_t size, std::size_t count) {
     auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
     const auto written = SDL_RWwrite(writer.file, pixels, size, count);
     writer.position += static_cast<Sint64>(written * size);

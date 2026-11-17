@@ -111,9 +111,15 @@ namespace {
    * @param width Bitmap width.
    * @param height Bitmap height.
    * @param pending Previously accumulated damage.
-   * @return Union of the changed pixel bounds and pending damage.
+   * @return Union of changed bounds and pending damage, or an empty rectangle for invalid storage.
    */
   streaming::VideoRectangle argb_damage(const std::vector<std::uint8_t> &before, const std::vector<std::uint8_t> &after, int width, int height, const streaming::VideoRectangle &pending) {
+    if (width <= 0 || height <= 0 || width > 2048 || height > 2048) {
+      return {};
+    }
+    if (const auto expected = static_cast<std::size_t>(width) * height * 4; before.size() != expected || after.size() != expected) {
+      return {};
+    }
     int left = width;
     int right = 0;
     int top = height;
@@ -195,9 +201,9 @@ namespace streaming {
    * @param clip Optional repaint rectangle.
    * @return True when rasterization remains within the destination.
    */
-  bool valid_menu_wheel(OverlayBitmap target, const MenuWheel &wheel, int sector, const VideoRectangle *clip) {
-    const auto [pixels, capacity, pitch, width, height] = target;
-    const auto [centerX, centerY, radius, selected] = wheel;
+  bool valid_menu_wheel(const OverlayBitmap &target, const MenuWheel &wheel, int sector, const VideoRectangle *clip) {
+    const auto &[pixels, capacity, pitch, width, height] = target;
+    const auto &[centerX, centerY, radius, selected] = wheel;
 
     if (!valid_storage(pixels, capacity, pitch, width, height, 4) || width > 2048 || height > 2048 || centerX < 0 || centerX >= width || centerY < 0 || centerY >= height || radius < 1 || radius > 2048 || sector < -1 || sector > 3) {
       return false;
@@ -258,9 +264,9 @@ namespace streaming {
     return direction == selected ? 85 : 36;
   }
 
-  bool rasterize_menu_wheel(OverlayBitmap target, const MenuWheel &wheel, int sector, const VideoRectangle *clip) {
-    const auto [pixels, capacity, pitch, width, height] = target;
-    const auto [centerX, centerY, radius, selected] = wheel;
+  bool rasterize_menu_wheel(const OverlayBitmap &target, const MenuWheel &wheel, int sector, const VideoRectangle *clip) {
+    const auto &[pixels, capacity, pitch, width, height] = target;
+    const auto &[centerX, centerY, radius, selected] = wheel;
     if (!valid_menu_wheel(target, wheel, sector, clip)) {
       return false;
     }

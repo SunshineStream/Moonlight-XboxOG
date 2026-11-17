@@ -736,7 +736,7 @@ namespace app {
    * @param succeeded True after the host confirmed that no app is running.
    * @param message Completion or actionable failure detail.
    */
-  void apply_app_quit_result(ClientState &state, bool succeeded, std::string message);
+  void apply_app_quit_result(ClientState &state, bool succeeded, const std::string &message);
   /**
    * @brief Remove a deleted capture from the open viewer and keep its selection in range.
    * @param state Viewer that requested deletion.

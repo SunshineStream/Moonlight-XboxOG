@@ -12,11 +12,6 @@
 #include <SDL.h>
 
 // nxdk includes
-#ifdef NXDK
-  #include <windows.h>
-#else
-  #include <Windows.h>
-#endif
 #include <xboxkrnl/xboxkrnl.h>
 
 // lib includes

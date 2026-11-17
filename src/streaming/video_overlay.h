@@ -72,7 +72,7 @@ namespace streaming {
    * @param clip Optional repaint rectangle restricting background restoration.
    * @return False for invalid storage or geometry, without changing destination pixels.
    */
-  bool rasterize_menu_wheel(OverlayBitmap target, const MenuWheel &wheel, int sector = -1, const VideoRectangle *clip = nullptr);
+  bool rasterize_menu_wheel(const OverlayBitmap &target, const MenuWheel &wheel, int sector = -1, const VideoRectangle *clip = nullptr);
 
   /**
    * @brief Placement of a shared panel inside the presented video rectangle.

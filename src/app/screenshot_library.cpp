@@ -66,6 +66,22 @@ namespace {
              return std::tolower(a) == std::tolower(b);
            });
   }
+
+  /**
+   * @brief Convert one timestamp using caller-owned calendar storage on every platform.
+   * @param time Unix timestamp representable by the platform clock type.
+   * @param utc Receives broken-down UTC calendar fields.
+   * @return True after a successful platform conversion.
+   */
+  bool screenshot_utc_time(std::time_t time, std::tm &utc) {
+#ifdef NXDK
+    return moonlight_gmtime(time, utc);
+#elif defined(_WIN32)
+    return gmtime_s(&utc, &time) == 0;
+#else
+    return gmtime_r(&time, &utc) != nullptr;
+#endif
+  }
 }  // namespace
 
 namespace app {
@@ -296,14 +312,7 @@ namespace app {
       return "Capture time unavailable";
     }
     std::tm utc {};
-#ifdef NXDK
-    const bool converted = moonlight_gmtime(time, utc);
-#elif defined(_WIN32)
-    const bool converted = gmtime_s(&utc, &time) == 0;
-#else
-    const bool converted = gmtime_r(&time, &utc) != nullptr;
-#endif
-    if (!converted || std::strftime(label.data(), label.size(), "%Y-%m-%d %H:%M:%S UTC", &utc) == 0) {
+    if (!screenshot_utc_time(time, utc) || std::strftime(label.data(), label.size(), "%Y-%m-%d %H:%M:%S UTC", &utc) == 0) {
       return "Capture time unavailable";
     }
     return label.data();

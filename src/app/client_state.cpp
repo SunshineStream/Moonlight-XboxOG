@@ -2943,7 +2943,7 @@ namespace app {
     }
   }
 
-  void apply_app_quit_result(ClientState &state, bool succeeded, std::string message) {
+  void apply_app_quit_result(ClientState &state, bool succeeded, const std::string &message) {
     const auto target = state.appQuit;
     if (!target.inProgress) {
       return;

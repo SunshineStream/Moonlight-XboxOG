@@ -1519,6 +1519,9 @@ namespace {
     std::size_t endIndex;  ///< One past the last visible row.
     std::size_t selectedIndex;  ///< Newly focused row.
     bool windowChanged;  ///< The visible row range moved.
+    std::size_t visibleRowCount;  ///< Maximum number of rows in the viewport.
+    bool overflow;  ///< Whether the list needs a scrollbar.
+    int scrollBarWidth;  ///< Scrollbar width, or zero when all rows fit.
   };
 
   /**
@@ -1552,128 +1555,141 @@ namespace {
   }
 
   /**
-   * @brief Draw scrollable action rows with rounded checkboxes, a filled selection and focus rail.
-   *
-   * @param renderer Active shell renderer.
-   * @param font Font for action labels.
-   * @param rows Actions and their focus state.
-   * @param rect Available list bounds.
-   * @param rowHeight Height of an action row.
-   * @param assetCache Optional cache for menu icons.
-   * @param active Whether this list currently owns controller focus.
-   * @param folder Optional retained folder viewport and visible label textures.
-   * @param repaint Repaint affected rows in the retained frame instead of the complete list.
+   * @brief Calculate the visible action range while retaining folder-browser scroll position.
+   * @param rows Nonempty action list.
+   * @param rect List bounds.
+   * @param rowHeight Single row height.
+   * @param folder Previous folder viewport, or nullptr for centered ordinary menus.
+   * @return Row geometry, selected index and scrollbar state.
+   */
+  ActionRowsLayout action_rows_layout(const std::vector<ui::ShellActionRow> &rows, const SDL_Rect &rect, int rowHeight, const FolderDialogCache *folder) {
+    constexpr int rowSpacing = 6;
+    const int rowStep = rowHeight + rowSpacing;
+    const auto visible = static_cast<std::size_t>(std::max(1, (rect.h + rowSpacing) / std::max(1, rowStep)));
+    const auto selected = selected_action_index(rows);
+    std::size_t first = 0;
+    if (rows.size() > visible) {
+      first = selected > visible / 2 ? selected - visible / 2 : 0;
+      first = std::min(first, rows.size() - visible);
+    }
+    if (folder != nullptr) {
+      first = ui::stable_list_first_row(rows.size(), selected, visible, folder->first);
+    }
+    const bool changed = folder != nullptr && first != folder->first;
+    const bool overflow = rows.size() > visible;
+    const int barWidth = overflow ? 8 : 0;
+    const int contentWidth = std::max(1, rect.w - (overflow ? barWidth + 10 : 0));
+    return {rect, rowHeight, rowStep, contentWidth, first, std::min(rows.size(), first + visible), selected, changed, visible, overflow, barWidth};
+  }
+
+  /**
+   * @brief Release cached row labels that have scrolled out of view.
+   * @param folder Retained row textures.
+   * @param layout Current visible range.
+   */
+  void prune_action_row_labels(FolderDialogCache &folder, const ActionRowsLayout &layout) {
+    for (auto it = folder.labels.begin(); it != folder.labels.end();) {
+      if (it->first < layout.startIndex || it->first >= layout.endIndex) {
+        clear_cached_text_texture(&it->second);
+        it = folder.labels.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  /**
+   * @brief Render one action's focus, icon, checkbox and retained or ordinary label.
+   * @param renderer Dialog renderer.
+   * @param font Action font.
+   * @param row Action content.
+   * @param index Row index in the complete list.
+   * @param layout Visible row geometry.
+   * @param options Icon, focus and cache settings.
+   * @return True when the label rendered successfully.
+   */
+  bool render_action_row(SDL_Renderer *renderer, TTF_Font *font, const ui::ShellActionRow &row, std::size_t index, const ActionRowsLayout &layout, const ActionRowsOptions &options) {
+    auto *const assetCache = options.assetCache;
+    const bool active = options.active;
+    auto *const folder = options.folder;
+    const int y = layout.bounds.y + static_cast<int>(index - layout.startIndex) * layout.rowStep;
+    const SDL_Rect rowRect {layout.bounds.x, y, layout.contentWidth, layout.rowHeight};
+    if (row.selected) {
+      fill_rounded_rect(renderer, rowRect, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, static_cast<Uint8>(active ? 0x28 : 0x12)}, 7);
+      if (active) {
+        fill_rect(renderer, {rowRect.x, rowRect.y + 8, 3, rowRect.h - 16}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
+      }
+    }
+
+    int labelX = rowRect.x + 12;
+    if (assetCache != nullptr && !row.iconAssetPath.empty()) {
+      const int iconSize = std::min(24, rowRect.h - 16);
+      render_asset_icon(renderer, assetCache, row.iconAssetPath, {labelX, rowRect.y + (rowRect.h - iconSize) / 2, iconSize, iconSize});
+      labelX += iconSize + 10;
+    }
+    const int checkboxSize = row.checkable ? std::min(22, rowRect.h - 16) : 0;
+    if (row.checkable) {
+      const SDL_Rect checkbox {rowRect.x + rowRect.w - checkboxSize - 14, rowRect.y + (rowRect.h - checkboxSize) / 2, checkboxSize, checkboxSize};
+      if (row.checked) {
+        fill_rounded_rect(renderer, checkbox, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, 4);
+        for (int stroke = 0; stroke < 2; ++stroke) {
+          draw_line(renderer, checkbox.x + checkboxSize / 4, checkbox.y + checkboxSize / 2 + stroke, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
+          draw_line(renderer, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, checkbox.x + checkboxSize * 3 / 4, checkbox.y + checkboxSize / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
+        }
+      } else {
+        draw_rounded_rect_outline(renderer, checkbox, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, 4);
+      }
+    }
+    const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
+    const int labelWidth = rowRect.x + rowRect.w - labelX - 12 - (row.checkable ? checkboxSize + 16 : 0);
+    const int labelY = rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2;
+    if (folder != nullptr) {
+      auto &label = folder->labels[index];
+      if (!ensure_single_line_text_texture(renderer, font, row.label, color, labelWidth, &label) || !render_cached_text_texture(renderer, label, labelX, labelY)) {
+        return false;
+      }
+    } else if (!render_text_line_simple(renderer, font, row.label, color, labelX, labelY, labelWidth)) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * @brief Render visible action rows using retained labels for folder navigation.
+   * @param renderer Dialog renderer.
+   * @param font Action font.
+   * @param rows Complete action list.
+   * @param rect List bounds.
+   * @param rowHeight Single row height.
+   * @param options Icon, focus and retained-cache settings.
    * @return True when visible labels rendered successfully.
    */
   bool render_action_rows(SDL_Renderer *renderer, TTF_Font *font, const std::vector<ui::ShellActionRow> &rows, const SDL_Rect &rect, int rowHeight, const ActionRowsOptions &options = {}) {
-    const auto &[assetCache, active, folder, repaint] = options;
     if (rows.empty()) {
       return true;
     }
-
-    const int rowSpacing = 6;
-    const int rowStep = rowHeight + rowSpacing;
-    const auto visibleRowCount = static_cast<std::size_t>(std::max(1, (rect.h + rowSpacing) / std::max(1, rowStep)));
-    std::size_t selectedIndex = 0U;
-    bool selectedIndexFound = false;
-    for (std::size_t index = 0; index < rows.size(); ++index) {
-      if (rows[index].selected) {
-        selectedIndex = index;
-        selectedIndexFound = true;
-        break;
-      }
-    }
-
-    std::size_t startIndex = 0U;
-    if (rows.size() > visibleRowCount && selectedIndexFound) {
-      const std::size_t centeredOffset = visibleRowCount / 2U;
-      startIndex = selectedIndex > centeredOffset ? selectedIndex - centeredOffset : 0U;
-      const std::size_t maxStartIndex = rows.size() - visibleRowCount;
-      if (startIndex > maxStartIndex) {
-        startIndex = maxStartIndex;
-      }
-    }
+    const auto layout = action_rows_layout(rows, rect, rowHeight, options.folder);
+    auto *const folder = options.folder;
     if (folder != nullptr) {
-      startIndex = ui::stable_list_first_row(rows.size(), selectedIndex, visibleRowCount, folder->first);
-    }
-    const bool windowChanged = folder != nullptr && startIndex != folder->first;
-    const std::size_t endIndex = std::min(rows.size(), startIndex + visibleRowCount);
-    const bool overflow = rows.size() > visibleRowCount;
-    const int scrollBarWidth = overflow ? 8 : 0;
-    const int contentWidth = std::max(1, rect.w - (overflow ? scrollBarWidth + 10 : 0));
-
-    if (folder != nullptr) {
-      if (repaint) {
-        restore_action_row_backgrounds(renderer, *folder, {rect, rowHeight, rowStep, contentWidth, startIndex, endIndex, selectedIndex, windowChanged});
+      if (options.repaint) {
+        restore_action_row_backgrounds(renderer, *folder, layout);
       }
-      for (auto it = folder->labels.begin(); it != folder->labels.end();) {
-        if (it->first < startIndex || it->first >= endIndex) {
-          clear_cached_text_texture(&it->second);
-          it = folder->labels.erase(it);
-        } else {
-          ++it;
-        }
-      }
+      prune_action_row_labels(*folder, layout);
     }
-    for (std::size_t index = startIndex; index < endIndex; ++index) {
-      if (folder != nullptr && repaint && !windowChanged && index != folder->selected && index != selectedIndex) {
+    for (std::size_t index = layout.startIndex; index < layout.endIndex; ++index) {
+      if (folder != nullptr && options.repaint && !layout.windowChanged && index != folder->selected && index != layout.selectedIndex) {
         continue;
       }
-      const int y = rect.y + static_cast<int>(index - startIndex) * rowStep;
-      const ui::ShellActionRow &row = rows[index];
-      const SDL_Rect rowRect {rect.x, y, contentWidth, rowHeight};
-      if (row.selected) {
-        fill_rounded_rect(renderer, rowRect, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, static_cast<Uint8>(active ? 0x28 : 0x12)}, 7);
-        if (active) {
-          fill_rect(renderer, {rowRect.x, rowRect.y + 8, 3, rowRect.h - 16}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
-        }
-      }
-
-      int labelX = rowRect.x + 12;
-      if (assetCache != nullptr && !row.iconAssetPath.empty()) {
-        const int iconSize = std::min(24, rowRect.h - 16);
-        render_asset_icon(renderer, assetCache, row.iconAssetPath, {labelX, rowRect.y + (rowRect.h - iconSize) / 2, iconSize, iconSize});
-        labelX += iconSize + 10;
-      }
-      const int checkboxSize = row.checkable ? std::min(22, rowRect.h - 16) : 0;
-      if (row.checkable) {
-        const SDL_Rect checkbox {rowRect.x + rowRect.w - checkboxSize - 14, rowRect.y + (rowRect.h - checkboxSize) / 2, checkboxSize, checkboxSize};
-        if (row.checked) {
-          fill_rounded_rect(renderer, checkbox, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, 4);
-          for (int stroke = 0; stroke < 2; ++stroke) {
-            draw_line(renderer, checkbox.x + checkboxSize / 4, checkbox.y + checkboxSize / 2 + stroke, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
-            draw_line(renderer, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, checkbox.x + checkboxSize * 3 / 4, checkbox.y + checkboxSize / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
-          }
-        } else {
-          draw_rounded_rect_outline(renderer, checkbox, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, 4);
-        }
-      }
-      const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
-      const int labelWidth = rowRect.x + rowRect.w - labelX - 12 - (row.checkable ? checkboxSize + 16 : 0);
-      const int labelY = rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2;
-      if (folder != nullptr) {
-        auto &label = folder->labels[index];
-        if (!ensure_single_line_text_texture(renderer, font, row.label, color, labelWidth, &label) || !render_cached_text_texture(renderer, label, labelX, labelY)) {
-          return false;
-        }
-      } else if (!render_text_line_simple(renderer, font, row.label, color, labelX, labelY, labelWidth)) {
+      if (!render_action_row(renderer, font, rows[index], index, layout, options)) {
         return false;
       }
     }
-
-    if (overflow && (!repaint || windowChanged)) {
-      render_vertical_scrollbar(
-        renderer,
-        {rect.x + rect.w - scrollBarWidth, rect.y, scrollBarWidth, rect.h},
-        static_cast<int>(rows.size()),
-        static_cast<int>(visibleRowCount),
-        static_cast<int>(startIndex)
-      );
+    if (layout.overflow && (!options.repaint || layout.windowChanged)) {
+      render_vertical_scrollbar(renderer, {rect.x + rect.w - layout.scrollBarWidth, rect.y, layout.scrollBarWidth, rect.h}, static_cast<int>(rows.size()), static_cast<int>(layout.visibleRowCount), static_cast<int>(layout.startIndex));
     }
-
     if (folder != nullptr) {
-      folder->first = startIndex;
-      folder->selected = selectedIndex;
+      folder->first = layout.startIndex;
+      folder->selected = layout.selectedIndex;
     }
     return true;
   }
@@ -3973,17 +3989,14 @@ namespace {
   };
 
   /**
-   * @brief Render a content-sized dialog with persistent guidance, scrolling actions or progress.
-   *
-   * @param renderer Active renderer.
-   * @param titleFont Dialog heading font.
-   * @param bodyFont Action label font.
-   * @param smallFont Supporting text font.
-   * @param assetCache Cached controller glyphs and action icons.
+   * @brief Render a shell modal and optionally retain its folder-list viewport.
+   * @param renderer Dialog renderer.
+   * @param fonts Heading, body and helper fonts.
+   * @param assetCache Cached action icons.
    * @param modal Dialog content.
    * @param width Logical display width.
    * @param height Framebuffer height.
-   * @param folder Optional folder cache to populate for incremental navigation.
+   * @param folder Optional retained folder state.
    * @return True when the dialog rendered successfully.
    */
   bool render_shell_dialog(SDL_Renderer *renderer, const DialogFonts &fonts, AssetTextureCache *assetCache, const ui::ShellModalView &modal, int width, int height, FolderDialogCache *folder = nullptr) {
@@ -4163,7 +4176,7 @@ namespace {
     }
     for (int y = area.y; y < area.y + area.h; ++y) {
       const auto *source = static_cast<const std::uint8_t *>(surface.pixels) + static_cast<std::size_t>(y) * surface.pitch + area.x * bytes;
-      auto *destination = static_cast<std::uint8_t *>(framebuffer) + (static_cast<std::size_t>(y) * mode.width + area.x) * bytes;
+      auto *destination = framebuffer + (static_cast<std::size_t>(y) * mode.width + area.x) * bytes;
       std::memcpy(destination, source, static_cast<std::size_t>(area.w) * bytes);
     }
     if (locked) {

@@ -192,6 +192,9 @@ namespace {
 }  // namespace
 
 namespace streaming {
+  StreamControls::EventHandler::EventHandler(StreamControls &controls) noexcept:
+      controls_(controls) {}
+
   void StreamControls::clear_panel() {
     panel_.text.clear();
     panel_.textBytes = 0;
@@ -246,9 +249,9 @@ namespace streaming {
     SDL_RenderCopy(renderer, raster.texture.get(), &source, &destination);
   }
 
-  void StreamControls::navigate_controller(const input::ControllerState &sample, Uint32 now) {
-    if (menu_.page != input::StreamMenuPage::keyboard && menu_.page != input::StreamMenuPage::logs) {
-      navigation_.controller.reset();
+  void StreamControls::EventHandler::navigate_controller(const input::ControllerState &sample, Uint32 now) const {
+    if (controls_.menu_.page != input::StreamMenuPage::keyboard && controls_.menu_.page != input::StreamMenuPage::logs) {
+      controls_.navigation_.controller.reset();
       return;
     }
     int x = (sample.buttonFlags & RIGHT_FLAG) != 0;
@@ -259,20 +262,20 @@ namespace streaming {
     if (y == 0 && (sample.buttonFlags & UP_FLAG) != 0) {
       y = -1;
     }
-    if (navigation_.neutralRequired) {
+    if (controls_.navigation_.neutralRequired) {
       if (x == 0 && y == 0 && std::max(std::abs(static_cast<int>(sample.leftStickX)), std::abs(static_cast<int>(sample.leftStickY))) < input::STICK_NAVIGATION_RELEASE_THRESHOLD) {
-        navigation_.neutralRequired = false;
+        controls_.navigation_.neutralRequired = false;
       }
       return;
     }
     const auto command = input::direction_command(x, y);
-    const auto step = x == 0 && y == 0 ? navigation_.controller.update_stick(sample.leftStickX, sample.leftStickY, now) : navigation_.controller.update(command, now);
+    const auto step = x == 0 && y == 0 ? controls_.navigation_.controller.update_stick(sample.leftStickX, sample.leftStickY, now) : controls_.navigation_.controller.update(command, now);
     const auto key = menu_navigation_key(step);
-    if (key != SDLK_UNKNOWN && !navigation_.applied) {
-      navigation_.applied = true;
+    if (key != SDLK_UNKNOWN && !controls_.navigation_.applied) {
+      controls_.navigation_.applied = true;
       const auto [dx, dy] = input::navigation_step(menu_navigation_command(key));
-      menu_.navigate(dx, dy);
-      panel_.dirty = true;
+      controls_.menu_.navigate(dx, dy);
+      controls_.panel_.dirty = true;
     }
   }
 
@@ -319,12 +322,12 @@ namespace streaming {
     return visible() || screenshotNotification_.visible;
   }
 
-  void StreamControls::release_pulse() {
-    if (pulseSlot_ >= 0) {
-      input::StreamPacket packet {input::StreamPacketType::controller, pulseSlot_, router_.active_mask()};
-      packet.controller = latestHostController_[pulseSlot_];
-      pulseSlot_ = -1;
-      pulseButtons_ = 0;
+  void StreamControls::EventHandler::release_pulse() const {
+    if (controls_.pulseSlot_ >= 0) {
+      input::StreamPacket packet {input::StreamPacketType::controller, controls_.pulseSlot_, controls_.router_.active_mask()};
+      packet.controller = controls_.latestHostController_[controls_.pulseSlot_];
+      controls_.pulseSlot_ = -1;
+      controls_.pulseButtons_ = 0;
       send_packet(packet);
     }
   }
@@ -363,7 +366,7 @@ namespace streaming {
   }
 
   void StreamControls::close_if_removed(int instance) {
-    release_pulse();
+    events_.release_pulse();
     router_.disconnect(instance);
     if (mouseDevice_ == instance) {
       mouseDevice_ = -1;
@@ -429,75 +432,75 @@ namespace streaming {
     return menu_.page != input::StreamMenuPage::closed;
   }
 
-  void StreamControls::open_menu(int device) {
-    if (menu_.page == input::StreamMenuPage::radial) {
+  void StreamControls::EventHandler::open_menu(int device) const {
+    if (controls_.menu_.page == input::StreamMenuPage::radial) {
       return;
     }
-    menu_.open(device);
-    navigation_.keyboard.reset();
-    navigation_.controller.reset();
-    navigation_.neutralRequired = false;
-    navigation_.pageTriggerDown = false;
-    navigation_.dockTriggerDown = false;
-    navigation_.inputDevice = device < 0 ? input::UiInputDevice::keyboard : input::UiInputDevice::gamepad;
-    router_.set_captured(true);
-    navigation_.armed = false;
-    panel_.dirty = true;
-    panel_.message.clear();
+    controls_.menu_.open(device);
+    controls_.navigation_.keyboard.reset();
+    controls_.navigation_.controller.reset();
+    controls_.navigation_.neutralRequired = false;
+    controls_.navigation_.pageTriggerDown = false;
+    controls_.navigation_.dockTriggerDown = false;
+    controls_.navigation_.inputDevice = device < 0 ? input::UiInputDevice::keyboard : input::UiInputDevice::gamepad;
+    controls_.router_.set_captured(true);
+    controls_.navigation_.armed = false;
+    controls_.panel_.dirty = true;
+    controls_.panel_.message.clear();
     logging::info("input", "Opened stream menu from " + (device < 0 ? std::string("keyboard") : "gamepad " + std::to_string(device)));
   }
 
-  void StreamControls::tap_key(int code) {
+  void StreamControls::EventHandler::tap_key(int code) const {
     if (code == 0) {
       return;
     }
-    const int keyModifiers = menu_.key_modifiers(code);
+    const int keyModifiers = controls_.menu_.key_modifiers(code);
     // No gameplay sample is forwarded during this event-thread-only local key tap.
-    router_.set_captured(false);
+    controls_.router_.set_captured(false);
     constexpr std::array<int, 4> modifiers {MODIFIER_SHIFT, MODIFIER_CTRL, MODIFIER_ALT, MODIFIER_META};
     constexpr std::array<int, 4> keys {0xA0, 0xA2, 0xA4, 0x15B};
     for (std::size_t i = 0; i < modifiers.size(); ++i) {
       if ((keyModifiers & modifiers[i]) != 0) {
-        router_.key(-3, keys[i], true);
+        controls_.router_.key(-3, keys[i], true);
       }
     }
-    router_.key(-3, code, true, keyModifiers);
-    router_.key(-3, code, false, keyModifiers);
-    router_.release_source(-3);
-    router_.set_captured(true);
-    menu_.key_sent();
-    panel_.dirty = true;
+    controls_.router_.key(-3, code, true, keyModifiers);
+    controls_.router_.key(-3, code, false, keyModifiers);
+    controls_.router_.release_source(-3);
+    controls_.router_.set_captured(true);
+    controls_.menu_.key_sent();
+    controls_.panel_.dirty = true;
   }
 
-  bool StreamControls::confirm_exit_key(SDL_Keycode key) {
+  bool StreamControls::EventHandler::confirm_exit_key(SDL_Keycode key) const {
     if (key == SDLK_RETURN) {
-      return menu_.confirm_disconnect(input::StreamDisconnectAction::disconnect);
+      return controls_.menu_.confirm_disconnect(input::StreamDisconnectAction::disconnect);
     }
     if (key == SDLK_q) {
-      return menu_.confirm_disconnect(input::StreamDisconnectAction::quit_app);
+      return controls_.menu_.confirm_disconnect(input::StreamDisconnectAction::quit_app);
     }
     if (key == SDLK_ESCAPE) {
-      panel_.dirty = true;
-      return menu_.confirm_disconnect(input::StreamDisconnectAction::cancel);
+      controls_.panel_.dirty = true;
+      return controls_.menu_.confirm_disconnect(input::StreamDisconnectAction::cancel);
     }
     return false;
   }
 
-  bool StreamControls::handle_keyboard_shortcut(SDL_Keycode key, bool active) {
+  bool StreamControls::EventHandler::handle_keyboard_shortcut(SDL_Keycode key, bool active) const {
     if (key == SDLK_TAB) {
-      menu_.toggle_keyboard_page();
+      controls_.menu_.toggle_keyboard_page();
       return true;
     }
     if (key == SDLK_LSHIFT || key == SDLK_RSHIFT) {
-      menu_.toggle_shift();
+      controls_.menu_.toggle_shift();
       return true;
     }
     if (key == SDLK_CAPSLOCK) {
-      menu_.caps = !menu_.caps;
+      controls_.menu_.caps = !controls_.menu_.caps;
       return true;
     }
     if (key == SDLK_F2) {
-      keyboardTop_ = !keyboardTop_;
+      controls_.keyboardTop_ = !controls_.keyboardTop_;
       return true;
     }
     if (key == SDLK_BACKSPACE || key == SDLK_SPACE) {
@@ -509,71 +512,71 @@ namespace streaming {
     return false;
   }
 
-  void StreamControls::activate_stream_action(FfmpegStreamBackend &backend, bool active, bool &stats) {
-    switch (menu_.selected) {
+  void StreamControls::EventHandler::activate_stream_action(FfmpegStreamBackend &backend, bool active, bool &stats) const {
+    switch (controls_.menu_.selected) {
       case input::StreamAction::quit:
-        menu_.page = input::StreamMenuPage::quit_confirmation;
+        controls_.menu_.page = input::StreamMenuPage::quit_confirmation;
         break;
       case input::StreamAction::keyboard:
-        menu_.page = input::StreamMenuPage::keyboard;
-        navigation_.controller.reset();
-        navigation_.neutralRequired = true;
+        controls_.menu_.page = input::StreamMenuPage::keyboard;
+        controls_.navigation_.controller.reset();
+        controls_.navigation_.neutralRequired = true;
         break;
       case input::StreamAction::logs:
-        menu_.page = input::StreamMenuPage::logs;
-        navigation_.controller.reset();
-        navigation_.neutralRequired = true;
-        panel_.logs.clear();
+        controls_.menu_.page = input::StreamMenuPage::logs;
+        controls_.navigation_.controller.reset();
+        controls_.navigation_.neutralRequired = true;
+        controls_.panel_.logs.clear();
         for (const auto &entry : logging::snapshot()) {
-          panel_.logs.push_back(logging::format_entry(entry));
+          controls_.panel_.logs.push_back(logging::format_entry(entry));
         }
-        if (panel_.logs.empty()) {
-          panel_.logs = logging::load_log_file().lines;
+        if (controls_.panel_.logs.empty()) {
+          controls_.panel_.logs = logging::load_log_file().lines;
         }
         break;
       case input::StreamAction::mouse:
-        if (mouseDevice_ < 0 && menu_.owner < 0) {
-          panel_.message = "Open the menu with a controller to enable mouse mode.";
+        if (controls_.mouseDevice_ < 0 && controls_.menu_.owner < 0) {
+          controls_.panel_.message = "Open the menu with a controller to enable mouse mode.";
           break;
         }
-        mouseDevice_ = mouseDevice_ < 0 ? menu_.owner : -1;
-        router_.set_mouse_device(mouseDevice_);
-        menu_.close();
+        controls_.mouseDevice_ = controls_.mouseDevice_ < 0 ? controls_.menu_.owner : -1;
+        controls_.router_.set_mouse_device(controls_.mouseDevice_);
+        controls_.menu_.close();
         break;
       case input::StreamAction::statistics:
         stats = !stats;
-        menu_.close();
+        controls_.menu_.close();
         break;
       case input::StreamAction::screenshot:
         {
-          if (backend.request_screenshot(screenshotDirectory_, screenshotSource_)) {
-            screenshotNotification_.begin();
+          if (backend.request_screenshot(controls_.screenshotDirectory_, controls_.screenshotSource_)) {
+            controls_.screenshotNotification_.begin();
           } else if (backend.screenshot_progress() < 0) {
-            screenshotNotification_.finish(false, "Could not start capture. Check the stream log for details.", SDL_GetTicks());
+            controls_.screenshotNotification_.finish(false, "Could not start capture. Check the stream log for details.", SDL_GetTicks());
           }
-          panel_.message = screenshotNotification_.title();
-          logging::info("stream", panel_.message);
-          menu_.close();
+          controls_.panel_.message = controls_.screenshotNotification_.title();
+          logging::info("stream", controls_.panel_.message);
+          controls_.menu_.close();
           break;
         }
       case input::StreamAction::guide:
       case input::StreamAction::share:
         {
-          const int slot = active ? router_.connect(menu_.owner) : -1;
+          const int slot = active ? controls_.router_.connect(controls_.menu_.owner) : -1;
           if (slot < 0) {
-            panel_.message = "A connected controller and active stream are required.";
+            controls_.panel_.message = "A connected controller and active stream are required.";
             break;
           }
           release_pulse();
-          pulseSlot_ = slot;
-          pulseUntil_ = SDL_GetTicks() + 120;
-          pulseButtons_ = menu_.selected == input::StreamAction::guide ? SPECIAL_FLAG : MISC_FLAG;
-          input::StreamPacket packet {input::StreamPacketType::controller, slot, router_.active_mask()};
-          packet.controller = latestHostController_[slot];
-          packet.controller.buttonFlags |= pulseButtons_;
+          controls_.pulseSlot_ = slot;
+          controls_.pulseUntil_ = SDL_GetTicks() + 120;
+          controls_.pulseButtons_ = controls_.menu_.selected == input::StreamAction::guide ? SPECIAL_FLAG : MISC_FLAG;
+          input::StreamPacket packet {input::StreamPacketType::controller, slot, controls_.router_.active_mask()};
+          packet.controller = controls_.latestHostController_[slot];
+          packet.controller.buttonFlags |= controls_.pulseButtons_;
           send_packet(packet);
-          panel_.message = menu_.selected == input::StreamAction::guide ? "Guide sent" : "Share sent (requires host support)";
-          menu_.close();
+          controls_.panel_.message = controls_.menu_.selected == input::StreamAction::guide ? "Guide sent" : "Share sent (requires host support)";
+          controls_.menu_.close();
           break;
         }
       case input::StreamAction::none:
@@ -581,40 +584,40 @@ namespace streaming {
     }
   }
 
-  bool StreamControls::menu_key(SDL_Keycode key, FfmpegStreamBackend &backend, bool active, bool &stats) {
-    if (menu_.page == input::StreamMenuPage::quit_confirmation) {
+  bool StreamControls::EventHandler::menu_key(SDL_Keycode key, FfmpegStreamBackend &backend, bool active, bool &stats) const {
+    if (controls_.menu_.page == input::StreamMenuPage::quit_confirmation) {
       return confirm_exit_key(key);
     }
-    panel_.dirty = true;
+    controls_.panel_.dirty = true;
     if (key == SDLK_ESCAPE) {
-      if (menu_.page == input::StreamMenuPage::radial) {
-        menu_.close();
+      if (controls_.menu_.page == input::StreamMenuPage::radial) {
+        controls_.menu_.close();
       } else {
-        menu_.page = input::StreamMenuPage::radial;
-        menu_.modifiers = 0;
-        menu_.shiftOnce = false;
+        controls_.menu_.page = input::StreamMenuPage::radial;
+        controls_.menu_.modifiers = 0;
+        controls_.menu_.shiftOnce = false;
       }
       return false;
     }
-    if (menu_.page == input::StreamMenuPage::keyboard && handle_keyboard_shortcut(key, active)) {
+    if (controls_.menu_.page == input::StreamMenuPage::keyboard && handle_keyboard_shortcut(key, active)) {
       return false;
     }
     if (key != SDLK_RETURN && key != SDLK_SPACE) {
-      if (key == SDLK_TAB && menu_.page == input::StreamMenuPage::radial) {
-        menu_.selected = menu_.selected == input::StreamAction::none ? input::StreamAction::keyboard : static_cast<input::StreamAction>((static_cast<int>(menu_.selected) + 1) % 8);
+      if (key == SDLK_TAB && controls_.menu_.page == input::StreamMenuPage::radial) {
+        controls_.menu_.selected = controls_.menu_.selected == input::StreamAction::none ? input::StreamAction::keyboard : static_cast<input::StreamAction>((static_cast<int>(controls_.menu_.selected) + 1) % 8);
       } else {
         const auto [dx, dy] = input::navigation_step(menu_navigation_command(key));
-        menu_.navigate(dx, dy);
+        controls_.menu_.navigate(dx, dy);
       }
       return false;
     }
-    if (menu_.page == input::StreamMenuPage::keyboard) {
+    if (controls_.menu_.page == input::StreamMenuPage::keyboard) {
       if (active) {
-        tap_key(menu_.keyboard_key());
+        tap_key(controls_.menu_.keyboard_key());
       }
       return false;
     }
-    if (menu_.page != input::StreamMenuPage::radial) {
+    if (controls_.menu_.page != input::StreamMenuPage::radial) {
       return false;
     }
     activate_stream_action(backend, active, stats);
@@ -641,44 +644,44 @@ namespace streaming {
     }
   }
 
-  void StreamControls::note_gamepad_activity(const SDL_Event &event) {
+  void StreamControls::EventHandler::note_gamepad_activity(const SDL_Event &event) const {
     const bool triggerAxis = event.type == SDL_CONTROLLERAXISMOTION && (event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
     const bool gamepadActivity = event.type == SDL_CONTROLLERBUTTONDOWN || (event.type == SDL_CONTROLLERAXISMOTION && (triggerAxis ? event.caxis.value >= 16000 : std::abs(static_cast<int>(event.caxis.value)) >= input::StreamMenu::WHEEL_DEADZONE));
-    if (visible() && gamepadActivity && menu_.owner < 0) {
-      menu_.owner = event.type == SDL_CONTROLLERBUTTONDOWN ? event.cbutton.which : event.caxis.which;
+    if (controls_.visible() && gamepadActivity && controls_.menu_.owner < 0) {
+      controls_.menu_.owner = event.type == SDL_CONTROLLERBUTTONDOWN ? event.cbutton.which : event.caxis.which;
     }
-    if (visible() && gamepadActivity && navigation_.inputDevice != input::UiInputDevice::gamepad) {
-      navigation_.inputDevice = input::UiInputDevice::gamepad;
-      navigation_.keyboard.reset();
-      panel_.dirty = true;
+    if (controls_.visible() && gamepadActivity && controls_.navigation_.inputDevice != input::UiInputDevice::gamepad) {
+      controls_.navigation_.inputDevice = input::UiInputDevice::gamepad;
+      controls_.navigation_.keyboard.reset();
+      controls_.panel_.dirty = true;
     }
     if (event.type == SDL_CONTROLLERAXISMOTION) {
       keyboard_trigger(event.caxis);
     }
   }
 
-  void StreamControls::keyboard_trigger(const SDL_ControllerAxisEvent &axis) {
-    if (!visible() || menu_.page != input::StreamMenuPage::keyboard || axis.which != menu_.owner) {
+  void StreamControls::EventHandler::keyboard_trigger(const SDL_ControllerAxisEvent &axis) const {
+    if (!controls_.visible() || controls_.menu_.page != input::StreamMenuPage::keyboard || axis.which != controls_.menu_.owner) {
       return;
     }
     const bool pressed = axis.value >= 16000;
     if (axis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) {
-      if (pressed && !navigation_.pageTriggerDown && navigation_.armed) {
-        menu_.toggle_keyboard_page();
-        panel_.dirty = true;
+      if (pressed && !controls_.navigation_.pageTriggerDown && controls_.navigation_.armed) {
+        controls_.menu_.toggle_keyboard_page();
+        controls_.panel_.dirty = true;
       }
-      navigation_.pageTriggerDown = pressed;
+      controls_.navigation_.pageTriggerDown = pressed;
     } else if (axis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
-      if (pressed && !navigation_.dockTriggerDown && navigation_.armed) {
-        keyboardTop_ = !keyboardTop_;
-        panel_.dirty = true;
+      if (pressed && !controls_.navigation_.dockTriggerDown && controls_.navigation_.armed) {
+        controls_.keyboardTop_ = !controls_.keyboardTop_;
+        controls_.panel_.dirty = true;
       }
-      navigation_.dockTriggerDown = pressed;
+      controls_.navigation_.dockTriggerDown = pressed;
     }
   }
 
-  void StreamControls::joystick_button(const SDL_JoyButtonEvent &button) {
-    for (auto &device : devices_) {
+  void StreamControls::EventHandler::joystick_button(const SDL_JoyButtonEvent &button) const {
+    for (auto &device : controls_.devices_) {
       if (device.handle == nullptr || SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(device.handle)) != button.which) {
         continue;
       }
@@ -693,8 +696,8 @@ namespace streaming {
     }
   }
 
-  void StreamControls::route_controller_button(const SDL_ControllerButtonEvent &button, bool active) {
-    for (auto &device : devices_) {
+  void StreamControls::EventHandler::route_controller_button(const SDL_ControllerButtonEvent &button, bool active) const {
+    for (auto &device : controls_.devices_) {
       if (device.handle == nullptr || SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(device.handle)) != button.which) {
         continue;
       }
@@ -710,30 +713,30 @@ namespace streaming {
         device.sample.buttonFlags &= ~flag;
       }
       if (active) {
-        router_.connect(button.which);
-        router_.controller(button.which, device.sample);
+        controls_.router_.connect(button.which);
+        controls_.router_.controller(button.which, device.sample);
       }
     }
   }
 
-  void StreamControls::navigate_owner_controller() {
-    for (const auto &device : devices_) {
-      if (device.handle != nullptr && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(device.handle)) == menu_.owner) {
+  void StreamControls::EventHandler::navigate_owner_controller() const {
+    for (const auto &device : controls_.devices_) {
+      if (device.handle != nullptr && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(device.handle)) == controls_.menu_.owner) {
         navigate_controller(device.sample, SDL_GetTicks());
       }
     }
   }
 
-  bool StreamControls::controller_button(const SDL_ControllerButtonEvent &button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) {
+  bool StreamControls::EventHandler::controller_button(const SDL_ControllerButtonEvent &button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
     route_controller_button(button, active);
-    if (visible() && navigation_.armed && button.state == SDL_RELEASED && button.which == menu_.owner && menu_.page != input::StreamMenuPage::radial) {
+    if (controls_.visible() && controls_.navigation_.armed && button.state == SDL_RELEASED && button.which == controls_.menu_.owner && controls_.menu_.page != input::StreamMenuPage::radial) {
       navigate_owner_controller();
     }
-    if (visible() && navigation_.armed && button.state == SDL_PRESSED) {
-      if (menu_.owner < 0) {
-        menu_.owner = button.which;
+    if (controls_.visible() && controls_.navigation_.armed && button.state == SDL_PRESSED) {
+      if (controls_.menu_.owner < 0) {
+        controls_.menu_.owner = button.which;
       }
-      if (button.which != menu_.owner) {
+      if (button.which != controls_.menu_.owner) {
         return false;
       }
       return activate_controller_button(button.button, backend, active, statisticsEnabled);
@@ -741,71 +744,68 @@ namespace streaming {
     return false;
   }
 
-  bool StreamControls::activate_controller_button(Uint8 button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) {
-    bool stop = false;
+  bool StreamControls::EventHandler::activate_controller_button(Uint8 button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
     switch (button) {
       case SDL_CONTROLLER_BUTTON_A:
-        stop = menu_key(SDLK_RETURN, backend, active, statisticsEnabled) || stop;
-        break;
+        return menu_key(SDLK_RETURN, backend, active, statisticsEnabled);
       case SDL_CONTROLLER_BUTTON_B:
-        stop = menu_key(SDLK_ESCAPE, backend, active, statisticsEnabled) || stop;
-        break;
+        return menu_key(SDLK_ESCAPE, backend, active, statisticsEnabled);
       case SDL_CONTROLLER_BUTTON_DPAD_UP:
       case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
       case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
       case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-        if (menu_.page == input::StreamMenuPage::radial) {
+        if (controls_.menu_.page == input::StreamMenuPage::radial) {
           menu_key(controller_navigation_key(button), backend, active, statisticsEnabled);
         } else {
           navigate_owner_controller();
         }
         break;
       case SDL_CONTROLLER_BUTTON_X:
-        if (menu_.page == input::StreamMenuPage::quit_confirmation) {
-          stop = menu_key(SDLK_q, backend, active, statisticsEnabled) || stop;
-        } else if (active && menu_.page == input::StreamMenuPage::keyboard) {
+        if (controls_.menu_.page == input::StreamMenuPage::quit_confirmation) {
+          return menu_key(SDLK_q, backend, active, statisticsEnabled);
+        } else if (active && controls_.menu_.page == input::StreamMenuPage::keyboard) {
           tap_key(0x08);
         }
         break;
       case SDL_CONTROLLER_BUTTON_Y:
-        if (active && menu_.page == input::StreamMenuPage::keyboard) {
+        if (active && controls_.menu_.page == input::StreamMenuPage::keyboard) {
           tap_key(0x20);
         }
         break;
       case SDL_CONTROLLER_BUTTON_LEFTSTICK:
-        if (menu_.page == input::StreamMenuPage::keyboard) {
-          menu_.caps = !menu_.caps;
-          panel_.dirty = true;
+        if (controls_.menu_.page == input::StreamMenuPage::keyboard) {
+          controls_.menu_.caps = !controls_.menu_.caps;
+          controls_.panel_.dirty = true;
         }
         break;
       case SDL_CONTROLLER_BUTTON_RIGHTSTICK:
-        if (menu_.page == input::StreamMenuPage::keyboard) {
-          menu_.toggle_shift();
-          panel_.dirty = true;
+        if (controls_.menu_.page == input::StreamMenuPage::keyboard) {
+          controls_.menu_.toggle_shift();
+          controls_.panel_.dirty = true;
         }
         break;
       case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
       case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
-        if (active && menu_.page == input::StreamMenuPage::keyboard) {
+        if (active && controls_.menu_.page == input::StreamMenuPage::keyboard) {
           tap_key(button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER ? 0x125 : 0x127);
         }
         break;
       case SDL_CONTROLLER_BUTTON_START:
-        if (active && menu_.page == input::StreamMenuPage::keyboard) {
+        if (active && controls_.menu_.page == input::StreamMenuPage::keyboard) {
           tap_key(0x0D);
         }
         break;
       default:
         break;
     }
-    return stop;
+    return false;
   }
 
-  void StreamControls::controller_axis(const SDL_ControllerAxisEvent &axis) {
-    if (!visible() || !navigation_.armed || axis.which != menu_.owner) {
+  void StreamControls::EventHandler::controller_axis(const SDL_ControllerAxisEvent &axis) const {
+    if (!controls_.visible() || !controls_.navigation_.armed || axis.which != controls_.menu_.owner) {
       return;
     }
-    for (auto &device : devices_) {
+    for (auto &device : controls_.devices_) {
       if (device.handle == nullptr || SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(device.handle)) != axis.which) {
         continue;
       }
@@ -828,8 +828,8 @@ namespace streaming {
           break;
       }
       if (axis.axis <= SDL_CONTROLLER_AXIS_RIGHTY) {
-        if (menu_.page == input::StreamMenuPage::radial) {
-          panel_.dirty = menu_.sample_sticks(sample.leftStickX, sample.leftStickY, sample.rightStickX, sample.rightStickY) || panel_.dirty;
+        if (controls_.menu_.page == input::StreamMenuPage::radial) {
+          controls_.panel_.dirty = controls_.menu_.sample_sticks(sample.leftStickX, sample.leftStickY, sample.rightStickX, sample.rightStickY) || controls_.panel_.dirty;
         } else {
           navigate_controller(sample, SDL_GetTicks());
         }
@@ -846,35 +846,34 @@ namespace streaming {
     return ((flags & KMOD_SHIFT) != 0 ? MODIFIER_SHIFT : 0) | ((flags & KMOD_CTRL) != 0 ? MODIFIER_CTRL : 0) | ((flags & KMOD_ALT) != 0 ? MODIFIER_ALT : 0) | ((flags & KMOD_GUI) != 0 ? MODIFIER_META : 0);
   }
 
-  bool StreamControls::keyboard_event(const SDL_KeyboardEvent &key, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) {
+  bool StreamControls::EventHandler::keyboard_event(const SDL_KeyboardEvent &key, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
     bool stop = false;
     const bool down = key.type == SDL_KEYDOWN;
-    const bool shortcut = key.keysym.scancode == SDL_SCANCODE_Q && (key.keysym.mod & KMOD_CTRL) != 0 && (key.keysym.mod & KMOD_ALT) != 0 && (key.keysym.mod & KMOD_SHIFT) != 0;
-    if (down && key.repeat == 0 && shortcut) {
+    if (const bool shortcut = key.keysym.scancode == SDL_SCANCODE_Q && (key.keysym.mod & KMOD_CTRL) != 0 && (key.keysym.mod & KMOD_ALT) != 0 && (key.keysym.mod & KMOD_SHIFT) != 0; down && key.repeat == 0 && shortcut) {
       open_menu(-1);
-      navigation_.armed = true;
+      controls_.navigation_.armed = true;
       return false;
     }
-    if (visible()) {
+    if (controls_.visible()) {
       if (!down) {
-        navigation_.keyboard.release(key.keysym.scancode);
+        controls_.navigation_.keyboard.release(key.keysym.scancode);
       }
       if (!down || key.repeat != 0) {
         return false;
       }
       {
-        if (navigation_.inputDevice != input::UiInputDevice::keyboard) {
-          navigation_.inputDevice = input::UiInputDevice::keyboard;
-          panel_.dirty = true;
+        if (controls_.navigation_.inputDevice != input::UiInputDevice::keyboard) {
+          controls_.navigation_.inputDevice = input::UiInputDevice::keyboard;
+          controls_.panel_.dirty = true;
         }
         const auto command = menu_navigation_command(key.keysym.sym);
         if (command != input::UiCommand::none) {
-          if (navigation_.keyboard.press(key.keysym.scancode, command, SDL_GetTicks()) != input::UiCommand::none) {
+          if (controls_.navigation_.keyboard.press(key.keysym.scancode, command, SDL_GetTicks()) != input::UiCommand::none) {
             menu_key(key.keysym.sym, backend, active, statisticsEnabled);
           }
         } else {
           if (key.keysym.sym == SDLK_RETURN || key.keysym.sym == SDLK_SPACE || key.keysym.sym == SDLK_ESCAPE) {
-            navigation_.keyboard.reset();
+            controls_.navigation_.keyboard.reset();
           }
           stop = menu_key(key.keysym.sym, backend, active, statisticsEnabled) || stop;
         }
@@ -883,7 +882,7 @@ namespace streaming {
     }
     if (active && key.repeat == 0) {
       const int mods = host_keyboard_modifiers(key.keysym.mod);
-      router_.key(0, input::keyboard_virtual_key(key.keysym.scancode), down, mods);
+      controls_.router_.key(0, input::keyboard_virtual_key(key.keysym.scancode), down, mods);
     }
     return stop;
   }
@@ -910,14 +909,14 @@ namespace streaming {
     }
   }
 
-  bool StreamControls::handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) {
+  bool StreamControls::EventHandler::handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
     note_gamepad_activity(event);
     switch (event.type) {
       case SDL_CONTROLLERDEVICEADDED:
-        open_if_needed(event.cdevice.which);
+        controls_.open_if_needed(event.cdevice.which);
         break;
       case SDL_CONTROLLERDEVICEREMOVED:
-        close_if_removed(event.cdevice.which);
+        controls_.close_if_removed(event.cdevice.which);
         break;
       case SDL_JOYBUTTONDOWN:
       case SDL_JOYBUTTONUP:
@@ -934,29 +933,29 @@ namespace streaming {
         return keyboard_event(event.key, backend, active, statisticsEnabled);
       case SDL_MOUSEMOTION:
         if (active) {
-          router_.mouse_move(event.motion.xrel, event.motion.yrel);
+          controls_.router_.mouse_move(event.motion.xrel, event.motion.yrel);
         }
         break;
       case SDL_MOUSEBUTTONDOWN:
       case SDL_MOUSEBUTTONUP:
         if (active) {
-          router_.mouse_button(1, host_mouse_button(event.button.button), event.type == SDL_MOUSEBUTTONDOWN);
+          controls_.router_.mouse_button(1, host_mouse_button(event.button.button), event.type == SDL_MOUSEBUTTONDOWN);
         }
         break;
       case SDL_MOUSEWHEEL:
         if (active) {
           const int direction = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1;
-          router_.scroll(event.wheel.x * direction, event.wheel.y * direction);
+          controls_.router_.scroll(event.wheel.x * direction, event.wheel.y * direction);
         }
         break;
       case SDL_WINDOWEVENT:
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-          focused_ = false;
-          navigation_.keyboard.reset();
-          router_.set_captured(true);
+          controls_.focused_ = false;
+          controls_.navigation_.keyboard.reset();
+          controls_.router_.set_captured(true);
         } else if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
-          focused_ = true;
-          router_.set_captured(visible());
+          controls_.focused_ = true;
+          controls_.router_.set_captured(controls_.visible());
         }
         break;
       case SDL_QUIT:
@@ -985,7 +984,7 @@ namespace streaming {
     }
   }
 
-  void StreamControls::update_device(Device &device, bool active, Uint32 now) {
+  void StreamControls::EventHandler::update_device(Device &device, bool active, Uint32 now) const {
     if (device.handle == nullptr) {
       return;
     }
@@ -998,26 +997,26 @@ namespace streaming {
     device.chordDown = down;
     if (active) {
       if (present) {
-        router_.connect(instance);
-        router_.controller(instance, device.sample);
+        controls_.router_.connect(instance);
+        controls_.router_.controller(instance, device.sample);
       } else {
-        router_.disconnect(instance);
+        controls_.router_.disconnect(instance);
       }
     }
-    if (!visible() || instance != menu_.owner || navigation_.inputDevice != input::UiInputDevice::gamepad) {
+    if (!controls_.visible() || instance != controls_.menu_.owner || controls_.navigation_.inputDevice != input::UiInputDevice::gamepad) {
       return;
     }
     const auto &sample = device.sample;
     if (sample.buttonFlags == 0 && sample.leftTrigger == 0 && sample.rightTrigger == 0) {
-      navigation_.armed = true;
+      controls_.navigation_.armed = true;
     }
-    if (!navigation_.armed) {
+    if (!controls_.navigation_.armed) {
       return;
     }
-    if (menu_.page == input::StreamMenuPage::radial) {
+    if (controls_.menu_.page == input::StreamMenuPage::radial) {
       // Poll on every pump as well as consuming events: Xbox input can change
       // between queued axis events, and a selected item must not freeze polling.
-      panel_.dirty = menu_.sample_sticks(sample.leftStickX, sample.leftStickY, sample.rightStickX, sample.rightStickY) || panel_.dirty;
+      controls_.panel_.dirty = controls_.menu_.sample_sticks(sample.leftStickX, sample.leftStickY, sample.rightStickX, sample.rightStickY) || controls_.panel_.dirty;
     } else {
       navigate_controller(sample, now);
     }
@@ -1074,7 +1073,7 @@ namespace streaming {
     SDL_Event event;  // SDL_PeepEvents fills the event before each use.
     const Uint32 eventStart = SDL_GetTicks();
     for (int count = 0; count < 128 && (count == 0 || SDL_GetTicks() - eventStart < 4) && SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT) > 0; ++count) {
-      stop = handle_event(event, backend, active, statisticsEnabled) || stop;
+      stop = events_.handle_event(event, backend, active, statisticsEnabled) || stop;
     }
     if (stop) {
       router_.set_captured(true);
@@ -1087,14 +1086,14 @@ namespace streaming {
     if (visible() && navigation_.inputDevice == input::UiInputDevice::keyboard) {
       const auto repeatedKey = menu_navigation_key(navigation_.keyboard.poll(now));
       if (repeatedKey != SDLK_UNKNOWN) {
-        menu_key(repeatedKey, backend, active, statisticsEnabled);
+        events_.menu_key(repeatedKey, backend, active, statisticsEnabled);
       }
     }
     for (auto &device : devices_) {
-      update_device(device, active, now);
+      events_.update_device(device, active, now);
     }
     if (pulseSlot_ >= 0 && (static_cast<Sint32>(now - pulseUntil_) >= 0 || (router_.active_mask() & (1U << pulseSlot_)) == 0)) {
-      release_pulse();
+      events_.release_pulse();
     }
     refresh_overlay(backend, font, width, height, wasVisible, screenshotChanged, statisticsEnabled);
     if (active) {
@@ -1106,7 +1105,7 @@ namespace streaming {
 
   void StreamControls::release_host_input() {
     router_.release_all();
-    release_pulse();
+    events_.release_pulse();
   }
 
   void StreamControls::render_screenshot_notification(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height) {

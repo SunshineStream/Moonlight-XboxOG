@@ -160,12 +160,6 @@ namespace streaming {
      * @param style Text alignment, background and color.
      */
     void label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, const StreamLabelStyle &style = {});
-    /**
-     * @brief Apply sampled or queued digital/stick navigation with shared repeat timing.
-     * @param sample Controller state, with positive stick Y upward.
-     * @param now Current SDL tick.
-     */
-    void navigate_controller(const input::ControllerState &sample, Uint32 now);
 
     /**
      * @brief Independent controller state and shortcut latch.
@@ -178,83 +172,10 @@ namespace streaming {
     };
 
     /**
-     * @brief Track deliberate gamepad activity and keyboard trigger shortcuts.
-     * @param event Queued SDL event.
-     */
-    void note_gamepad_activity(const SDL_Event &event);
-    /**
-     * @brief Apply trigger edges while the keyboard owns this controller.
-     * @param axis Queued controller axis transition.
-     */
-    void keyboard_trigger(const SDL_ControllerAxisEvent &axis);
-    /**
-     * @brief Recognize the original Xbox raw-button shortcut.
-     * @param button Queued joystick button transition.
-     */
-    void joystick_button(const SDL_JoyButtonEvent &button);
-    /**
-     * @brief Route controller transitions before local menu activation.
-     * @param button Queued controller button transition.
-     * @param active Transport readiness.
-     */
-    void route_controller_button(const SDL_ControllerButtonEvent &button, bool active);
-    /**
-     * @brief Navigate from the current sample of the controller owning the local menu.
-     */
-    void navigate_owner_controller();
-    /**
-     * @brief Handle controller release gates and local button activation.
-     * @param button Queued controller button transition.
-     * @param backend Streaming backend.
-     * @param active Transport readiness.
-     * @param statisticsEnabled Session statistics setting.
-     * @return True on a confirmed stream exit.
-     */
-    bool controller_button(const SDL_ControllerButtonEvent &button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled);
-    /**
-     * @brief Apply one local controller button action.
-     * @param button SDL controller button.
-     * @param backend Streaming backend.
-     * @param active Transport readiness.
-     * @param statisticsEnabled Session statistics setting.
-     * @return True on a confirmed stream exit.
-     */
-    bool activate_controller_button(Uint8 button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled);
-    /**
-     * @brief Apply queued stick movement before the next sampled state.
-     * @param axis Queued controller axis transition.
-     */
-    void controller_axis(const SDL_ControllerAxisEvent &axis);
-    /**
-     * @brief Route physical keyboard input to local controls or the host.
-     * @param key Queued keyboard transition.
-     * @param backend Streaming backend.
-     * @param active Transport readiness.
-     * @param statisticsEnabled Session statistics setting.
-     * @return True on a confirmed stream exit.
-     */
-    bool keyboard_event(const SDL_KeyboardEvent &key, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled);
-    /**
-     * @brief Dispatch a single SDL event without delaying the bounded input batch.
-     * @param event Queued SDL event.
-     * @param backend Streaming backend.
-     * @param active Transport readiness.
-     * @param statisticsEnabled Session statistics setting.
-     * @return True on a confirmed stream exit or window close.
-     */
-    bool handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled);
-    /**
      * @brief Refresh live log entries while preserving a scrolled reading position.
      * @param now Monotonic millisecond tick.
      */
     void refresh_logs(Uint32 now);
-    /**
-     * @brief Route and navigate one sampled controller.
-     * @param device Owned controller slot.
-     * @param active Transport readiness.
-     * @param now Monotonic millisecond tick.
-     */
-    void update_device(Device &device, bool active, Uint32 now);
     /**
      * @brief Publish local controls or capture feedback through the shared overlay.
      * @param backend Streaming backend.
@@ -266,11 +187,6 @@ namespace streaming {
      * @param stats Session statistics setting.
      */
     void refresh_overlay(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool wasVisible, bool screenshotChanged, bool stats);
-    /**
-     * @brief Open the wheels from gameplay or any local page and release host inputs.
-     * @param device Controller instance ID, or -1 for keyboard control.
-     */
-    void open_menu(int device);
     /**
      * @brief Draw cached colored controls with an opaque OSK and a translucent wheel backdrop.
      * @param backend Video backend.
@@ -389,44 +305,145 @@ namespace streaming {
      * @param compact Use smaller glyphs inside keyboard keys, preserving footer sizing.
      */
     void render_hint(SDL_Renderer *renderer, TTF_Font *font, const char *asset, const char *key, const char *text, SDL_Rect bounds, bool compact = false);
+
     /**
-     * @brief Apply direct cancel, disconnect or quit-app input on the exit confirmation page.
-     * @param key SDL key code.
-     * @return True for a confirmed stream exit.
+     * @brief Process ordered input events using state owned by the enclosing stream session.
      */
-    bool confirm_exit_key(SDL_Keycode key);
-    /**
-     * @brief Apply a layout, modifier, docking or editing shortcut on the keyboard page.
-     * @param key SDL key code.
-     * @param active Transport readiness for host key taps.
-     * @return True when the keyboard consumes this shortcut.
-     */
-    bool handle_keyboard_shortcut(SDL_Keycode key, bool active);
-    /**
-     * @brief Execute the selected wheel action or open its local page.
-     * @param backend Overlay and screenshot backend.
-     * @param active Transport readiness.
-     * @param stats Mutable session statistics setting.
-     */
-    void activate_stream_action(FfmpegStreamBackend &backend, bool active, bool &stats);
-    /**
-     * @brief Process a local navigation or activation key.
-     * @param key SDL key code.
-     * @param backend Video backend for screenshots.
-     * @param active Transport readiness.
-     * @param stats Mutable statistics toggle.
-     * @return True on confirmed quit.
-     */
-    bool menu_key(SDL_Keycode key, FfmpegStreamBackend &backend, bool active, bool &stats);
-    /**
-     * @brief Tap a host key with the on-screen keyboard's modifier toggles.
-     * @param code Virtual key code.
-     */
-    void tap_key(int code);
-    /**
-     * @brief End a Guide/Share pulse while restoring the latest gameplay state.
-     */
-    void release_pulse();
+    class EventHandler {
+    public:
+      /**
+       * @brief Bind input processing to its owning session without copying SDL references.
+       * @param controls Session whose lifetime contains this handler.
+       */
+      explicit EventHandler(StreamControls &controls) noexcept;
+      /**
+       * @brief Apply sampled or queued digital/stick navigation with shared repeat timing.
+       * @param sample Controller state, with positive stick Y upward.
+       * @param now Current SDL tick.
+       */
+      void navigate_controller(const input::ControllerState &sample, Uint32 now) const;
+      /**
+       * @brief Track deliberate gamepad activity and keyboard trigger shortcuts.
+       * @param event Queued SDL event.
+       */
+      void note_gamepad_activity(const SDL_Event &event) const;
+      /**
+       * @brief Apply trigger edges while the keyboard owns this controller.
+       * @param axis Queued controller axis transition.
+       */
+      void keyboard_trigger(const SDL_ControllerAxisEvent &axis) const;
+      /**
+       * @brief Recognize the original Xbox raw-button shortcut.
+       * @param button Queued joystick button transition.
+       */
+      void joystick_button(const SDL_JoyButtonEvent &button) const;
+      /**
+       * @brief Route controller transitions before local menu activation.
+       * @param button Queued controller button transition.
+       * @param active Transport readiness.
+       */
+      void route_controller_button(const SDL_ControllerButtonEvent &button, bool active) const;
+      /**
+       * @brief Navigate from the current sample of the controller owning the local menu.
+       */
+      void navigate_owner_controller() const;
+      /**
+       * @brief Handle controller release gates and local button activation.
+       * @param button Queued controller button transition.
+       * @param backend Streaming backend.
+       * @param active Transport readiness.
+       * @param statisticsEnabled Session statistics setting.
+       * @return True on a confirmed stream exit.
+       */
+      bool controller_button(const SDL_ControllerButtonEvent &button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const;
+      /**
+       * @brief Apply one local controller button action.
+       * @param button SDL controller button.
+       * @param backend Streaming backend.
+       * @param active Transport readiness.
+       * @param statisticsEnabled Session statistics setting.
+       * @return True on a confirmed stream exit.
+       */
+      bool activate_controller_button(Uint8 button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const;
+      /**
+       * @brief Apply queued stick movement before the next sampled state.
+       * @param axis Queued controller axis transition.
+       */
+      void controller_axis(const SDL_ControllerAxisEvent &axis) const;
+      /**
+       * @brief Route physical keyboard input to local controls or the host.
+       * @param key Queued keyboard transition.
+       * @param backend Streaming backend.
+       * @param active Transport readiness.
+       * @param statisticsEnabled Session statistics setting.
+       * @return True on a confirmed stream exit.
+       */
+      bool keyboard_event(const SDL_KeyboardEvent &key, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const;
+      /**
+       * @brief Dispatch a single SDL event without delaying the bounded input batch.
+       * @param event Queued SDL event.
+       * @param backend Streaming backend.
+       * @param active Transport readiness.
+       * @param statisticsEnabled Session statistics setting.
+       * @return True on a confirmed stream exit or window close.
+       */
+      bool handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const;
+      /**
+       * @brief Route and navigate one sampled controller.
+       * @param device Owned controller slot.
+       * @param active Transport readiness.
+       * @param now Monotonic millisecond tick.
+       */
+      void update_device(Device &device, bool active, Uint32 now) const;
+      /**
+       * @brief Open the wheels from gameplay or any local page and release host inputs.
+       * @param device Controller instance ID, or -1 for keyboard control.
+       */
+      void open_menu(int device) const;
+      /**
+       * @brief Apply direct cancel, disconnect or quit-app input on the exit confirmation page.
+       * @param key SDL key code.
+       * @return True for a confirmed stream exit.
+       */
+      bool confirm_exit_key(SDL_Keycode key) const;
+      /**
+       * @brief Apply a layout, modifier, docking or editing shortcut on the keyboard page.
+       * @param key SDL key code.
+       * @param active Transport readiness for host key taps.
+       * @return True when the keyboard consumes this shortcut.
+       */
+      bool handle_keyboard_shortcut(SDL_Keycode key, bool active) const;
+      /**
+       * @brief Execute the selected wheel action or open its local page.
+       * @param backend Overlay and screenshot backend.
+       * @param active Transport readiness.
+       * @param stats Mutable session statistics setting.
+       */
+      void activate_stream_action(FfmpegStreamBackend &backend, bool active, bool &stats) const;
+      /**
+       * @brief Process a local navigation or activation key.
+       * @param key SDL key code.
+       * @param backend Video backend for screenshots.
+       * @param active Transport readiness.
+       * @param stats Mutable statistics toggle.
+       * @return True on confirmed quit.
+       */
+      bool menu_key(SDL_Keycode key, FfmpegStreamBackend &backend, bool active, bool &stats) const;
+      /**
+       * @brief Tap a host key with the on-screen keyboard's modifier toggles.
+       * @param code Virtual key code.
+       */
+      void tap_key(int code) const;
+      /**
+       * @brief End a Guide/Share pulse while restoring the latest gameplay state.
+       */
+      void release_pulse() const;
+
+    private:
+      StreamControls &controls_;  ///< Session state updated by this handler's input operations.
+    };
+
+    EventHandler events_ {*this};  ///< Input processing bound to this session's stable lifetime.
     std::array<Device, 4> devices_ {};  ///< Stable local controller slots.
     input::StreamInput router_;  ///< Ordered event-thread host input.
     input::StreamMenu menu_;  ///< Local menu state.
