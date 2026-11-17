@@ -2,16 +2,18 @@
  * @file tests/unit/app/settings_storage_test.cpp
  * @brief Verifies application settings persistence.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/app/settings_storage.h"
 
 // standard includes
 #include <cstdio>
 #include <string>
 #include <string_view>
 
-// local includes
-#include "src/app/settings_storage.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
+
+// test includes
 #include "tests/support/filesystem_test_utils.h"
 
 namespace {

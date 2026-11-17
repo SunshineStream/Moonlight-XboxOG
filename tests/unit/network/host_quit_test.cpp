@@ -2,15 +2,15 @@
  * @file tests/unit/network/host_quit_test.cpp
  * @brief Verifies authenticated cancellation, stale-target protection and host quit verification.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/network/host_pairing.h"
 
 // standard includes
 #include <atomic>
 #include <string>
 
-// local includes
-#include "src/network/host_pairing.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 namespace {
   /**

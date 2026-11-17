@@ -2,8 +2,8 @@
  * @file tests/unit/streaming/video_overlay_test.cpp
  * @brief Verifies equivalent GPU/software panel pixels and destination bounds.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/streaming/video_overlay.h"
 
 // standard includes
 #include <algorithm>
@@ -13,8 +13,8 @@
 #include <utility>
 #include <vector>
 
-// local includes
-#include "src/streaming/video_overlay.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Full-screen dialog repaints reuse their color allocation while screenshots own additional buffers.

@@ -2,14 +2,16 @@
  * @file tests/unit/app/menu_actions_test.cpp
  * @brief Verifies retained action menus, confirmed capture deletion and host-app termination.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/app/client_state.h"
 
 // standard includes
 #include <string>
 
+// lib includes
+#include <lizardbyte/common/testing.h>
+
 // local includes
-#include "src/app/client_state.h"
 #include "src/ui/shell_view.h"
 
 namespace {

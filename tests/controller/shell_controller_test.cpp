@@ -2,16 +2,16 @@
  * @file tests/controller/shell_controller_test.cpp
  * @brief Verifies recovery from removed virtual gamepads and preservation of live menu-controller references.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/input/shell_controller.h"
 
 // standard includes
 #include <algorithm>
 #include <array>
 #include <vector>
 
-// local includes
-#include "src/input/shell_controller.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Stable controller handle whose device can disappear from enumeration while its reference remains open.

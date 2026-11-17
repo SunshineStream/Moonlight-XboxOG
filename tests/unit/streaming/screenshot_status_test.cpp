@@ -2,15 +2,15 @@
  * @file tests/unit/streaming/screenshot_status_test.cpp
  * @brief Verifies persistent save progress and timed screenshot completion feedback.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/streaming/screenshot_status.h"
 
 // standard includes
 #include <cstdint>
 #include <limits>
 
-// local includes
-#include "src/streaming/screenshot_status.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Saving never times out, never reports premature completion, and avoids redraws for every disk row.

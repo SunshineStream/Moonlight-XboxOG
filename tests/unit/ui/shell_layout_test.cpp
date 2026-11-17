@@ -2,16 +2,16 @@
  * @file tests/unit/ui/shell_layout_test.cpp
  * @brief Verifies TV-safe layout and focus visibility across Xbox display modes.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/ui/shell_layout.h"
 
 // standard includes
 #include <cstdlib>
 #include <limits>
 #include <utility>
 
-// local includes
-#include "src/ui/shell_layout.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 namespace {
 

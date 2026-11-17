@@ -2,16 +2,16 @@
  * @file tests/unit/input/ui_input_test.cpp
  * @brief Verifies keyboard navigation holds, input-source arbitration and repeat-safe commands.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/input/ui_input.h"
 
 // standard includes
 #include <cstdint>
 #include <limits>
 #include <utility>
 
-// local includes
-#include "src/input/ui_input.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Keyboard navigation uses the same initial delay and interval as controller navigation.

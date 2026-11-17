@@ -2,11 +2,11 @@
  * @file tests/unit/input/navigation_input_test.cpp
  * @brief Verifies controller navigation input handling.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
-
-// local includes
+// test header include
 #include "src/input/navigation_input.h"
+
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 namespace {
 

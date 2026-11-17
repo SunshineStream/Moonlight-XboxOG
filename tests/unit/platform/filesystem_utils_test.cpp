@@ -2,10 +2,8 @@
  * @file tests/unit/platform/filesystem_utils_test.cpp
  * @brief Verifies filesystem utility helpers.
  */
-// test includes
-#include "tests/support/filesystem_test_utils.h"
-
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/platform/filesystem_utils.h"
 
 // standard includes
 #include <cstdint>
@@ -14,8 +12,11 @@
 #include <iterator>
 #include <string>
 
-// local includes
-#include "src/platform/filesystem_utils.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
+
+// test includes
+#include "tests/support/filesystem_test_utils.h"
 
 namespace {
 

@@ -2,14 +2,16 @@
  * @file tests/unit/app/directory_picker_test.cpp
  * @brief Verifies staged screenshot destination selection and the local folder-name keyboard.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/app/client_state.h"
 
 // standard includes
 #include <string>
 
+// lib includes
+#include <lizardbyte/common/testing.h>
+
 // local includes
-#include "src/app/client_state.h"
 #include "src/startup/storage_paths.h"
 #include "src/ui/shell_view.h"
 

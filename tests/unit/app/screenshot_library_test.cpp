@@ -2,21 +2,24 @@
  * @file tests/unit/app/screenshot_library_test.cpp
  * @brief Verifies capture provenance, journal recovery, unique filenames and app-scoped navigation.
  */
-// test includes
-#include "tests/support/filesystem_test_utils.h"
-
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/app/screenshot_library.h"
 
 // standard includes
 #include <filesystem>
 #include <fstream>
 #include <limits>
 
+// lib includes
+#include <lizardbyte/common/testing.h>
+
 // local includes
 #include "src/app/client_state.h"
-#include "src/app/screenshot_library.h"
 #include "src/startup/storage_paths.h"
 #include "src/ui/shell_view.h"
+
+// test includes
+#include "tests/support/filesystem_test_utils.h"
 
 namespace {
   /**

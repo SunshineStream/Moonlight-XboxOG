@@ -2,10 +2,8 @@
  * @file tests/unit/app/client_state_test.cpp
  * @brief Verifies client state models and transitions.
  */
-// test includes
-#include "tests/support/network_test_constants.h"
-
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/app/client_state.h"
 
 // standard includes
 #include <array>
@@ -13,8 +11,11 @@
 #include <limits>
 #include <string>
 
-// local includes
-#include "src/app/client_state.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
+
+// test includes
+#include "tests/support/network_test_constants.h"
 
 namespace {
 

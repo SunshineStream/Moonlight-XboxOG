@@ -2,16 +2,16 @@
  * @file tests/unit/ui/screenshot_image_test.cpp
  * @brief Verifies bounded capture decoding and aspect-preserving image placement.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/ui/screenshot_image.h"
 
 // standard includes
 #include <cstdint>
 #include <limits>
 #include <string>
 
-// local includes
-#include "src/ui/screenshot_image.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 namespace {
   /**

@@ -2,15 +2,15 @@
  * @file tests/unit/ui/input_hints_test.cpp
  * @brief Verifies keyboard keycaps throughout the UI and restoration of controller glyphs.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/ui/shell_view.h"
 
 // standard includes
 #include <array>
 #include <string>
 
-// local includes
-#include "src/ui/shell_view.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Main-page helpers follow keyboard input and restore the original glyphs after gamepad input.

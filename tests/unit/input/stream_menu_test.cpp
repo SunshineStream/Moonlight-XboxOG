@@ -2,8 +2,8 @@
  * @file tests/unit/input/stream_menu_test.cpp
  * @brief Verifies dual-stick sectors, dead zones, keyboard modifiers and log navigation.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/input/stream_menu.h"
 
 // standard includes
 #include <array>
@@ -12,8 +12,7 @@
 // lib includes
 #include "third-party/moonlight-common-c/src/Limelight.h"
 
-// local includes
-#include "src/input/stream_menu.h"
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Both sticks select all eight actions and never select an action in the dead zone.

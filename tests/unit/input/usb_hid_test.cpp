@@ -2,15 +2,15 @@
  * @file tests/unit/input/usb_hid_test.cpp
  * @brief Verifies boot HID rollover, signed motion, truncation and independent device lifetimes.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/input/usb_hid.h"
 
 // standard includes
 #include <array>
 #include <vector>
 
-// local includes
-#include "src/input/usb_hid.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Records decoded HID operations without USB hardware.

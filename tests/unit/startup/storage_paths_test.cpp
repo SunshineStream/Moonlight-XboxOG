@@ -2,11 +2,11 @@
  * @file tests/unit/startup/storage_paths_test.cpp
  * @brief Verifies configured screenshot folders and the default save-data subdirectory.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
-
-// local includes
+// test header include
 #include "src/startup/storage_paths.h"
+
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Default screenshots live together under save data; custom Xbox and host separators are preserved.

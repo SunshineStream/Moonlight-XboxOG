@@ -2,18 +2,19 @@
  * @file tests/unit/ui/shell_view_test.cpp
  * @brief Verifies the shell view renderer and layout helpers.
  */
-// test includes
-#include "tests/support/network_test_constants.h"
-
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/ui/shell_view.h"
 
 // standard includes
 #include <array>
 #include <string>
 #include <vector>
 
-// local includes
-#include "src/ui/shell_view.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
+
+// test includes
+#include "tests/support/network_test_constants.h"
 
 namespace {
 
