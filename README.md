@@ -99,10 +99,12 @@ for readability. Guide and Share use Xbox Series-style symbols.
 | Left  | Keyboard | Mouse mode | View logs  | Quit stream            |
 | Right | Guide    | Share      | Screenshot | Enable / disable stats |
 
-**Quit stream** opens a confirmation dialog: **A / Enter** disconnects and **B / Esc** cancels.
+![Stream controls](./docs/images/screenshots/12-stream-controls.png)
+
+**Exit** opens a confirmation dialog: **A / Enter** disconnects, **X / Q** quits the host app and **B / Esc** cancels.
 The icons sit on their buttons; arrow navigation is not required. The client displays **Stopping stream...**,
 then a stream summary. Release the buttons, then press a button to return to the library.
-The host application keeps running.
+The host application keeps running when you choose Disconnect.
 
 The on-screen keyboard uses an Xbox One-style layout on a solid dark panel: a number row,
 QWERTY keys, a wide space bar, tall side controls, and an outlined focus key. Use **D-pad / left stick**
@@ -123,6 +125,8 @@ When using a physical keyboard, use **Tab** to change page, **Shift** for one-sh
 to toggle Caps, **F2** to move the panel, **Space / Backspace** to send those keys, and **Esc** to return.
 In the numeric address/port keypad, **Space** types the focused key and **Enter** accepts the field;
 **PgUp / PgDn** change the address section.
+
+![On-screen keyboard](./docs/images/screenshots/13-stream-keyboard.png)
 
 Stream logs appear in a live side panel with severity colors and a scrollbar. Scroll upward to read
 older entries; return to the bottom to follow new entries. **Exit** opens a three-button dialog:
@@ -161,6 +165,8 @@ A progress popup remains visible while saving, then shows the saved path for fiv
 remain visible for eight seconds. Neither popup captures controller, mouse or keyboard input.
 Only one capture saves at a time; completion and errors are written to the log. The wheels close
 automatically after screenshot, Guide, Share, statistics and mouse-mode actions.
+
+![Screenshot notification](./docs/images/screenshots/14-screenshot-notification.png)
 
 Mouse mode uses the invoking controller's **left stick** for movement and **A / B** for left / right
 clicks. Stick-driven mouse movement is reported at up to 125 Hz, while button presses and releases
