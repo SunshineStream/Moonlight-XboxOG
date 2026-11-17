@@ -5,9 +5,32 @@ endif()
 
 file(MAKE_DIRECTORY "${LUCIDE_ASSET_DIR}/icons" "${LUCIDE_ASSET_DIR}/licenses")
 foreach(icon IN ITEMS
-        settings circle-question-mark circle-plus monitor gamepad-2 scroll-text rotate-ccw
-        network hash activity key-round save loader-circle circle-check circle-x info
-        keyboard mouse power log-out pause panels-top-left share-2 camera chart-no-axes-combined)
+        settings
+        circle-question-mark
+        circle-plus
+        monitor
+        gamepad-2
+        scroll-text
+        rotate-ccw
+        network
+        hash
+        activity
+        key-round
+        save
+        loader-circle
+        circle-check
+        circle-x
+        info
+        keyboard
+        mouse
+        power
+        log-out
+        pause
+        panels-top-left
+        share-2
+        camera
+        chart-no-axes-combined
+)
     set(_icon_source "${LUCIDE_SOURCE_DIR}/icons/${icon}.svg")
     if(NOT EXISTS "${_icon_source}")
         message(FATAL_ERROR "Required Lucide icon not found: ${_icon_source}")
@@ -40,7 +63,19 @@ configure_file("${LUCIDE_SOURCE_DIR}/LICENSE" "${LUCIDE_ASSET_DIR}/licenses/luci
 
 # Remove obsolete first-party icons from existing build directories, too.
 foreach(legacy_icon IN ITEMS
-        gear support add-host host-monitor-online host-monitor-pairing host-monitor-offline
-        circle-help life-buoy monitor-check monitor-dot monitor-off ethernet-port question-mark)
+        gear
+        support
+        add-host
+        host-monitor-online
+        host-monitor-pairing
+        host-monitor-offline
+        circle-help
+        life-buoy
+        monitor-check
+        monitor-dot
+        monitor-off
+        ethernet-port
+        question-mark
+)
     file(REMOVE "${LUCIDE_ASSET_DIR}/icons/${legacy_icon}.svg")
 endforeach()
