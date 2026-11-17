@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <mutex>
@@ -435,6 +436,7 @@ namespace streaming {
     screenshot_.directory = directory;
     screenshot_.capturedAt = static_cast<std::int64_t>(std::time(nullptr));
     screenshot_.result.clear();
+    screenshot_.progress.store(0, std::memory_order_relaxed);
     screenshot_.complete.store(false, std::memory_order_relaxed);
     screenshot_.thread = SDL_CreateThread(save_screenshot_worker, "save-screenshot", &screenshot_);
     if (screenshot_.thread == nullptr) {
@@ -453,11 +455,57 @@ namespace streaming {
     return std::exchange(screenshot_.result, {});
   }
 
+  int FfmpegStreamBackend::screenshot_progress() const {
+    return screenshot_.thread != nullptr ? screenshot_.progress.load(std::memory_order_relaxed) : -1;
+  }
+
+  /**
+   * @brief Track actual completed BMP writes while retaining SDL's platform file implementation.
+   */
+  struct ScreenshotFileProgress {
+    SDL_RWops *file;  ///< Worker-owned file, closed after SDL finalizes the BMP header.
+    std::atomic<int> &progress;  ///< UI-readable percentage independent of file and surface lifetimes.
+    Sint64 expected;  ///< Final 24-bit BMP length, including scanline padding and header.
+    Sint64 position = 0;  ///< Current file position, including SDL's header fixup seeks.
+    Sint64 written = 0;  ///< Highest written position, preventing header fixups from reducing progress.
+  };
+
+  /**
+   * @brief Delegate a BMP file seek while keeping progress accounting in sync.
+   * @param stream Progress-decorated SDL file.
+   * @param offset Byte offset relative to whence.
+   * @param whence SDL seek origin.
+   * @return New byte position or a negative value on error.
+   */
+  Sint64 screenshot_file_seek(SDL_RWops *stream, Sint64 offset, int whence) {
+    auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
+    writer.position = SDL_RWseek(writer.file, offset, whence);
+    return writer.position;
+  }
+
+  /**
+   * @brief Forward one BMP write and publish progress only for bytes actually written.
+   * @param stream Progress-decorated SDL file.
+   * @param pixels Header or pixel bytes.
+   * @param size Bytes per object.
+   * @param count Requested object count.
+   * @return Number of complete objects written.
+   */
+  std::size_t screenshot_file_write(SDL_RWops *stream, const void *pixels, std::size_t size, std::size_t count) {
+    auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
+    const auto written = SDL_RWwrite(writer.file, pixels, size, count);
+    writer.position += static_cast<Sint64>(written * size);
+    writer.written = std::max(writer.written, writer.position);
+    writer.progress.store(10 + static_cast<int>(85 * std::min(writer.written, writer.expected) / writer.expected), std::memory_order_relaxed);
+    return written;
+  }
+
   int FfmpegStreamBackend::save_screenshot_worker(void *context) {
     auto &job = *static_cast<ScreenshotTask *>(context);
     // Stay below the high-priority streaming event loop without starving behind
     // ongoing USB/audio work on the Xbox's single CPU.
     SDL_SetThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
+    job.progress.store(1, std::memory_order_relaxed);
     std::string error;
     const std::string path = app::next_screenshot_path(job.directory, job.capturedAt, error);
     const auto &frame = job.frame;
@@ -471,11 +519,27 @@ namespace streaming {
       const std::array<int, 4> pitch {frame.yPitch, frame.uPitch, frame.vPitch, 0};
       std::array<std::uint8_t *, 4> output {static_cast<std::uint8_t *>(surface->pixels), nullptr, nullptr, nullptr};
       const std::array<int, 4> outputPitch {surface->pitch, 0, 0, 0};
-      saved = sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height && SDL_SaveBMP(surface, path.c_str()) == 0;
+      if (sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height) {
+        job.progress.store(10, std::memory_order_relaxed);
+        if (SDL_RWops *file = SDL_RWFromFile(path.c_str(), "wb"); file != nullptr) {
+          ScreenshotFileProgress writer {file, job.progress, 54 + static_cast<Sint64>((frame.width * 3 + 3) & ~3) * frame.height};
+          SDL_RWops progressFile {};
+          progressFile.hidden.unknown.data1 = &writer;
+          progressFile.seek = screenshot_file_seek;
+          progressFile.write = screenshot_file_write;
+          const bool encoded = SDL_SaveBMP_RW(surface, &progressFile, 0) == 0;
+          const bool closed = SDL_RWclose(file) == 0;
+          saved = encoded && closed;
+          if (!saved) {
+            std::remove(path.c_str());
+          }
+        }
+      }
       sws_freeContext(conversion);
     }
     SDL_FreeSurface(surface);
     if (saved) {
+      job.progress.store(99, std::memory_order_relaxed);
       job.result = app::append_screenshot({job.source, path, job.capturedAt}, app::screenshot_library_path(), error) ? "Saved " + path : "Saved " + path + "; could not update the screenshot library: " + error;
     } else {
       job.result = "Screenshot failed: " + (error.empty() ? std::string(SDL_GetError()) : error);

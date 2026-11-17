@@ -230,8 +230,8 @@ function(_moonlight_prepare_nxdk_tools nxdk_dir cxbe_path source_dir build_dir o
     )
 endfunction()
 
-# Install USB hooks into the owned SDK copy and fingerprint the resulting sources.
-function(_moonlight_prepare_usb_input_hooks nxdk_dir out_signature)
+# Install SDL adapters into the owned SDK copy and fingerprint the resulting sources.
+function(_moonlight_prepare_sdl_hooks nxdk_dir out_signature)
     # The vendored SDL Xbox event pump is a stub. Install small hooks only in
     # the owned SDK copy; the project adapter implements boot HID and SDL events.
     file(READ "${MOONLIGHT_NXDK_DIR}/lib/sdl/SDL2/src/joystick/xbox/SDL_xboxjoystick.c" joystick_source)
@@ -249,7 +249,15 @@ function(_moonlight_prepare_usb_input_hooks nxdk_dir out_signature)
             events_source "${events_source}")
     file(CONFIGURE OUTPUT "${nxdk_dir}/lib/sdl/SDL2/src/video/xbox/SDL_xbevents.c"  # cmake-lint: disable=E1126
             CONTENT "${events_source}" @ONLY)
-    string(SHA256 signature "${joystick_source}\n${events_source}\nNXDK_USB_ENABLE_HID=y")
+    # An AC97 underrun can stop completion notifications. An unbounded wait
+    # leaves SDL_CloseAudioDevice joining a playback thread that never wakes.
+    file(READ "${MOONLIGHT_NXDK_DIR}/lib/sdl/SDL2/src/audio/xbox/SDL_xboxaudio.c" audio_source)
+    string(REPLACE "SDL_SemWait(_this->hidden->playsem);"
+            "SDL_SemWaitTimeout(_this->hidden->playsem, 100);"
+            audio_source "${audio_source}")
+    file(CONFIGURE OUTPUT "${nxdk_dir}/lib/sdl/SDL2/src/audio/xbox/SDL_xboxaudio.c"  # cmake-lint: disable=E1126
+            CONTENT "${audio_source}" @ONLY)
+    string(SHA256 signature "${joystick_source}\n${events_source}\n${audio_source}\nNXDK_USB_ENABLE_HID=y")
 
     set(${out_signature} "${signature}" PARENT_SCOPE)
 endfunction()
@@ -258,7 +266,7 @@ endfunction()
 function(moonlight_prepare_nxdk nxdk_dir state_dir)
     file(MAKE_DIRECTORY "${state_dir}")
 
-    _moonlight_prepare_usb_input_hooks("${nxdk_dir}" input_signature)
+    _moonlight_prepare_sdl_hooks("${nxdk_dir}" input_signature)
 
     file(READ "${nxdk_dir}/.moonlight-source.signature" nxdk_revision)
     set(signature_inputs

@@ -146,6 +146,12 @@ namespace streaming {
     std::string take_screenshot_result();
 
     /**
+     * @brief Read background capture progress without waiting for conversion or disk I/O.
+     * @return Zero through 99 while a capture is pending, or -1 when there is no worker.
+     */
+    int screenshot_progress() const;
+
+    /**
      * @brief Resolve the video rectangle available to shared GPU/software controls.
      * @param width Output width, replaced with the fitted video width.
      * @param height Output height, replaced with the fitted video height.
@@ -385,6 +391,7 @@ namespace streaming {
     struct ScreenshotTask {
       SDL_Thread *thread = nullptr;  ///< Owned worker, joined after completion or at shutdown.
       std::atomic<bool> complete = false;  ///< Release/acquire publication of the completed result.
+      std::atomic<int> progress = 0;  ///< Conversion, BMP write and index progress; completion is published separately.
       LatestVideoFrame frame;  ///< Independently owned snapshot of the uncomposited YUV frame.
       app::ScreenshotSource source;  ///< Original host and app identity.
       std::string directory;  ///< Destination at request time.

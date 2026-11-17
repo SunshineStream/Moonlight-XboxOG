@@ -309,6 +309,10 @@ namespace streaming {
     return menu_.disconnectAction == input::StreamDisconnectAction::quit_app;
   }
 
+  bool StreamControls::has_overlay() const {
+    return visible() || screenshotNotification_.visible;
+  }
+
   void StreamControls::release_pulse() {
     if (pulseSlot_ >= 0) {
       input::StreamPacket packet {input::StreamPacketType::controller, pulseSlot_, router_.active_mask()};
@@ -564,7 +568,12 @@ namespace streaming {
         break;
       case input::StreamAction::screenshot:
         {
-          message_ = backend.request_screenshot(screenshotDirectory_, screenshotSource_) ? "Saving screenshot in the background" : "Screenshot not queued; another capture may still be saving.";
+          if (backend.request_screenshot(screenshotDirectory_, screenshotSource_)) {
+            screenshotNotification_.begin();
+          } else if (backend.screenshot_progress() < 0) {
+            screenshotNotification_.finish(false, "Could not start capture. Check the stream log for details.", SDL_GetTicks());
+          }
+          message_ = screenshotNotification_.title();
           logging::info("stream", message_);
           menu_.close();
           break;
@@ -596,8 +605,13 @@ namespace streaming {
   }
 
   bool StreamControls::pump(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool active, bool &statisticsEnabled) {
+    bool screenshotChanged = false;
     if (const auto result = backend.take_screenshot_result(); !result.empty()) {
       logging::info("screenshots", result);
+      screenshotNotification_.finish(result.rfind("Saved ", 0) == 0, result, SDL_GetTicks());
+      screenshotChanged = true;
+    } else {
+      screenshotChanged = screenshotNotification_.update(backend.screenshot_progress());
     }
     // Sampling and transport enqueueing share one owner so capture cannot race a stale gameplay packet.
     controllerNavigationApplied_ = false;
@@ -845,6 +859,7 @@ namespace streaming {
     }
     poll();
     const Uint32 now = SDL_GetTicks();
+    screenshotChanged = screenshotNotification_.tick(now) || screenshotChanged;
     if (menu_.page == input::StreamMenuPage::logs && now - logRefreshTick_ >= 1000) {
       logRefreshTick_ = now;
       std::vector<std::string> lines;
@@ -909,11 +924,26 @@ namespace streaming {
     if (!visible() && (wasVisible || dirty_)) {
       keyboardNavigation_.reset();
       router_.set_captured(!focused_);
-      backend.set_statistics_bitmap(0, 0, {});
+      if (!screenshotNotification_.visible) {
+        backend.set_statistics_bitmap(0, 0, {});
+      }
       clear_panel();
       dirty_ = false;
+      screenshotChanged = true;
     }
     backend.local_overlay_size(width, height);
+    if (!visible() && screenshotChanged) {
+      if (screenshotNotification_.visible) {
+        render_screenshot_notification(backend, font, width, height);
+      } else {
+        backend.set_statistics_bitmap(0, 0, {});
+        clear_panel();
+      }
+    }
+    if (visible() && screenshotNotification_.visible && message_ != screenshotNotification_.title()) {
+      message_ = screenshotNotification_.title();
+      dirty_ = true;
+    }
     if (visible() && (width != menuWidth_ || height != menuHeight_)) {
       dirty_ = true;
       menuWidth_ = width;
@@ -932,6 +962,43 @@ namespace streaming {
   void StreamControls::release_host_input() {
     router_.release_all();
     release_pulse();
+  }
+
+  void StreamControls::render_screenshot_notification(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height) {
+    if (font == nullptr || width <= 0 || height <= 0) {
+      return;
+    }
+    const int line = TTF_FontLineSkip(font);
+    const int panelWidth = std::min(width - 16, std::min(600, width * 3 / 4));
+    const int panelHeight = std::min(height - 16, line * 3 + 32);
+    if (panelWidth <= 0 || panelHeight <= 0) {
+      return;
+    }
+    if (!panel_ || panel_->w != panelWidth || panel_->h != panelHeight) {
+      clear_panel();
+      panel_.reset(SDL_CreateRGBSurfaceWithFormat(0, panelWidth, panelHeight, 32, SDL_PIXELFORMAT_ARGB8888));
+      if (panel_) {
+        panelRenderer_.reset(SDL_CreateSoftwareRenderer(panel_.get()));
+      }
+    }
+    if (!panelRenderer_) {
+      return;
+    }
+    auto *renderer = panelRenderer_.get();
+    SDL_SetRenderDrawColor(renderer, 22, 31, 46, 245);
+    SDL_RenderClear(renderer);
+    label(renderer, font, screenshotNotification_.title(), {12, 8, panelWidth - 24, line}, false, false, true);
+    const auto detail = screenshotNotification_.saving ? "You can keep playing while the image is saved." : screenshotNotification_.detail;
+    label(renderer, font, detail, {12, line + 12, panelWidth - 24, line * 2}, true, false);
+    SDL_Rect bar {12, panelHeight - 12, panelWidth - 24, 4};
+    SDL_SetRenderDrawColor(renderer, 50, 65, 86, 255);
+    SDL_RenderFillRect(renderer, &bar);
+    bar.w = bar.w * screenshotNotification_.percent / 100;
+    SDL_SetRenderDrawColor(renderer, screenshotNotification_.saving || screenshotNotification_.saved ? 130 : 255, screenshotNotification_.saving || screenshotNotification_.saved ? 180 : 110, screenshotNotification_.saving || screenshotNotification_.saved ? 255 : 110, 255);
+    SDL_RenderFillRect(renderer, &bar);
+    SDL_RenderPresent(renderer);
+    auto pixels = extract_overlay_bitmap(static_cast<const std::uint8_t *>(panel_->pixels), static_cast<std::size_t>(panel_->pitch) * panelHeight, panel_->pitch, panelWidth, panelHeight, false);
+    backend.set_color_overlay(panelWidth, panelHeight, std::move(pixels), VideoOverlayPlacement::bottom_center);
   }
 
   bool StreamControls::render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip) {

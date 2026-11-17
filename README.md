@@ -157,6 +157,8 @@ files display an unavailable message. Captures saved before this index was intro
 and are not automatically assigned to an app.
 
 Taking a screenshot snapshots the currently displayed host frame and saves it in the background.
+A progress popup remains visible while saving, then shows the saved path for five seconds. Capture errors
+remain visible for eight seconds. Neither popup captures controller, mouse or keyboard input.
 Only one capture saves at a time; completion and errors are written to the log. The wheels close
 automatically after screenshot, Guide, Share, statistics and mouse-mode actions.
 

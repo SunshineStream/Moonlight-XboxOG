@@ -1033,11 +1033,11 @@ namespace {
     int width = 0;
     int height = 0;
     SDL_GetRendererOutputSize(resources->renderer, &width, &height);
-    const bool wasVisible = resources->controller.visible();
+    const bool wasVisible = resources->controller.has_overlay();
     if (resources->controller.pump(resources->mediaBackend, resources->bodyFont, width, height, connectionState->connectionStarted.load(), resources->statisticsEnabled)) {
       request_stream_stop(connectionState);
     }
-    if (wasVisible && !resources->controller.visible()) {
+    if (wasVisible && !resources->controller.has_overlay()) {
       resources->statisticsSampler = {};
     }
   }
@@ -1097,7 +1097,7 @@ namespace {
    * @return True when the video must be refreshed to display a new panel.
    */
   bool update_stream_statistics_overlay(const StreamStartContext &context, const StreamConnectionState &connectionState, StreamUiResources *resources) {
-    if (resources == nullptr || resources->controller.visible() || !resources->statisticsEnabled || resources->statisticsFont == nullptr || !resources->mediaBackend.has_decoded_video()) {
+    if (resources == nullptr || resources->controller.has_overlay() || !resources->statisticsEnabled || resources->statisticsFont == nullptr || !resources->mediaBackend.has_decoded_video()) {
       return false;
     }
     const auto now = PltGetMicroseconds();
@@ -1242,7 +1242,7 @@ namespace {
 
     render_text_lines(resources->renderer, resources->bodyFont, lines, screenWidth, &cursorY);
 
-    if (resources->controller.visible() && mediaBackend != nullptr) {
+    if (resources->controller.has_overlay() && mediaBackend != nullptr) {
       mediaBackend->render_local_overlay(resources->renderer, screenWidth, screenHeight);
     }
     SDL_RenderPresent(resources->renderer);

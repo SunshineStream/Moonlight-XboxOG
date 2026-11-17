@@ -9,6 +9,7 @@
 #include "src/input/stream_input.h"
 #include "src/input/stream_menu.h"
 #include "src/input/ui_input.h"
+#include "src/streaming/screenshot_status.h"
 #include "src/streaming/video_overlay.h"
 
 #include <array>
@@ -113,6 +114,11 @@ namespace streaming {
      */
     bool visible() const;
     /**
+     * @brief Check whether local controls or a screenshot popup currently own the shared overlay.
+     * @return True while a menu or capture notification is visible.
+     */
+    bool has_overlay() const;
+    /**
      * @brief Release all held host input before transport shutdown.
      */
     void release_host_input();
@@ -174,6 +180,14 @@ namespace streaming {
      * @param stats Current statistics toggle.
      */
     void render_menu(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool stats);
+    /**
+     * @brief Draw a compact screenshot progress or completion popup without capturing host input.
+     * @param backend Shared GPU/software overlay owner.
+     * @param font Notification font.
+     * @param width Available video width.
+     * @param height Available video height.
+     */
+    void render_screenshot_notification(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height);
     /**
      * @brief Draw the keyboard, optionally repainting only the old and new focus cells.
      * @param renderer Software panel renderer.
@@ -247,6 +261,7 @@ namespace streaming {
     bool keyboardDockTriggerDown_ = false;  ///< Edge latch for right-trigger keyboard docking.
     bool keyboardTop_ = false;  ///< Dock the keyboard flush with the top edge.
     std::string screenshotDirectory_;  ///< Configured screenshot folder, empty for the default.
+    ScreenshotNotification screenshotNotification_;  ///< Progress and timed completion feedback independent of menu capture.
     app::ScreenshotSource screenshotSource_;  ///< Stream identity retained with each capture.
     Uint32 logRefreshTick_ = 0;  ///< Last live log refresh.
     std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Surface>> icons_;  ///< Cached SVG rasters survive panel renderer replacement.
