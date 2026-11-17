@@ -38,6 +38,45 @@ namespace {
     }
 
     /**
+     * @brief Answer authenticated cancellation and server-info requests from the scripted host.
+     * @param request Host request under test.
+     * @param response Receives the scripted status and XML body.
+     * @param error Receives simulated transport errors when requested.
+     * @return True for a completed scripted response.
+     */
+    bool handle_http_request(const network::testing::HostPairingHttpTestRequest &request, network::testing::HostPairingHttpTestResponse *response, std::string *error) {
+      if (request.pathAndQuery.rfind("/cancel?", 0) == 0) {
+        ++cancelRequests;
+        EXPECT_TRUE(request.useTls);
+        EXPECT_EQ(request.port, 47990U);
+        EXPECT_EQ(request.tlsClientIdentity, &identity);
+        EXPECT_NE(request.pathAndQuery.find("uniqueid=" + identity.uniqueId), std::string::npos);
+        if (cancelTransportFailure) {
+          if (error != nullptr) {
+            *error = "Cancel request timed out";
+          }
+          return false;
+        }
+        response->statusCode = cancelStatus;
+        response->body = cancelBody;
+        if (!keepRunning && cancelStatus == 200 && cancelBody.find("status_code=\"200\"") != std::string::npos) {
+          running = 0;
+        }
+        return true;
+      }
+      EXPECT_EQ(request.pathAndQuery.rfind("/serverinfo?", 0), 0U);
+      if (serverTransportFailure || (failVerification && cancelRequests != 0)) {
+        if (error != nullptr) {
+          *error = "Serverinfo unavailable";
+        }
+        return false;
+      }
+      response->statusCode = 200;
+      response->body = server_info();
+      return true;
+    }
+
+    /**
      * @brief Install deterministic serverinfo and cancel responses.
      */
     void SetUp() override {
@@ -45,35 +84,7 @@ namespace {
       identity = network::create_pairing_identity();
       ASSERT_TRUE(network::is_valid_pairing_identity(identity));
       network::testing::set_host_pairing_http_test_handler([this](const auto &request, auto *response, std::string *error, const std::atomic<bool> *) {
-        if (request.pathAndQuery.rfind("/cancel?", 0) == 0) {
-          ++cancelRequests;
-          EXPECT_TRUE(request.useTls);
-          EXPECT_EQ(request.port, 47990U);
-          EXPECT_EQ(request.tlsClientIdentity, &identity);
-          EXPECT_NE(request.pathAndQuery.find("uniqueid=" + identity.uniqueId), std::string::npos);
-          if (cancelTransportFailure) {
-            if (error != nullptr) {
-              *error = "Cancel request timed out";
-            }
-            return false;
-          }
-          response->statusCode = cancelStatus;
-          response->body = cancelBody;
-          if (!keepRunning && cancelStatus == 200 && cancelBody.find("status_code=\"200\"") != std::string::npos) {
-            running = 0;
-          }
-          return true;
-        }
-        EXPECT_EQ(request.pathAndQuery.rfind("/serverinfo?", 0), 0U);
-        if (serverTransportFailure || (failVerification && cancelRequests != 0)) {
-          if (error != nullptr) {
-            *error = "Serverinfo unavailable";
-          }
-          return false;
-        }
-        response->statusCode = 200;
-        response->body = server_info();
-        return true;
+        return handle_http_request(request, response, error);
       });
     }
 
@@ -139,7 +150,7 @@ namespace {
     cancelStatus = 403;
     EXPECT_FALSE(network::quit_host_app("192.0.2.1", 47989, identity, 7, &error));
     cancelStatus = 200;
-    cancelBody = "<root status_code=\"503\" status_message=\"Another client owns the app\"/>";
+    cancelBody = R"(<root status_code="503" status_message="Another client owns the app"/>)";
     EXPECT_FALSE(network::quit_host_app("192.0.2.1", 47989, identity, 7, &error));
     EXPECT_NE(error.find("Another client"), std::string::npos);
     cancelBody = "malformed response";

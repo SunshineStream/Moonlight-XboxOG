@@ -16,7 +16,7 @@
  * @brief Records decoded HID operations without USB hardware.
  */
 class BootHidTest: public testing::Test {
-protected:
+public:
   std::vector<input::BootHidEvent> events;  ///< Decoded transitions.
   input::BootHidInput hid {[this](const input::BootHidEvent &event) {
     events.push_back(event);

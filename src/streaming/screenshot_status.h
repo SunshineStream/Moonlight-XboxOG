@@ -76,7 +76,6 @@ namespace streaming {
     int percent = 0;  ///< Displayed progress, with 100 reserved for successful completion.
     std::string detail;  ///< Completed path or an actionable failure description.
 
-  private:
     std::uint32_t completedAt_ = 0;  ///< Tick at which completion was observed by the UI.
   };
 }  // namespace streaming

@@ -7,15 +7,22 @@
 /**
  * @brief SDL's boolean values used by the production recovery adapter.
  */
-enum SDL_bool {
+enum class SDL_bool {
   SDL_FALSE = 0,  ///< No or detached.
   SDL_TRUE = 1,  ///< Yes or attached.
 };
 
+constexpr auto SDL_FALSE = SDL_bool::SDL_FALSE;  ///< SDL-compatible false value.
+constexpr auto SDL_TRUE = SDL_bool::SDL_TRUE;  ///< SDL-compatible true value.
+
 /**
  * @brief Opaque SDL controller handle implemented by the test device registry.
  */
-typedef struct _SDL_GameController SDL_GameController;
+struct _SDL_GameController;
+/**
+ * @brief SDL-compatible public controller handle name.
+ */
+using SDL_GameController = _SDL_GameController;
 
 extern "C" {
   /**
@@ -39,11 +46,11 @@ extern "C" {
    * @brief Release one owned gamepad reference.
    * @param controller Owned handle being closed.
    */
-  void SDL_GameControllerClose(SDL_GameController *controller);
+  void SDL_GameControllerClose(const SDL_GameController *controller);
   /**
    * @brief Check whether an open gamepad still has a connected device.
    * @param controller Open controller reference.
    * @return True while the device is attached.
    */
-  SDL_bool SDL_GameControllerGetAttached(SDL_GameController *controller);
+  SDL_bool SDL_GameControllerGetAttached(const SDL_GameController *controller);
 }

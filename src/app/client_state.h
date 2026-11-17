@@ -371,6 +371,14 @@ namespace app {
   };
 
   /**
+   * @brief Persisted storage and placement preferences for local streaming controls.
+   */
+  struct LocalStreamPreferences {
+    std::string screenshotDirectory;  ///< Screenshot folder; empty selects the title-scoped screenshots directory.
+    bool keyboardDockTop = false;  ///< Dock the stream keyboard to the top instead of the bottom.
+  };
+
+  /**
    * @brief State owned by the settings, log viewer, and saved-file workflows.
    */
   struct SettingsState {
@@ -390,8 +398,7 @@ namespace app {
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
-    std::string screenshotDirectory;  ///< Screenshot folder; empty selects the title-scoped screenshots directory.
-    bool keyboardDockTop = false;  ///< Dock the stream keyboard to the top instead of the bottom.
+    LocalStreamPreferences controls;  ///< Screenshot storage and keyboard placement preferences.
     bool dirty = false;  ///< True when persisted TOML-backed settings changed and should be saved.
     std::vector<startup::SavedFileEntry> savedFiles;  ///< Saved-file catalog shown on the reset settings page.
     bool savedFilesDirty = true;  ///< True when the saved-file catalog should be refreshed.
@@ -751,6 +758,6 @@ namespace app {
    * @param update Receives persistence and modal closure flags.
    * @param path Selected folder; empty restores the title-scoped default.
    */
-  void accept_screenshot_directory(ClientState &state, AppUpdate &update, const std::string &path);
+  void accept_screenshot_directory(ClientState &state, AppUpdate &update, std::string_view path);
 
 }  // namespace app

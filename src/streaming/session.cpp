@@ -1513,7 +1513,7 @@ namespace streaming {
       logging::error("stream", initializationError);
       return false;
     }
-    resources.controller.configure(settings.screenshotDirectory, settings.keyboardDockTop, app::screenshot_source(host, app));
+    resources.controller.configure(settings.controls.screenshotDirectory, settings.controls.keyboardDockTop, app::screenshot_source(host, app));
     ScopedThreadPriority streamThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 
     startup::log_memory_statistics();
@@ -1640,8 +1640,8 @@ namespace streaming {
       logging::info("stream", line);
     }
     startup::log_memory_statistics();
-    if (settings.keyboardDockTop != resources.controller.keyboard_docked_top()) {
-      settings.keyboardDockTop = resources.controller.keyboard_docked_top();
+    if (settings.controls.keyboardDockTop != resources.controller.keyboard_docked_top()) {
+      settings.controls.keyboardDockTop = resources.controller.keyboard_docked_top();
       settings.dirty = true;
     }
     show_stream_end_statistics(host, app, startContext, finalStatistics, finalMessage, &resources);

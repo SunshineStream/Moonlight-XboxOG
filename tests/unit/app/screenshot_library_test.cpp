@@ -293,12 +293,12 @@ namespace {
    */
   TEST_F(ScreenshotLibraryTest, ReportsDeletionFailuresWithoutLosingOtherCaptures) {
     std::string error;
-    const auto first = app::next_screenshot_path(root, 10, error);
+    const std::filesystem::path first = app::next_screenshot_path(root, 10, error);
     {
       std::ofstream image(first);
       image << "capture";
     }
-    const app::ScreenshotRecord record {source, first, 10};
+    const app::ScreenshotRecord record {source, first.string(), 10};
     ASSERT_TRUE(app::append_screenshot(record, journal, error));
     EXPECT_FALSE(app::delete_screenshot({}, journal, error));
     EXPECT_FALSE(error.empty());

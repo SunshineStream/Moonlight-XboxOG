@@ -99,6 +99,21 @@ TEST(StreamMenuTest, NavigatesWideAndTallKeyboardCells) {
   EXPECT_EQ(menu.keyboard_key(), '0');
 }
 
+namespace {
+  /**
+   * @brief Count the grid units occupied by a single OSK key.
+   * @param coverage Coverage counts for the complete keyboard grid.
+   * @param cell Key geometry to include.
+   */
+  void cover_keyboard_cell(std::array<int, input::StreamMenu::KEYBOARD_COLUMNS * input::StreamMenu::KEYBOARD_ROWS> &coverage, const input::StreamKeyboardCell &cell) {
+    for (int y = cell.row; y < cell.row + cell.height; ++y) {
+      for (int x = cell.column; x < cell.column + cell.width; ++x) {
+        ++coverage.at(y * input::StreamMenu::KEYBOARD_COLUMNS + x);
+      }
+    }
+  }
+}  // namespace
+
 /**
  * @brief Every host key remains accessible, with complete geometry on all three layouts.
  */
@@ -114,11 +129,7 @@ TEST(StreamMenuTest, PreservesHostKeysAcrossThreeLayouts) {
       if (cell.key < static_cast<int>(input::StreamMenu::KEYS.size())) {
         codes.insert(input::StreamMenu::KEYS[cell.key].code);
       }
-      for (int y = cell.row; y < cell.row + cell.height; ++y) {
-        for (int x = cell.column; x < cell.column + cell.width; ++x) {
-          ++coverage.at(y * input::StreamMenu::KEYBOARD_COLUMNS + x);
-        }
-      }
+      cover_keyboard_cell(coverage, cell);
     }
     for (int count : coverage) {
       EXPECT_EQ(count, 1);

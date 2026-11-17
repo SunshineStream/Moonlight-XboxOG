@@ -184,7 +184,12 @@ namespace input {
     if (page != StreamMenuPage::radial || std::max(std::abs(static_cast<int>(x)), std::abs(static_cast<int>(y))) < WHEEL_DEADZONE) {
       return false;
     }
-    const int sector = std::abs(static_cast<int>(y)) >= std::abs(static_cast<int>(x)) ? (y > 0 ? 0 : 2) : (x > 0 ? 1 : 3);
+    int sector;
+    if (std::abs(static_cast<int>(y)) >= std::abs(static_cast<int>(x))) {
+      sector = y > 0 ? 0 : 2;
+    } else {
+      sector = x > 0 ? 1 : 3;
+    }
     const auto action = static_cast<StreamAction>((right ? 4 : 0) + sector);
     const bool changed = action != selected;
     selected = action;
@@ -258,8 +263,10 @@ namespace input {
   std::string StreamMenu::key_label(int index) const {
     const int catalogIndex = keyboard_cells().at(index).key;
     if (catalogIndex == KEYBOARD_PAGE_KEY) {
-      return keyboardLayout == 0 ? "?123" : keyboardLayout == 1 ? "PC keys" :
-                                                                  "ABC";
+      if (keyboardLayout == 0) {
+        return "?123";
+      }
+      return keyboardLayout == 1 ? "PC keys" : "ABC";
     }
     if (catalogIndex == KEYBOARD_CAPS_KEY) {
       return "Caps";
@@ -275,8 +282,7 @@ namespace input {
   }
 
   int StreamMenu::key_modifiers(int code) const {
-    const int key = keyboard_cells().at(keyIndex).key;
-    if (key < static_cast<int>(KEYS.size()) && KEYS[key].code == code) {
+    if (const int key = keyboard_cells().at(keyIndex).key; key < static_cast<int>(KEYS.size()) && KEYS[key].code == code) {
       return binding_modifiers(key);
     }
     return modifiers | ((shiftOnce != (caps && code >= 'A' && code <= 'Z')) ? MODIFIER_SHIFT : 0);
@@ -439,8 +445,10 @@ namespace input {
       116,
       117,
     }});
-    return keyboardLayout == 0 ? letters : keyboardLayout == 1 ? symbols :
-                                                                 desktop;
+    if (keyboardLayout == 0) {
+      return letters;
+    }
+    return keyboardLayout == 1 ? symbols : desktop;
   }
 
   void StreamMenu::toggle_keyboard_page() {

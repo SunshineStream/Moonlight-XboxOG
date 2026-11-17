@@ -6,12 +6,30 @@
 #include "src/input/ui_input.h"
 
 // standard includes
+#include <array>
 #include <cstdint>
 #include <limits>
+#include <tuple>
 #include <utility>
 
 // lib includes
 #include <lizardbyte/common/testing.h>
+
+/**
+ * @brief Shared grid commands preserve direction, horizontal priority and neutral input.
+ */
+TEST(UiInputTest, MapsDirectionalCommandsToGridSteps) {
+  const std::array<input::UiCommand, 4> commands {input::UiCommand::move_left, input::UiCommand::move_right, input::UiCommand::move_up, input::UiCommand::move_down};
+  for (const auto command : commands) {
+    const auto [x, y] = input::navigation_step(command);
+    EXPECT_EQ(input::direction_command(x, y), command);
+  }
+  EXPECT_EQ(input::direction_command(2, -3), input::UiCommand::move_right);
+  EXPECT_EQ(input::direction_command(-2, 3), input::UiCommand::move_left);
+  EXPECT_EQ(input::direction_command(0, 0), input::UiCommand::none);
+  EXPECT_EQ(input::navigation_step(input::UiCommand::none), (std::pair<int, int> {0, 0}));
+  EXPECT_EQ(input::navigation_step(input::UiCommand::activate), (std::pair<int, int> {0, 0}));
+}
 
 /**
  * @brief Keyboard navigation uses the same initial delay and interval as controller navigation.
@@ -110,14 +128,24 @@ TEST(ShellInputStateTest, ResumesNavigationAfterStreamingConsumesReleaseEvents) 
   input::ShellInputState state;
   state.keyboardNavigation.press(1, input::UiCommand::move_down, 100);
   state.keyboardNavigation.press(2, input::UiCommand::confirm, 110);
-  state.leftTriggerPressed = state.rightTriggerPressed = true;
-  state.leftShoulderPressed = state.rightShoulderPressed = true;
-  state.controllerStartPressed = state.controllerBackPressed = true;
-  state.controllerExitComboArmed = state.controllerExitComboTriggered = true;
-  state.controllerStartDownTick = state.controllerBackDownTick = 120;
-  state.leftShoulderRepeatTick = state.rightShoulderRepeatTick = 120;
-  state.leftTriggerRepeatTick = state.rightTriggerRepeatTick = 120;
-  state.moveUpHoldState = state.moveDownHoldState = state.moveLeftHoldState = state.moveRightHoldState = {true, 100, 200};
+  state.leftTriggerPressed = true;
+  state.rightTriggerPressed = true;
+  state.leftShoulderPressed = true;
+  state.rightShoulderPressed = true;
+  state.controllerStartPressed = true;
+  state.controllerBackPressed = true;
+  state.controllerExitComboArmed = true;
+  state.controllerExitComboTriggered = true;
+  state.controllerStartDownTick = 120;
+  state.controllerBackDownTick = 120;
+  state.leftShoulderRepeatTick = 120;
+  state.rightShoulderRepeatTick = 120;
+  state.leftTriggerRepeatTick = 120;
+  state.rightTriggerRepeatTick = 120;
+  state.moveUpHoldState = {true, 100, 200};
+  state.moveDownHoldState = {true, 100, 200};
+  state.moveLeftHoldState = {true, 100, 200};
+  state.moveRightHoldState = {true, 100, 200};
   state.reset_after_stream();
   EXPECT_FALSE(state.leftTriggerPressed || state.rightTriggerPressed || state.leftShoulderPressed || state.rightShoulderPressed);
   EXPECT_FALSE(state.controllerStartPressed || state.controllerBackPressed || state.controllerExitComboArmed || state.controllerExitComboTriggered);
@@ -139,10 +167,24 @@ TEST(ShellInputStateTest, ResumesNavigationAfterStreamingConsumesReleaseEvents) 
  */
 TEST(ShellInputStateTest, ControllerHandoffPreservesKeyboardAndResetsGamepadHolds) {
   input::ShellInputState state;
-  state.leftTriggerPressed = state.rightTriggerPressed = state.leftShoulderPressed = state.rightShoulderPressed = true;
-  state.controllerStartPressed = state.controllerBackPressed = state.controllerExitComboArmed = state.controllerExitComboTriggered = true;
-  state.controllerStartDownTick = state.controllerBackDownTick = state.leftShoulderRepeatTick = state.rightShoulderRepeatTick = state.leftTriggerRepeatTick = state.rightTriggerRepeatTick = 100;
-  state.moveUpHoldState = state.moveDownHoldState = state.moveLeftHoldState = state.moveRightHoldState = {true, 100, 200};
+  state.leftTriggerPressed = true;
+  state.rightTriggerPressed = true;
+  state.leftShoulderPressed = true;
+  state.rightShoulderPressed = true;
+  state.controllerStartPressed = true;
+  state.controllerBackPressed = true;
+  state.controllerExitComboArmed = true;
+  state.controllerExitComboTriggered = true;
+  state.controllerStartDownTick = 100;
+  state.controllerBackDownTick = 100;
+  state.leftShoulderRepeatTick = 100;
+  state.rightShoulderRepeatTick = 100;
+  state.leftTriggerRepeatTick = 100;
+  state.rightTriggerRepeatTick = 100;
+  state.moveUpHoldState = {true, 100, 200};
+  state.moveDownHoldState = {true, 100, 200};
+  state.moveLeftHoldState = {true, 100, 200};
+  state.moveRightHoldState = {true, 100, 200};
   EXPECT_EQ(state.keyboardNavigation.press(1, input::UiCommand::move_right, 100), input::UiCommand::move_right);
   state.reset_after_controller_change();
   EXPECT_FALSE(state.leftTriggerPressed || state.rightTriggerPressed || state.leftShoulderPressed || state.rightShoulderPressed);
@@ -201,20 +243,18 @@ TEST(DirectionNavigationTest, ClearsOnNeutralOrResetAndHandlesClockWrap) {
  * @brief Both stick axes use the main menu dead zone, retain a noisy hold and release without a second tap.
  */
 TEST(DirectionNavigationTest, StickFlicksStepOnceWithHysteresisOnBothAxes) {
-  for (const auto &axis : {std::pair<short, short> {20000, 0}, {-20000, 0}, {0, 20000}, {0, -20000}}) {
+  const std::array<std::tuple<short, short, input::UiCommand>, 4> axes {{{20000, 0, input::UiCommand::move_right}, {-20000, 0, input::UiCommand::move_left}, {0, 20000, input::UiCommand::move_up}, {0, -20000, input::UiCommand::move_down}}};
+  for (const auto &[x, y, direction] : axes) {
     input::DirectionNavigation navigation;
-    const auto direction = axis.first > 0 ? input::UiCommand::move_right : axis.first < 0 ? input::UiCommand::move_left :
-                                                                         axis.second > 0  ? input::UiCommand::move_up :
-                                                                                            input::UiCommand::move_down;
-    EXPECT_EQ(navigation.update_stick(axis.first / 2, axis.second / 2, 0), input::UiCommand::none);
-    EXPECT_EQ(navigation.update_stick(axis.first, axis.second, 1), direction);
-    EXPECT_EQ(navigation.update_stick(axis.first * 3 / 5, axis.second * 3 / 5, 40), input::UiCommand::none);
-    EXPECT_EQ(navigation.update_stick(axis.first * 7 / 10, axis.second * 7 / 10, 80), input::UiCommand::none);
-    EXPECT_EQ(navigation.update_stick(axis.first, axis.second, 149), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(x / 2, y / 2, 0), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(x, y, 1), direction);
+    EXPECT_EQ(navigation.update_stick(x * 3 / 5, y * 3 / 5, 40), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(x * 7 / 10, y * 7 / 10, 80), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(x, y, 149), input::UiCommand::none);
     EXPECT_EQ(navigation.update_stick(0, 0, 150), input::UiCommand::none);
-    EXPECT_EQ(navigation.update_stick(axis.first / 2, axis.second / 2, 151), input::UiCommand::none);
-    EXPECT_EQ(navigation.update_stick(axis.first, axis.second, 152), direction);
-    EXPECT_EQ(navigation.update_stick(axis.first, axis.second, 302), direction);
+    EXPECT_EQ(navigation.update_stick(x / 2, y / 2, 151), input::UiCommand::none);
+    EXPECT_EQ(navigation.update_stick(x, y, 152), direction);
+    EXPECT_EQ(navigation.update_stick(x, y, 302), direction);
   }
 }
 

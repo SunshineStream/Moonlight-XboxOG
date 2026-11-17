@@ -50,8 +50,10 @@ namespace streaming {
   }
 
   std::string ScreenshotNotification::title() const {
-    return saving ? "Saving screenshot... " + std::to_string(percent) + "%" : saved ? "Screenshot saved" :
-                                                                                      "Screenshot failed";
+    if (saving) {
+      return "Saving screenshot... " + std::to_string(percent) + "%";
+    }
+    return saved ? "Screenshot saved" : "Screenshot failed";
   }
 
   std::string_view ScreenshotNotification::body() const {
@@ -59,8 +61,7 @@ namespace streaming {
       return {};
     }
     std::string_view text = detail;
-    const std::string_view prefix = saved ? "Saved " : "Screenshot failed: ";
-    if (text.substr(0, prefix.size()) == prefix) {
+    if (const std::string_view prefix = saved ? "Saved " : "Screenshot failed: "; text.substr(0, prefix.size()) == prefix) {
       text.remove_prefix(prefix.size());
     }
     return text;

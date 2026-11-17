@@ -31,6 +31,16 @@ namespace streaming {
   class FfmpegStreamBackend;
 
   /**
+   * @brief Text alignment, background and color for a cached stream-control label.
+   */
+  struct StreamLabelStyle {
+    bool leading = false;  ///< Align text to its top-left corner.
+    bool background = true;  ///< Restore an opaque label background before drawing.
+    bool fitSingleLine = false;  ///< Shrink the label to fit on one line.
+    SDL_Color foreground {255, 255, 255, 255};  ///< Original text color.
+  };
+
+  /**
    * @brief Owns four gamepads, local stream controls and ordered host input.
    */
   class StreamControls {
@@ -147,12 +157,9 @@ namespace streaming {
      * @param font Label font.
      * @param text UTF-8 label.
      * @param bounds Label bounds.
-     * @param leading Align console output to its top-left corner.
-     * @param background Paint an opaque label background.
-     * @param fitSingleLine Shrink a single-line key label to fit.
-     * @param foreground Text color.
+     * @param style Text alignment, background and color.
      */
-    void label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, bool leading = false, bool background = true, bool fitSingleLine = false, SDL_Color foreground = {255, 255, 255, 255});
+    void label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, const StreamLabelStyle &style = {});
     /**
      * @brief Apply sampled or queued digital/stick navigation with shared repeat timing.
      * @param sample Controller state, with positive stick Y upward.
@@ -170,6 +177,95 @@ namespace streaming {
       bool chordDown = false;  ///< Chord edge latch.
     };
 
+    /**
+     * @brief Track deliberate gamepad activity and keyboard trigger shortcuts.
+     * @param event Queued SDL event.
+     */
+    void note_gamepad_activity(const SDL_Event &event);
+    /**
+     * @brief Apply trigger edges while the keyboard owns this controller.
+     * @param axis Queued controller axis transition.
+     */
+    void keyboard_trigger(const SDL_ControllerAxisEvent &axis);
+    /**
+     * @brief Recognize the original Xbox raw-button shortcut.
+     * @param button Queued joystick button transition.
+     */
+    void joystick_button(const SDL_JoyButtonEvent &button);
+    /**
+     * @brief Route controller transitions before local menu activation.
+     * @param button Queued controller button transition.
+     * @param active Transport readiness.
+     */
+    void route_controller_button(const SDL_ControllerButtonEvent &button, bool active);
+    /**
+     * @brief Navigate from the current sample of the controller owning the local menu.
+     */
+    void navigate_owner_controller();
+    /**
+     * @brief Handle controller release gates and local button activation.
+     * @param button Queued controller button transition.
+     * @param backend Streaming backend.
+     * @param active Transport readiness.
+     * @param statisticsEnabled Session statistics setting.
+     * @return True on a confirmed stream exit.
+     */
+    bool controller_button(const SDL_ControllerButtonEvent &button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled);
+    /**
+     * @brief Apply one local controller button action.
+     * @param button SDL controller button.
+     * @param backend Streaming backend.
+     * @param active Transport readiness.
+     * @param statisticsEnabled Session statistics setting.
+     * @return True on a confirmed stream exit.
+     */
+    bool activate_controller_button(Uint8 button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled);
+    /**
+     * @brief Apply queued stick movement before the next sampled state.
+     * @param axis Queued controller axis transition.
+     */
+    void controller_axis(const SDL_ControllerAxisEvent &axis);
+    /**
+     * @brief Route physical keyboard input to local controls or the host.
+     * @param key Queued keyboard transition.
+     * @param backend Streaming backend.
+     * @param active Transport readiness.
+     * @param statisticsEnabled Session statistics setting.
+     * @return True on a confirmed stream exit.
+     */
+    bool keyboard_event(const SDL_KeyboardEvent &key, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled);
+    /**
+     * @brief Dispatch a single SDL event without delaying the bounded input batch.
+     * @param event Queued SDL event.
+     * @param backend Streaming backend.
+     * @param active Transport readiness.
+     * @param statisticsEnabled Session statistics setting.
+     * @return True on a confirmed stream exit or window close.
+     */
+    bool handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled);
+    /**
+     * @brief Refresh live log entries while preserving a scrolled reading position.
+     * @param now Monotonic millisecond tick.
+     */
+    void refresh_logs(Uint32 now);
+    /**
+     * @brief Route and navigate one sampled controller.
+     * @param device Owned controller slot.
+     * @param active Transport readiness.
+     * @param now Monotonic millisecond tick.
+     */
+    void update_device(Device &device, bool active, Uint32 now);
+    /**
+     * @brief Publish local controls or capture feedback through the shared overlay.
+     * @param backend Streaming backend.
+     * @param font Overlay font.
+     * @param width Output width.
+     * @param height Output height.
+     * @param wasVisible Controls were visible before this input batch.
+     * @param screenshotChanged Capture feedback needs repainting.
+     * @param stats Session statistics setting.
+     */
+    void refresh_overlay(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool wasVisible, bool screenshotChanged, bool stats);
     /**
      * @brief Open the wheels from gameplay or any local page and release host inputs.
      * @param device Controller instance ID, or -1 for keyboard control.
@@ -192,6 +288,77 @@ namespace streaming {
      * @param height Available video height.
      */
     void render_screenshot_notification(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height);
+
+    /**
+     * @brief Rasterization context shared by the sectors of one menu wheel.
+     */
+    struct WheelPaint {
+      OverlayBitmap target;  ///< Writable panel pixels and geometry.
+      MenuWheel geometry;  ///< Wheel center, radius and selection.
+      int index;  ///< Left or right action wheel.
+      int line;  ///< Text line height including spacing.
+      bool focusOnly;  ///< Restore only changed sectors and labels.
+      bool stats;  ///< Current session statistics setting.
+    };
+
+    /**
+     * @brief Draw one keyboard cell, its shortcut glyph and focus outline.
+     * @param renderer Panel renderer.
+     * @param font Keyboard font.
+     * @param i Cell index.
+     * @param key Cell pixel bounds.
+     */
+    void render_keyboard_key(SDL_Renderer *renderer, TTF_Font *font, int i, SDL_Rect key);
+    /**
+     * @brief Draw or restore one wheel sector and its action label.
+     * @param renderer Panel renderer.
+     * @param font Wheel font.
+     * @param paint Wheel rasterization context.
+     * @param sector Clockwise sector from up.
+     */
+    void render_wheel_sector(SDL_Renderer *renderer, TTF_Font *font, const WheelPaint &paint, int sector);
+    /**
+     * @brief Draw both menu wheels and their footer controls.
+     * @param renderer Panel renderer.
+     * @param font Wheel font.
+     * @param width Panel width.
+     * @param height Panel height.
+     * @param stats Current statistics setting.
+     * @param focusOnly Repaint only changed sectors.
+     */
+    void render_wheels(SDL_Renderer *renderer, TTF_Font *font, int width, int height, bool stats, bool focusOnly);
+    /**
+     * @brief Draw the live log panel and scroll position.
+     * @param renderer Panel renderer.
+     * @param font Log font.
+     * @param width Panel width.
+     * @param height Panel height.
+     */
+    void render_logs(SDL_Renderer *renderer, TTF_Font *font, int width, int height);
+    /**
+     * @brief Draw direct cancel, disconnect and quit-app actions.
+     * @param renderer Panel renderer.
+     * @param font Dialog font.
+     * @param width Panel width.
+     * @param height Panel height.
+     */
+    void render_exit_confirmation(SDL_Renderer *renderer, TTF_Font *font, int width, int height);
+    /**
+     * @brief Allocate panel geometry when needed and enforce the raster cache budget.
+     * @param width Panel width.
+     * @param height Panel height.
+     * @return True when a panel renderer is available.
+     */
+    bool prepare_panel(int width, int height);
+    /**
+     * @brief Publish changed panel regions through the shared GPU and software overlay.
+     * @param backend Overlay backend.
+     * @param width Panel width.
+     * @param height Panel height.
+     * @param keyboard Opaque docked keyboard placement.
+     * @param focusOnly Publish only damaged regions.
+     */
+    void publish_panel(FfmpegStreamBackend &backend, int width, int height, bool keyboard, bool focusOnly) const;
     /**
      * @brief Draw the keyboard, optionally repainting only the old and new focus cells.
      * @param renderer Software panel renderer.
@@ -223,6 +390,26 @@ namespace streaming {
      */
     void render_hint(SDL_Renderer *renderer, TTF_Font *font, const char *asset, const char *key, const char *text, SDL_Rect bounds, bool compact = false);
     /**
+     * @brief Apply direct cancel, disconnect or quit-app input on the exit confirmation page.
+     * @param key SDL key code.
+     * @return True for a confirmed stream exit.
+     */
+    bool confirm_exit_key(SDL_Keycode key);
+    /**
+     * @brief Apply a layout, modifier, docking or editing shortcut on the keyboard page.
+     * @param key SDL key code.
+     * @param active Transport readiness for host key taps.
+     * @return True when the keyboard consumes this shortcut.
+     */
+    bool handle_keyboard_shortcut(SDL_Keycode key, bool active);
+    /**
+     * @brief Execute the selected wheel action or open its local page.
+     * @param backend Overlay and screenshot backend.
+     * @param active Transport readiness.
+     * @param stats Mutable session statistics setting.
+     */
+    void activate_stream_action(FfmpegStreamBackend &backend, bool active, bool &stats);
+    /**
      * @brief Process a local navigation or activation key.
      * @param key SDL key code.
      * @param backend Video backend for screenshots.
@@ -243,13 +430,6 @@ namespace streaming {
     std::array<Device, 4> devices_ {};  ///< Stable local controller slots.
     input::StreamInput router_;  ///< Ordered event-thread host input.
     input::StreamMenu menu_;  ///< Local menu state.
-    input::KeyboardNavigation keyboardNavigation_;  ///< Local keyboard repeats, independent of gameplay key forwarding.
-    input::DirectionNavigation controllerNavigation_;  ///< Immediate direction changes with the shared repeat interval.
-    bool controllerNavigationApplied_ = false;  ///< Queued events and the polling sample can advance focus only once per input pass.
-    bool navigationNeutralRequired_ = false;  ///< Release wheel navigation before moving around a newly opened page.
-    input::UiInputDevice inputDevice_ = input::UiInputDevice::gamepad;  ///< Device used by local helper text.
-    bool armed_ = false;  ///< Opening buttons have been released.
-    bool dirty_ = false;  ///< Overlay requires rasterization.
     bool focused_ = true;  ///< Window focus state.
     int mouseDevice_ = -1;  ///< Virtual mouse controller, or disabled.
     Uint32 lastTick_ = 0;  ///< Pointer integration clock.
@@ -257,29 +437,52 @@ namespace streaming {
     Uint32 pulseUntil_ = 0;  ///< Guide/share pulse deadline.
     std::uint32_t pulseButtons_ = 0;  ///< Button held across normal packets after the wheel closes.
     std::array<input::ControllerState, 4> latestHostController_ {};  ///< Latest unmodified transport state for pulse release.
-    std::string message_;  ///< Last action result.
-    std::vector<std::string> logs_;  ///< Snapshot of runtime log lines.
-    int menuWidth_ = 0;  ///< Last video rectangle width used for local controls.
-    int menuHeight_ = 0;  ///< Last video rectangle height used for local controls.
-    bool keyboardPageTriggerDown_ = false;  ///< Edge latch for the left-trigger keyboard layout shortcut.
-    bool keyboardDockTriggerDown_ = false;  ///< Edge latch for right-trigger keyboard docking.
     bool keyboardTop_ = false;  ///< Dock the keyboard flush with the top edge.
     std::string screenshotDirectory_;  ///< Configured screenshot folder, empty for the default.
     ScreenshotNotification screenshotNotification_;  ///< Progress and timed completion feedback independent of menu capture.
     app::ScreenshotSource screenshotSource_;  ///< Stream identity retained with each capture.
-    Uint32 logRefreshTick_ = 0;  ///< Last live log refresh.
-    std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Surface>> icons_;  ///< Cached SVG rasters survive panel renderer replacement.
-    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> panel_ {nullptr, SDL_FreeSurface};  ///< Retained software composition target.
-    std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> panelRenderer_ {nullptr, SDL_DestroyRenderer};  ///< Renderer reused at a stable panel size.
-    std::map<std::tuple<TTF_Font *, std::string, int, Uint32>, CachedText> text_;  ///< Bounded cache of unchanged label rasters.
-    std::size_t textBytes_ = 0;  ///< Estimated text texture bytes, bounded to protect the Xbox memory budget.
-    std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Texture>> iconTextures_;  ///< Renderer-owned SVG textures.
     /**
      * @brief Content dependencies other than the focused key or wheel sector.
      */
     using PanelContent = std::tuple<TTF_Font *, input::UiInputDevice, input::StreamMenuPage, int, int, bool, bool, bool, int, bool, std::string>;
-    std::optional<PanelContent> panelContent_;  ///< Last fully drawn content; changes invalidate incremental focus painting.
-    int panelSelection_ = -1;  ///< Previously painted keyboard cell or wheel sector.
-    std::vector<VideoRectangle> panelDamage_;  ///< Regions repainted during the current input pass.
+
+    /**
+     * @brief Input ownership, release gates and local navigation timing.
+     */
+    struct NavigationState {
+      input::KeyboardNavigation keyboard;  ///< Local keyboard repeats, independent of gameplay key forwarding.
+      input::DirectionNavigation controller;  ///< Immediate direction changes with the shared repeat interval.
+      bool applied = false;  ///< Queued events and the polling sample can advance focus only once per input pass.
+      bool neutralRequired = false;  ///< Release wheel navigation before moving around a newly opened page.
+      input::UiInputDevice inputDevice = input::UiInputDevice::gamepad;  ///< Device used by local helper text.
+      bool armed = false;  ///< Opening buttons have been released.
+      bool pageTriggerDown = false;  ///< Edge latch for the left-trigger keyboard layout shortcut.
+      bool dockTriggerDown = false;  ///< Edge latch for right-trigger keyboard docking.
+    };
+
+    NavigationState navigation_;  ///< Input ownership, release gates and local navigation timing.
+
+    /**
+     * @brief Retained overlay surfaces, rasters and content invalidation.
+     */
+    struct PanelCache {
+      bool dirty = false;  ///< Overlay requires rasterization.
+      std::string message;  ///< Last action result.
+      std::vector<std::string> logs;  ///< Snapshot of runtime log lines.
+      int width = 0;  ///< Last video rectangle width used for local controls.
+      int height = 0;  ///< Last video rectangle height used for local controls.
+      Uint32 logRefreshTick = 0;  ///< Last live log refresh.
+      std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Surface>> icons;  ///< Cached SVG rasters survive panel renderer replacement.
+      std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface {nullptr, &SDL_FreeSurface};  ///< Retained software composition target.
+      std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer {nullptr, &SDL_DestroyRenderer};  ///< Renderer reused at a stable panel size.
+      std::map<std::tuple<TTF_Font *, std::string, int, Uint32>, CachedText> text;  ///< Bounded cache of unchanged label rasters.
+      std::size_t textBytes = 0;  ///< Estimated text texture bytes, bounded to protect the Xbox memory budget.
+      std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Texture>> iconTextures;  ///< Renderer-owned SVG textures.
+      std::optional<PanelContent> content;  ///< Last fully drawn content; changes invalidate incremental focus painting.
+      int selection = -1;  ///< Previously painted keyboard cell or wheel sector.
+      std::vector<VideoRectangle> damage;  ///< Regions repainted during the current input pass.
+    };
+
+    PanelCache panel_;  ///< Retained overlay surfaces, rasters and content invalidation.
   };
 }  // namespace streaming

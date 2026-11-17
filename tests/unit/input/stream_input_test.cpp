@@ -18,7 +18,7 @@
  * @brief Captures ordered transport packets without a host connection.
  */
 class StreamInputTest: public testing::Test {
-protected:
+public:
   std::vector<input::StreamPacket> packets;  ///< Packets emitted by the router.
   input::StreamInput router {[this](const input::StreamPacket &packet) {
     packets.push_back(packet);
@@ -307,7 +307,7 @@ TEST_F(StreamInputTest, BoundsMouseReportRateWithoutDelayingClicks) {
 TEST(StreamInputRateTest, SustainsMouseMovementWithBoundedTraffic) {
   int reports = 0;
   int distance = 0;
-  input::StreamInput router([&](const input::StreamPacket &packet) {
+  input::StreamInput router([&reports, &distance](const input::StreamPacket &packet) {
     if (packet.type == input::StreamPacketType::mouse_move) {
       ++reports;
       distance += packet.x;

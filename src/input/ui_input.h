@@ -42,10 +42,55 @@ namespace input {
   bool is_repeatable_ui_command(UiCommand command);
 
   /**
+   * @brief Map signed directional steps to a command, preferring horizontal movement.
+   * @param x Horizontal step, positive rightward.
+   * @param y Vertical step, positive downward.
+   * @return Directional command, or none for a centered input.
+   */
+  UiCommand direction_command(int x, int y);
+
+  /**
+   * @brief Convert a directional command to a single keyboard or grid step.
+   * @param command Navigation command.
+   * @return Horizontal and vertical steps; zero for other commands.
+   */
+  std::pair<int, int> navigation_step(UiCommand command);
+
+  /**
    * @brief Generates UI repeats from transitions, including USB keyboards without OS autorepeat.
    */
   class KeyboardNavigation {
   public:
+    /**
+     * @brief Start with no held navigation keys.
+     */
+    KeyboardNavigation() = default;
+    /**
+     * @brief Copy the current hold and repeat state.
+     * @param other Navigation state to copy.
+     */
+    KeyboardNavigation(const KeyboardNavigation &other) = default;
+    /**
+     * @brief Replace held navigation keys and repeat state with a copy.
+     * @param other Navigation state to copy.
+     * @return This navigation state.
+     */
+    KeyboardNavigation &operator=(const KeyboardNavigation &other) = default;
+    /**
+     * @brief Release retained navigation keys.
+     */
+    ~KeyboardNavigation() = default;
+    /**
+     * @brief Transfer held navigation keys without a potentially throwing container move.
+     * @param other Navigation state being transferred.
+     */
+    KeyboardNavigation(KeyboardNavigation &&other) noexcept = default;
+    /**
+     * @brief Transfer navigation state when replacing the active input owner.
+     * @param other Navigation state being transferred.
+     * @return This navigation state.
+     */
+    KeyboardNavigation &operator=(KeyboardNavigation &&other) noexcept = default;
     /**
      * @brief Register an initial key press and issue its command exactly once.
      * @param key Physical key identity, such as an SDL scancode.

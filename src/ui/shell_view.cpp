@@ -667,7 +667,7 @@ namespace {
     if (!picker.error.empty()) {
       view.lines.push_back(picker.error);
     } else if (!picker.path.empty() && picker.folders.empty()) {
-      view.lines.push_back("No subfolders here.");
+      view.lines.emplace_back("No subfolders here.");
     }
     const bool canUse = picker.available && !picker.path.empty();
     view.actions = {
@@ -831,7 +831,7 @@ namespace {
    * @param icon Controller icon path.
    * @return Keyboard keycap label, or an empty string for a non-controller icon.
    */
-  std::string keyboard_hint_for_icon(const std::string &icon) {
+  std::string keyboard_hint_for_icon(std::string_view icon) {
     if (icon == "icons\\button-a.svg" || icon == "icons\\button-start.svg") {
       return "Enter";
     }

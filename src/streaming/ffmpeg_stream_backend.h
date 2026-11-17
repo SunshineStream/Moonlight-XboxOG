@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // lib includes
@@ -150,7 +151,7 @@ namespace streaming {
      * @param source Server and app identity captured at request time.
      * @return True when queued; false before the first frame or while another capture is pending.
      */
-    bool request_screenshot(const std::string &directory, const app::ScreenshotSource &source);
+    bool request_screenshot(std::string_view directory, const app::ScreenshotSource &source);
     /**
      * @brief Reap a completed screenshot worker without blocking the streaming event loop.
      * @return Completion or error detail, or empty when no result is ready.
@@ -402,7 +403,7 @@ namespace streaming {
      */
     struct ScreenshotTask {
       SDL_Thread *thread = nullptr;  ///< Owned worker, joined after completion or at shutdown.
-      std::atomic<bool> complete = false;  ///< Release/acquire publication of the completed result.
+      std::atomic<bool> complete = false;  ///< Publishes the completed result before the UI can read it.
       std::atomic<int> progress = 0;  ///< Conversion, BMP write and index progress; completion is published separately.
       LatestVideoFrame frame;  ///< Independently owned snapshot of the uncomposited YUV frame.
       app::ScreenshotSource source;  ///< Original host and app identity.
@@ -416,7 +417,13 @@ namespace streaming {
      * @param context ScreenshotTask owned by this backend until the worker is joined.
      * @return Zero after publishing a completion result.
      */
-    static int save_screenshot_worker(void *context);
+    static int save_screenshot_worker(ScreenshotTask *context);
+    /**
+     * @brief Convert the owned YUV snapshot into a BGR screenshot without retaining conversion buffers.
+     * @param frame Stable screenshot snapshot.
+     * @return Owned BGR surface, or nullptr when conversion fails.
+     */
+    static SDL_Surface *convert_screenshot_frame(const LatestVideoFrame &frame);
 
     /**
      * @brief Hold FFmpeg and SDL state used by the video path.

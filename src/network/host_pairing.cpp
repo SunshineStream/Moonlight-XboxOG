@@ -2738,8 +2738,7 @@ namespace network {
       return false;
     }
     uint32_t status = 0;
-    std::string message;
-    if (response.statusCode != 200 || !extract_root_status(response.body, &status, &message) || status != 200) {
+    if (std::string message; response.statusCode != 200 || !extract_root_status(response.body, &status, &message) || status != 200) {
       return append_error(errorMessage, message.empty() ? "The host rejected the quit request. Another client may own this session" : message);
     }
     // Like the other Moonlight clients, verify /serverinfo: some hosts return

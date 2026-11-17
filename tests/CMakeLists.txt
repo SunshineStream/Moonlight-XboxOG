@@ -45,6 +45,7 @@ file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
         ${CMAKE_SOURCE_DIR}/tests/*.cpp)
 list(FILTER TEST_SOURCES EXCLUDE REGEX "/tests/gpu/")
 list(FILTER TEST_SOURCES EXCLUDE REGEX "/tests/controller/")
+list(FILTER TEST_SOURCES EXCLUDE REGEX "/tests/xbox/")
 
 add_executable(${PROJECT_NAME}
         ${TEST_SOURCES}
@@ -130,5 +131,18 @@ target_compile_options(test_shell_controller PRIVATE ${TEST_COVERAGE_COMPILE_OPT
 target_link_options(test_shell_controller PRIVATE ${TEST_COVERAGE_LINK_OPTIONS})
 
 gtest_discover_tests(test_shell_controller
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES ${TEST_RUNTIME_PROPERTIES})
+
+# Exercise Xbox UTC conversion with deterministic kernel responses on the host.
+add_executable(test_xbox_time "${CMAKE_SOURCE_DIR}/tests/xbox/time_test.cpp")
+target_compile_features(test_xbox_time PRIVATE cxx_std_17)
+target_include_directories(test_xbox_time PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/support/xbox_time"
+        "${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_xbox_time PRIVATE gtest_main lizardbyte::test_support)
+target_compile_options(test_xbox_time PRIVATE ${TEST_COVERAGE_COMPILE_OPTIONS})
+target_link_options(test_xbox_time PRIVATE ${TEST_COVERAGE_LINK_OPTIONS})
+gtest_discover_tests(test_xbox_time
         DISCOVERY_MODE PRE_TEST
         PROPERTIES ${TEST_RUNTIME_PROPERTIES})

@@ -133,7 +133,8 @@ namespace input {
     release_source(VIRTUAL_MOUSE_SOURCE);
     const int previous = mouseDevice_;
     mouseDevice_ = device;
-    mouseX_ = mouseY_ = 0;
+    mouseX_ = 0;
+    mouseY_ = 0;
     mouseElapsed_ = 0;
     for (int i = 0; i < 4; ++i) {
       if (slots_[i].device != -1 && (slots_[i].device == previous || slots_[i].device == device)) {
@@ -164,15 +165,15 @@ namespace input {
       mouse_button(VIRTUAL_MOUSE_SOURCE, BUTTON_RIGHT, (state.buttonFlags & B_FLAG) != 0);
       mouseX_ += mouse_axis(state.leftStickX) * 900 * seconds;
       mouseY_ -= mouse_axis(state.leftStickY) * 900 * seconds;
-      const int x = static_cast<int>(mouseX_);
-      const int y = static_cast<int>(mouseY_);
+      const auto x = static_cast<int>(mouseX_);
+      const auto y = static_cast<int>(mouseY_);
       mouseX_ -= x;
       mouseY_ -= y;
       mouse_move(x, y);
     }
   }
 
-  void StreamInput::digital(StreamPacketType type, std::map<int, std::set<int>> &held, int source, int code, bool pressed, int modifiers) {
+  void StreamInput::digital(StreamPacketType type, std::map<int, std::set<int>> &held, int source, int code, bool pressed, int modifiers) const {
     if (code <= 0 || (captured_ && pressed)) {
       return;
     }
@@ -181,7 +182,7 @@ namespace input {
       if (!pressed) {
         return;
       }
-      entry = held.emplace(code, std::set<int> {}).first;
+      entry = held.try_emplace(code).first;
     }
     auto &sources = entry->second;
     const bool wasPressed = !sources.empty();
@@ -210,7 +211,7 @@ namespace input {
     digital(StreamPacketType::mouse_button, buttons_, source, button, pressed, 0);
   }
 
-  void StreamInput::mouse_move(int x, int y) {
+  void StreamInput::mouse_move(int x, int y) const {
     if (!captured_ && (x != 0 || y != 0)) {
       StreamPacket packet {StreamPacketType::mouse_move};
       packet.x = std::clamp(x, -32768, 32767);
@@ -219,7 +220,7 @@ namespace input {
     }
   }
 
-  void StreamInput::scroll(int x, int y) {
+  void StreamInput::scroll(int x, int y) const {
     if (!captured_ && (x != 0 || y != 0)) {
       StreamPacket packet {StreamPacketType::scroll};
       packet.x = std::clamp(x, -127, 127);
@@ -280,107 +281,61 @@ namespace input {
     if (usage >= 89 && usage <= 97) {
       return 0x61 + usage - 89;
     }
-    switch (usage) {
-      case 39:
-        return '0';
-      case 40:
-        return 0x0D;
-      case 41:
-        return 0x1B;
-      case 42:
-        return 0x08;
-      case 43:
-        return 0x09;
-      case 44:
-        return 0x20;
-      case 45:
-        return 0xBD;
-      case 46:
-        return 0xBB;
-      case 47:
-        return 0xDB;
-      case 48:
-        return 0xDD;
-      case 49:
-      case 50:
-      case 100:
-        return 0xDC;
-      case 51:
-        return 0xBA;
-      case 52:
-        return 0xDE;
-      case 53:
-        return 0xC0;
-      case 54:
-        return 0xBC;
-      case 55:
-        return 0xBE;
-      case 56:
-        return 0xBF;
-      case 57:
-        return 0x14;
-      case 70:
-        return 0x12C;
-      case 71:
-        return 0x91;
-      case 72:
-        return 0x13;
-      case 73:
-        return 0x12D;
-      case 74:
-        return 0x124;
-      case 75:
-        return 0x121;
-      case 76:
-        return 0x12E;
-      case 77:
-        return 0x123;
-      case 78:
-        return 0x122;
-      case 79:
-        return 0x127;
-      case 80:
-        return 0x125;
-      case 81:
-        return 0x128;
-      case 82:
-        return 0x126;
-      case 83:
-        return 0x190;
-      case 84:
-        return 0x16F;
-      case 85:
-        return 0x6A;
-      case 86:
-        return 0x6D;
-      case 87:
-        return 0x6B;
-      case 88:
-        return 0x10D;
-      case 98:
-        return 0x60;
-      case 99:
-        return 0x6E;
-      case 101:
-        return 0x15D;
-      case 224:
-        return 0xA2;
-      case 225:
-        return 0xA0;
-      case 226:
-        return 0xA4;
-      case 227:
-        return 0x15B;
-      case 228:
-        return 0x1A3;
-      case 229:
-        return 0xA1;
-      case 230:
-        return 0x1A5;
-      case 231:
-        return 0x15C;
-      default:
-        return 0;
-    }
+    constexpr std::array<std::pair<int, int>, 50> overrides {{
+      {39, '0'},
+      {40, 0x0D},
+      {41, 0x1B},
+      {42, 0x08},
+      {43, 0x09},
+      {44, 0x20},
+      {45, 0xBD},
+      {46, 0xBB},
+      {47, 0xDB},
+      {48, 0xDD},
+      {49, 0xDC},
+      {50, 0xDC},
+      {51, 0xBA},
+      {52, 0xDE},
+      {53, 0xC0},
+      {54, 0xBC},
+      {55, 0xBE},
+      {56, 0xBF},
+      {57, 0x14},
+      {70, 0x12C},
+      {71, 0x91},
+      {72, 0x13},
+      {73, 0x12D},
+      {74, 0x124},
+      {75, 0x121},
+      {76, 0x12E},
+      {77, 0x123},
+      {78, 0x122},
+      {79, 0x127},
+      {80, 0x125},
+      {81, 0x128},
+      {82, 0x126},
+      {83, 0x190},
+      {84, 0x16F},
+      {85, 0x6A},
+      {86, 0x6D},
+      {87, 0x6B},
+      {88, 0x10D},
+      {98, 0x60},
+      {99, 0x6E},
+      {100, 0xDC},
+      {101, 0x15D},
+      {224, 0xA2},
+      {225, 0xA0},
+      {226, 0xA4},
+      {227, 0x15B},
+      {228, 0x1A3},
+      {229, 0xA1},
+      {230, 0x1A5},
+      {231, 0x15C},
+    }};
+    const auto entry = std::lower_bound(overrides.begin(), overrides.end(), usage, [](const auto &binding, int key) {
+      return binding.first < key;
+    });
+    return entry != overrides.end() && entry->first == usage ? entry->second : 0;
   }
 }  // namespace input

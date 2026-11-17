@@ -103,6 +103,48 @@ namespace {
     }
     return result;
   }
+
+  /**
+   * @brief Bound changed ARGB rows and merge damage not yet presented.
+   * @param before Previous validated bitmap.
+   * @param after Replacement bitmap with matching geometry.
+   * @param width Bitmap width.
+   * @param height Bitmap height.
+   * @param pending Previously accumulated damage.
+   * @return Union of the changed pixel bounds and pending damage.
+   */
+  streaming::VideoRectangle argb_damage(const std::vector<std::uint8_t> &before, const std::vector<std::uint8_t> &after, int width, int height, const streaming::VideoRectangle &pending) {
+    int left = width;
+    int right = 0;
+    int top = height;
+    int bottom = 0;
+    for (int row = 0; row < height; ++row) {
+      const auto offset = static_cast<std::size_t>(row) * width * 4;
+      if (std::memcmp(before.data() + offset, after.data() + offset, static_cast<std::size_t>(width) * 4) == 0) {
+        continue;
+      }
+      int first = 0;
+      while (first < width && std::memcmp(before.data() + offset + first * 4, after.data() + offset + first * 4, 4) == 0) {
+        ++first;
+      }
+      int last = width - 1;
+      while (last > first && std::memcmp(before.data() + offset + last * 4, after.data() + offset + last * 4, 4) == 0) {
+        --last;
+      }
+      left = std::min(left, first);
+      right = std::max(right, last + 1);
+      top = std::min(top, row);
+      bottom = row + 1;
+    }
+    if (pending.width > 0 && pending.height > 0) {
+      left = std::min(left, pending.x);
+      right = std::max(right, pending.x + pending.width);
+      top = std::min(top, pending.y);
+      bottom = std::max(bottom, pending.y + pending.height);
+    }
+    return {left, top, right - left, bottom - top};
+  }
+
 }  // namespace
 
 namespace streaming {
@@ -130,7 +172,9 @@ namespace streaming {
           continue;
         }
         if (opacity == 0) {
-          bitmap[index] = bitmap[index + 1] = bitmap[index + 2] = 0;
+          bitmap[index] = 0;
+          bitmap[index + 1] = 0;
+          bitmap[index + 2] = 0;
           continue;
         }
         for (int component = 0; component < 3; ++component) {
@@ -143,11 +187,81 @@ namespace streaming {
     return bitmap;
   }
 
-  bool rasterize_menu_wheel(std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, int centerX, int centerY, int radius, int selected, int sector, const VideoRectangle *clip) {
+  /**
+   * @brief Validate a wheel's destination, geometry and optional repaint bounds.
+   * @param target Writable ARGB bitmap.
+   * @param wheel Wheel geometry and selection.
+   * @param sector Requested sector, or minus one for the whole ring.
+   * @param clip Optional repaint rectangle.
+   * @return True when rasterization remains within the destination.
+   */
+  bool valid_menu_wheel(OverlayBitmap target, const MenuWheel &wheel, int sector, const VideoRectangle *clip) {
+    const auto [pixels, capacity, pitch, width, height] = target;
+    const auto [centerX, centerY, radius, selected] = wheel;
+
     if (!valid_storage(pixels, capacity, pitch, width, height, 4) || width > 2048 || height > 2048 || centerX < 0 || centerX >= width || centerY < 0 || centerY >= height || radius < 1 || radius > 2048 || sector < -1 || sector > 3) {
       return false;
     }
     if (clip != nullptr && (clip->x < 0 || clip->y < 0 || clip->width <= 0 || clip->height <= 0 || clip->width > width || clip->height > height || clip->x > width - clip->width || clip->y > height - clip->height)) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * @brief Bound a single sector's columns on one wheel row.
+   * @param wheel Wheel geometry.
+   * @param y Row displacement from its center.
+   * @param first First visible column.
+   * @param last Last visible column.
+   * @param sector Requested sector, or minus one for the whole ring.
+   * @return Inclusive clipped column bounds.
+   */
+  std::pair<int, int> wheel_columns(const MenuWheel &wheel, int y, int first, int last, int sector) {
+    if (sector == 0 || sector == 2) {
+      return {std::max(first, wheel.centerX - std::abs(y)), std::min(last, wheel.centerX + std::abs(y))};
+    }
+    if (sector == 1) {
+      first = std::max(first, wheel.centerX + std::abs(y) + 1);
+    }
+    if (sector == 3) {
+      last = std::min(last, wheel.centerX - std::abs(y) - 1);
+    }
+    return {first, last};
+  }
+
+  /**
+   * @brief Resolve a pixel's clockwise wheel sector with vertical diagonal ties.
+   * @param x Horizontal displacement.
+   * @param y Vertical displacement, positive downward.
+   * @return Up, right, down or left as zero through three.
+   */
+  int wheel_sector(int x, int y) {
+    if (std::abs(y) >= std::abs(x)) {
+      return y < 0 ? 0 : 2;
+    }
+    return x > 0 ? 1 : 3;
+  }
+
+  /**
+   * @brief Choose the separator or normal/selected wheel shade.
+   * @param x Horizontal displacement.
+   * @param y Vertical displacement.
+   * @param direction Pixel sector.
+   * @param selected Highlighted sector.
+   * @return Opaque grayscale component.
+   */
+  unsigned wheel_shade(int x, int y, int direction, int selected) {
+    if (std::abs(std::abs(x) - std::abs(y)) < 2) {
+      return 110;
+    }
+    return direction == selected ? 85 : 36;
+  }
+
+  bool rasterize_menu_wheel(OverlayBitmap target, const MenuWheel &wheel, int sector, const VideoRectangle *clip) {
+    const auto [pixels, capacity, pitch, width, height] = target;
+    const auto [centerX, centerY, radius, selected] = wheel;
+    if (!valid_menu_wheel(target, wheel, sector, clip)) {
       return false;
     }
     const int firstRow = std::max({0, centerY - radius, clip != nullptr ? clip->y : 0});
@@ -159,24 +273,21 @@ namespace streaming {
       if ((sector == 0 && y > 0) || (sector == 2 && y < 0)) {
         continue;
       }
-      const int start = sector == 0 || sector == 2 ? std::max(firstColumn, centerX - std::abs(y)) : sector == 1 ? std::max(firstColumn, centerX + std::abs(y) + 1) :
-                                                                                                                  firstColumn;
-      const int end = sector == 0 || sector == 2 ? std::min(lastColumn, centerX + std::abs(y)) : sector == 3 ? std::min(lastColumn, centerX - std::abs(y) - 1) :
-                                                                                                               lastColumn;
+      const auto [start, end] = wheel_columns(wheel, y, firstColumn, lastColumn, sector);
       for (int column = start; column <= end; ++column) {
         const int x = column - centerX;
-        const int distance = x * x + y * y;
-        if (distance > radius * radius || distance < radius * radius / 9) {
+        if (const int distance = x * x + y * y; distance > radius * radius || distance < radius * radius / 9) {
           continue;
         }
-        const int direction = std::abs(y) >= std::abs(x) ? (y < 0 ? 0 : 2) : (x > 0 ? 1 : 3);
+        const int direction = wheel_sector(x, y);
         if (sector >= 0 && sector != direction) {
           continue;
         }
-        const std::uint32_t gray = std::abs(std::abs(x) - std::abs(y)) < 2 ? 110 : direction == selected ? 85 :
-                                                                                                           36;
+        const auto gray = wheel_shade(x, y, direction, selected);
         auto *pixel = pixels + static_cast<std::size_t>(row) * pitch + column * 4;
-        pixel[0] = pixel[1] = pixel[2] = gray;
+        pixel[0] = gray;
+        pixel[1] = gray;
+        pixel[2] = gray;
         pixel[3] = 255;
       }
     }
@@ -239,35 +350,7 @@ namespace streaming {
     const bool reuse = sameGeometry && opaque == opaque_;
     VideoRectangle changed {};
     if (reuse) {
-      int left = width;
-      int right = 0;
-      int top = height;
-      int bottom = 0;
-      for (int row = 0; row < height; ++row) {
-        const auto offset = static_cast<std::size_t>(row) * width * 4;
-        if (std::memcmp(argb_.data() + offset, pixels.data() + offset, static_cast<std::size_t>(width) * 4) == 0) {
-          continue;
-        }
-        int first = 0;
-        while (std::memcmp(argb_.data() + offset + first * 4, pixels.data() + offset + first * 4, 4) == 0) {
-          ++first;
-        }
-        int last = width - 1;
-        while (std::memcmp(argb_.data() + offset + last * 4, pixels.data() + offset + last * 4, 4) == 0) {
-          --last;
-        }
-        left = std::min(left, first);
-        right = std::max(right, last + 1);
-        top = std::min(top, row);
-        bottom = row + 1;
-      }
-      if (damage_.width > 0 && damage_.height > 0) {
-        left = std::min(left, damage_.x);
-        right = std::max(right, damage_.x + damage_.width);
-        top = std::min(top, damage_.y);
-        bottom = std::max(bottom, damage_.y + damage_.height);
-      }
-      changed = {left, top, right - left, bottom - top};
+      changed = argb_damage(argb_, pixels, width, height, damage_);
     }
     width_ = width;
     height_ = height;
@@ -425,7 +508,9 @@ namespace streaming {
       const auto bitmapRow = static_cast<std::size_t>(row) * width_;
       if (opaque_) {
         std::memcpy(destinationRow, converted.data() + bitmapRow * bytes, copyBytes);
-      } else {
+        continue;
+      }
+      {
         for (int column = 0; column < bounds.width; ++column) {
           const auto index = bitmapRow + column;
           const auto color = color_at(index);
@@ -441,14 +526,8 @@ namespace streaming {
     return true;
   }
 
-  bool VideoOverlay::draw_yuy2(std::uint8_t *pixels, std::size_t capacity, int pitch, int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix) {
-    if (width_ == 0) {
-      return true;
-    }
-    if (!valid_storage(pixels, capacity, pitch, frameWidth, frameHeight, 2) || (frameWidth & 1) != 0 || frameWidth > 2046 || frameHeight > 2047 || destination.width <= MARGIN || destination.height <= MARGIN || matrix == VideoColorMatrix::unsupported) {
-      return false;
-    }
-    const bool rebuild = frameWidth_ != frameWidth || frameHeight_ != frameHeight || outputWidth_ != destination.width || outputHeight_ != destination.height || matrix_ != matrix;
+  bool VideoOverlay::prepare_yuy2(int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix, bool &rebuild) {
+    rebuild = frameWidth_ != frameWidth || frameHeight_ != frameHeight || outputWidth_ != destination.width || outputHeight_ != destination.height || matrix_ != matrix;
     if (rebuild) {
       matrix_ = matrix;
       frameWidth_ = frameWidth;
@@ -458,7 +537,7 @@ namespace streaming {
       const auto bounds = rectangle({0, 0, destination.width, destination.height});
       if (bounds.width == 0 || bounds.height == 0) {
         source_ = {};
-        return true;
+        return false;
       }
       source_.x = (static_cast<int>(static_cast<std::int64_t>(bounds.x) * frameWidth / destination.width) + 1) & ~1;
       source_.y = static_cast<int>(static_cast<std::int64_t>(bounds.y) * frameHeight / destination.height);
@@ -467,59 +546,84 @@ namespace streaming {
       source_.width = std::min(frameWidth - source_.x, ((visibleWidth * frameWidth + destination.width - 1) / destination.width + 1) & ~1);
       source_.height = std::min(frameHeight - source_.y, (visibleHeight * frameHeight + destination.height - 1) / destination.height);
       if (source_.width <= 0 || source_.height <= 0) {
-        return true;
+        return false;
       }
       yuy2_.resize(static_cast<std::size_t>(source_.width) * source_.height * 2);
       if (!opaque_) {
         yuy2Opacity_.resize(yuy2_.size() / 2);
       }
     }
-    if (rebuild || (damage_.width > 0 && damage_.height > 0)) {
-      const auto bounds = rectangle({0, 0, destination.width, destination.height});
-      const int visibleWidth = bounds.width;
-      const int visibleHeight = bounds.height;
-      if (visibleWidth == 0 || visibleHeight == 0) {
-        return true;
-      }
-      const int firstRow = rebuild ? 0 : std::min(source_.height, damage_.y * source_.height / visibleHeight);
-      const int lastRow = rebuild ? source_.height : std::min(source_.height, ((damage_.y + damage_.height) * source_.height + visibleHeight - 1) / visibleHeight);
-      const int firstColumn = rebuild ? 0 : std::min(source_.width, (damage_.x * source_.width / visibleWidth) & ~1);
-      const int lastColumn = rebuild ? source_.width : std::min(source_.width, ((((damage_.x + damage_.width) * source_.width + visibleWidth - 1) / visibleWidth) + 1) & ~1);
-      const bool nativeWidth = visibleWidth == source_.width;
-      for (int row = firstRow; row < lastRow; ++row) {
-        const int bitmapRow = std::min(visibleHeight - 1, row * visibleHeight / source_.height);
-        for (int column = firstColumn; column < lastColumn; column += 2) {
-          const int firstColumn = nativeWidth ? column : std::min(visibleWidth - 1, column * visibleWidth / source_.width);
-          const int secondColumn = nativeWidth ? column + 1 : std::min(visibleWidth - 1, (column + 1) * visibleWidth / source_.width);
-          const auto firstColor = color_at(static_cast<std::size_t>(bitmapRow) * width_ + firstColumn);
-          const auto secondColor = color_at(static_cast<std::size_t>(bitmapRow) * width_ + secondColumn);
-          const auto first = rgb_to_yuv(firstColor, matrix);
-          const auto second = rgb_to_yuv(secondColor, matrix);
-          const unsigned firstAlpha = firstColor >> 24;
-          const unsigned secondAlpha = secondColor >> 24;
-          const unsigned coverage = firstAlpha + secondAlpha;
-          const auto offset = (static_cast<std::size_t>(row) * source_.width + column) * 2;
-          yuy2_[offset] = first[0];
-          yuy2_[offset + 2] = second[0];
-          // Weight shared chroma by coverage so a transparent colored pixel
-          // cannot tint its opaque neighbor or desaturate the host underneath.
-          // Most wheel/key pixels are gray. Equal chroma needs no coverage
-          // division, including antialiased text and partially dimmed video.
-          yuy2_[offset + 1] = coverage == 0 ? 128 : first[1] == second[1] ? first[1] :
-                                                                            (first[1] * firstAlpha + second[1] * secondAlpha + coverage / 2) / coverage;
-          yuy2_[offset + 3] = coverage == 0 ? 128 : first[2] == second[2] ? first[2] :
-                                                                            (first[2] * firstAlpha + second[2] * secondAlpha + coverage / 2) / coverage;
-          if (!opaque_) {
-            yuy2Opacity_[offset / 2] = firstAlpha;
-            yuy2Opacity_[offset / 2 + 1] = secondAlpha;
-          }
-        }
+    return true;
+  }
+
+  /**
+   * @brief Weight shared chroma without allowing transparent pixels to tint their neighbors.
+   * @param first First chroma component.
+   * @param second Second chroma component.
+   * @param firstAlpha First pixel coverage.
+   * @param secondAlpha Second pixel coverage.
+   * @return Coverage-weighted chroma, or neutral chroma for a transparent pair.
+   */
+  unsigned covered_chroma(unsigned first, unsigned second, unsigned firstAlpha, unsigned secondAlpha) {
+    const unsigned coverage = firstAlpha + secondAlpha;
+    if (coverage == 0) {
+      return 128;
+    }
+    if (first == second) {
+      return first;
+    }
+    return (first * firstAlpha + second * secondAlpha + coverage / 2) / coverage;
+  }
+
+  void VideoOverlay::convert_yuy2_pair(int row, int column, int bitmapRow, int firstBitmapColumn, int secondBitmapColumn, VideoColorMatrix matrix) {
+    const auto firstColor = color_at(static_cast<std::size_t>(bitmapRow) * width_ + firstBitmapColumn);
+    const auto secondColor = color_at(static_cast<std::size_t>(bitmapRow) * width_ + secondBitmapColumn);
+    const auto first = rgb_to_yuv(firstColor, matrix);
+    const auto second = rgb_to_yuv(secondColor, matrix);
+    const unsigned firstAlpha = firstColor >> 24;
+    const unsigned secondAlpha = secondColor >> 24;
+    const auto offset = (static_cast<std::size_t>(row) * source_.width + column) * 2;
+    yuy2_[offset] = first[0];
+    yuy2_[offset + 2] = second[0];
+    // Weight shared chroma by coverage so a transparent colored pixel
+    // cannot tint its opaque neighbor or desaturate the host underneath.
+    // Most wheel/key pixels are gray. Equal chroma needs no coverage
+    // division, including antialiased text and partially dimmed video.
+    yuy2_[offset + 1] = covered_chroma(first[1], second[1], firstAlpha, secondAlpha);
+    yuy2_[offset + 3] = covered_chroma(first[2], second[2], firstAlpha, secondAlpha);
+    if (!opaque_) {
+      yuy2Opacity_[offset / 2] = firstAlpha;
+      yuy2Opacity_[offset / 2 + 1] = secondAlpha;
+    }
+  }
+
+  void VideoOverlay::update_yuy2(const VideoRectangle &destination, VideoColorMatrix matrix, bool rebuild) {
+    const auto bounds = rectangle({0, 0, destination.width, destination.height});
+    const int visibleWidth = bounds.width;
+    const int visibleHeight = bounds.height;
+    if (visibleWidth == 0 || visibleHeight == 0) {
+      return;
+    }
+    const int firstRow = rebuild ? 0 : std::min(source_.height, damage_.y * source_.height / visibleHeight);
+    const int lastRow = rebuild ? source_.height : std::min(source_.height, ((damage_.y + damage_.height) * source_.height + visibleHeight - 1) / visibleHeight);
+    const int firstColumn = rebuild ? 0 : std::min(source_.width, (damage_.x * source_.width / visibleWidth) & ~1);
+    const int lastColumn = rebuild ? source_.width : std::min(source_.width, ((((damage_.x + damage_.width) * source_.width + visibleWidth - 1) / visibleWidth) + 1) & ~1);
+    const bool nativeWidth = visibleWidth == source_.width;
+    for (int row = firstRow; row < lastRow; ++row) {
+      const int bitmapRow = std::min(visibleHeight - 1, row * visibleHeight / source_.height);
+      for (int column = firstColumn; column < lastColumn; column += 2) {
+        const int firstBitmapColumn = nativeWidth ? column : std::min(visibleWidth - 1, column * visibleWidth / source_.width);
+        const int secondBitmapColumn = nativeWidth ? column + 1 : std::min(visibleWidth - 1, (column + 1) * visibleWidth / source_.width);
+        convert_yuy2_pair(row, column, bitmapRow, firstBitmapColumn, secondBitmapColumn, matrix);
       }
     }
+  }
+
+  void VideoOverlay::blend_yuy2(std::uint8_t *pixels, int pitch) {
     damage_ = {};
 
     if (source_.width <= 0 || source_.height <= 0) {
-      return true;
+      return;
     }
     for (int row = 0; row < source_.height; ++row) {
       auto *destinationRow = pixels + static_cast<std::size_t>(source_.y + row) * pitch + source_.x * 2;
@@ -527,7 +631,9 @@ namespace streaming {
       const auto *foreground = yuy2_.data() + rowOffset * 2;
       if (opaque_) {
         std::memcpy(destinationRow, foreground, source_.width * 2);
-      } else {
+        continue;
+      }
+      {
         for (int column = 0; column < source_.width; column += 2) {
           const unsigned left = yuy2Opacity_[rowOffset + column];
           const unsigned right = yuy2Opacity_[rowOffset + column + 1];
@@ -552,6 +658,23 @@ namespace streaming {
         }
       }
     }
+  }
+
+  bool VideoOverlay::draw_yuy2(std::uint8_t *pixels, std::size_t capacity, int pitch, int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix) {
+    if (width_ == 0) {
+      return true;
+    }
+    if (!valid_storage(pixels, capacity, pitch, frameWidth, frameHeight, 2) || (frameWidth & 1) != 0 || frameWidth > 2046 || frameHeight > 2047 || destination.width <= MARGIN || destination.height <= MARGIN || matrix == VideoColorMatrix::unsupported) {
+      return false;
+    }
+    bool rebuild = false;
+    if (!prepare_yuy2(frameWidth, frameHeight, destination, matrix, rebuild)) {
+      return true;
+    }
+    if (rebuild || (damage_.width > 0 && damage_.height > 0)) {
+      update_yuy2(destination, matrix, rebuild);
+    }
+    blend_yuy2(pixels, pitch);
     return true;
   }
 }  // namespace streaming

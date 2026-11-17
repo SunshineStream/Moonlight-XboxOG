@@ -1448,8 +1448,7 @@ namespace {
     }
 
     const int hintHeight = measure_footer_actions_height(smallFont, viewModel.modal.footerActions, modalRect.w - 36);
-    const SDL_Rect hintRect {modalRect.x + 18, modalRect.y + 64 + pathHeight + 8, modalRect.w - 36, hintHeight};
-    if (!render_footer_actions(renderer, smallFont, assetCache, viewModel.modal.footerActions, hintRect)) {
+    if (const SDL_Rect hintRect {modalRect.x + 18, modalRect.y + 64 + pathHeight + 8, modalRect.w - 36, hintHeight}; !render_footer_actions(renderer, smallFont, assetCache, viewModel.modal.footerActions, hintRect)) {
       return false;
     }
 
@@ -1499,6 +1498,60 @@ namespace {
   }
 
   /**
+   * @brief Optional icon, focus and retained-cache settings for action rows.
+   */
+  struct ActionRowsOptions {
+    AssetTextureCache *assetCache = nullptr;  ///< Shared action icon cache.
+    bool active = true;  ///< Whether the list owns controller focus.
+    FolderDialogCache *folder = nullptr;  ///< Retained row-label and scroll state.
+    bool repaint = false;  ///< Restore only rows affected by a focus change.
+  };
+
+  /**
+   * @brief Geometry and visible indices for a retained action-list repaint.
+   */
+  struct ActionRowsLayout {
+    SDL_Rect bounds;  ///< Complete list bounds.
+    int rowHeight;  ///< Single row height.
+    int rowStep;  ///< Distance between successive rows.
+    int contentWidth;  ///< Width excluding the scrollbar.
+    std::size_t startIndex;  ///< First visible row.
+    std::size_t endIndex;  ///< One past the last visible row.
+    std::size_t selectedIndex;  ///< Newly focused row.
+    bool windowChanged;  ///< The visible row range moved.
+  };
+
+  /**
+   * @brief Erase stale focus backgrounds before repainting retained action rows.
+   * @param renderer Dialog renderer.
+   * @param folder Previous focus and scroll state.
+   * @param layout Current visible row geometry.
+   */
+  void restore_action_row_backgrounds(SDL_Renderer *renderer, const FolderDialogCache &folder, const ActionRowsLayout &layout) {
+    if (layout.windowChanged) {
+      fill_rect(renderer, layout.bounds, 0x15, 0x1E, 0x2E);
+    } else {
+      for (const auto index : {folder.selected, layout.selectedIndex}) {
+        if (index >= layout.startIndex && index < layout.endIndex) {
+          fill_rect(renderer, {layout.bounds.x, layout.bounds.y + static_cast<int>(index - layout.startIndex) * layout.rowStep, layout.contentWidth, layout.rowHeight}, 0x15, 0x1E, 0x2E);
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Find the first focused action, using the first row when no focus is marked.
+   * @param rows Dialog actions.
+   * @return Focused row index, or zero.
+   */
+  std::size_t selected_action_index(const std::vector<ui::ShellActionRow> &rows) {
+    const auto found = std::find_if(rows.begin(), rows.end(), [](const ui::ShellActionRow &row) {
+      return row.selected;
+    });
+    return found == rows.end() ? 0 : static_cast<std::size_t>(found - rows.begin());
+  }
+
+  /**
    * @brief Draw scrollable action rows with rounded checkboxes, a filled selection and focus rail.
    *
    * @param renderer Active shell renderer.
@@ -1512,17 +1565,8 @@ namespace {
    * @param repaint Repaint affected rows in the retained frame instead of the complete list.
    * @return True when visible labels rendered successfully.
    */
-  bool render_action_rows(
-    SDL_Renderer *renderer,
-    TTF_Font *font,
-    const std::vector<ui::ShellActionRow> &rows,
-    const SDL_Rect &rect,
-    int rowHeight,
-    AssetTextureCache *assetCache = nullptr,
-    bool active = true,
-    FolderDialogCache *folder = nullptr,
-    bool repaint = false
-  ) {
+  bool render_action_rows(SDL_Renderer *renderer, TTF_Font *font, const std::vector<ui::ShellActionRow> &rows, const SDL_Rect &rect, int rowHeight, const ActionRowsOptions &options = {}) {
+    const auto &[assetCache, active, folder, repaint] = options;
     if (rows.empty()) {
       return true;
     }
@@ -1560,15 +1604,7 @@ namespace {
 
     if (folder != nullptr) {
       if (repaint) {
-        if (windowChanged) {
-          fill_rect(renderer, rect, 0x15, 0x1E, 0x2E);
-        } else {
-          for (const auto index : {folder->selected, selectedIndex}) {
-            if (index >= startIndex && index < endIndex) {
-              fill_rect(renderer, {rect.x, rect.y + static_cast<int>(index - startIndex) * rowStep, contentWidth, rowHeight}, 0x15, 0x1E, 0x2E);
-            }
-          }
-        }
+        restore_action_row_backgrounds(renderer, *folder, {rect, rowHeight, rowStep, contentWidth, startIndex, endIndex, selectedIndex, windowChanged});
       }
       for (auto it = folder->labels.begin(); it != folder->labels.end();) {
         if (it->first < startIndex || it->first >= endIndex) {
@@ -1707,10 +1743,14 @@ namespace {
     FooterActionChipLayout layout;
     const bool keyboard = !action.keyLabel.empty() || !action.secondaryKeyLabel.empty();
     layout.iconSize = keyboard ? std::max(18, TTF_FontHeight(font) + 6) : std::max(18, chipHeight - 14);
-    layout.primaryIconWidth = !action.keyLabel.empty() ? measure_footer_action_label_width(font, action.keyLabel) + 12 : action.iconAssetPath.empty() ? 0 :
-                                                                                                                                                        layout.iconSize;
-    layout.secondaryIconWidth = !action.secondaryKeyLabel.empty() ? measure_footer_action_label_width(font, action.secondaryKeyLabel) + 12 : action.secondaryIconAssetPath.empty() ? 0 :
-                                                                                                                                                                                     layout.iconSize;
+    layout.primaryIconWidth = action.iconAssetPath.empty() ? 0 : layout.iconSize;
+    if (!action.keyLabel.empty()) {
+      layout.primaryIconWidth = measure_footer_action_label_width(font, action.keyLabel) + 12;
+    }
+    layout.secondaryIconWidth = action.secondaryIconAssetPath.empty() ? 0 : layout.iconSize;
+    if (!action.secondaryKeyLabel.empty()) {
+      layout.secondaryIconWidth = measure_footer_action_label_width(font, action.secondaryKeyLabel) + 12;
+    }
     layout.iconBlockWidth = layout.primaryIconWidth + layout.secondaryIconWidth + (layout.primaryIconWidth > 0 && layout.secondaryIconWidth > 0 ? 4 : 0);
     layout.horizontalPadding = compact ? 6 : 10;
     layout.iconLabelGap = compact ? 4 : 8;
@@ -2410,10 +2450,8 @@ namespace {
    */
   void process_directory_picker_requests(app::ClientState &state, app::AppUpdate &update) {
     auto &picker = state.directoryPicker;
-    if (update.requests.directorySelectRequested) {
-      if (platform::directory_is_writable(picker.path, picker.error)) {
-        app::accept_screenshot_directory(state, update, picker.path);
-      }
+    if (update.requests.directorySelectRequested && platform::directory_is_writable(picker.path, picker.error)) {
+      app::accept_screenshot_directory(state, update, picker.path);
     }
     if (update.requests.directoryCreateRequested && platform::create_child_directory(picker.path, picker.name, picker.error)) {
       picker.path = platform::join_path(picker.path, picker.name);
@@ -2455,8 +2493,8 @@ namespace {
       state.settings.playAudioOnPc,
       state.settings.showPerformanceStats,
       state.settings.playAudioOnXbox,
-      state.settings.screenshotDirectory,
-      state.settings.keyboardDockTop,
+      state.settings.controls.screenshotDirectory,
+      state.settings.controls.keyboardDockTop,
     };
   }
 
@@ -3824,7 +3862,7 @@ namespace {
     const bool success = render_text_line_simple(renderer, smallFont, viewModel.content.selectedMenuRowLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.title.x, layout.title.y, layout.title.w) &&
                          render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowDescription, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, sdl_rect(layout.description));
     draw_line(renderer, layout.optionsHeader.x, layout.optionsHeader.y - 10, layout.optionsHeader.x + layout.optionsHeader.w, layout.optionsHeader.y - 10, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
-    return success && render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.optionsHeader.x, layout.optionsHeader.y, layout.optionsHeader.w) && render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, sdl_rect(layout.options), rowHeight, nullptr, viewModel.content.rightPanelActive);
+    return success && render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.optionsHeader.x, layout.optionsHeader.y, layout.optionsHeader.w) && render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, sdl_rect(layout.options), rowHeight, {nullptr, viewModel.content.rightPanelActive});
   }
 
   /**
@@ -3926,6 +3964,15 @@ namespace {
   }
 
   /**
+   * @brief Fonts shared by the title, content and actions of a shell dialog.
+   */
+  struct DialogFonts {
+    TTF_Font *titleFont;  ///< Dialog heading font.
+    TTF_Font *bodyFont;  ///< Dialog body font.
+    TTF_Font *smallFont;  ///< Helper and action font.
+  };
+
+  /**
    * @brief Render a content-sized dialog with persistent guidance, scrolling actions or progress.
    *
    * @param renderer Active renderer.
@@ -3939,7 +3986,8 @@ namespace {
    * @param folder Optional folder cache to populate for incremental navigation.
    * @return True when the dialog rendered successfully.
    */
-  bool render_shell_dialog(SDL_Renderer *renderer, TTF_Font *titleFont, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellModalView &modal, int width, int height, FolderDialogCache *folder = nullptr) {
+  bool render_shell_dialog(SDL_Renderer *renderer, const DialogFonts &fonts, AssetTextureCache *assetCache, const ui::ShellModalView &modal, int width, int height, FolderDialogCache *folder = nullptr) {
+    const auto &[titleFont, bodyFont, smallFont] = fonts;
     const int padding = std::max(18, height / 40);
     const int dialogWidth = std::min(760, width * 3 / 4);
     const int innerWidth = dialogWidth - padding * 2;
@@ -3978,7 +4026,7 @@ namespace {
       folder->rows = rows;
       folder->rowHeight = rowHeight;
     }
-    if (!modal.actions.empty() && !render_action_rows(renderer, bodyFont, modal.actions, rows, rowHeight, assetCache, true, folder)) {
+    if (!modal.actions.empty() && !render_action_rows(renderer, bodyFont, modal.actions, rows, rowHeight, {assetCache, true, folder})) {
       return false;
     }
     draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
@@ -4083,6 +4131,49 @@ namespace {
     return render_footer_actions(renderer, smallFont, assetCache, actions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerHeight}, true);
   }
 
+#ifdef NXDK
+  /**
+   * @brief Describe the Xbox framebuffer format and bytes per pixel.
+   * @param bpp Video depth.
+   * @return SDL format and byte count; zero bytes for an unsupported mode.
+   */
+  std::pair<Uint32, int> folder_framebuffer_format(int bpp) {
+    if (bpp == 32) {
+      return {SDL_PIXELFORMAT_RGB888, 4};
+    }
+    if (bpp == 16) {
+      return {SDL_PIXELFORMAT_RGB565, 2};
+    }
+    return {SDL_PIXELFORMAT_RGB555, bpp == 15 ? 2 : 0};
+  }
+
+  /**
+   * @brief Copy damaged rows into Xbox scanout after validating the source and destination formats.
+   * @param surface Source software window surface.
+   * @param framebuffer Write-combined scanout storage.
+   * @param mode Current Xbox video mode.
+   * @param area Validated repaint bounds.
+   * @param bytes Bytes per pixel.
+   * @return False if locking failed and ordinary SDL presentation is required.
+   */
+  bool copy_folder_framebuffer(SDL_Surface &surface, std::uint8_t *framebuffer, const VIDEO_MODE &mode, const ui::ShellRect &area, int bytes) {
+    const bool locked = SDL_MUSTLOCK(&surface) != 0;
+    if (locked && SDL_LockSurface(&surface) != 0) {
+      return false;
+    }
+    for (int y = area.y; y < area.y + area.h; ++y) {
+      const auto *source = static_cast<const std::uint8_t *>(surface.pixels) + static_cast<std::size_t>(y) * surface.pitch + area.x * bytes;
+      auto *destination = static_cast<std::uint8_t *>(framebuffer) + (static_cast<std::size_t>(y) * mode.width + area.x) * bytes;
+      std::memcpy(destination, source, static_cast<std::size_t>(area.w) * bytes);
+    }
+    if (locked) {
+      SDL_UnlockSurface(&surface);
+    }
+    XVideoFlushFB();
+    return true;
+  }
+#endif
+
   /**
    * @brief Present changed folder rows without the Xbox SDL driver's full-screen copy, retaining SDL fallback.
    * @param renderer Software shell renderer to flush.
@@ -4092,35 +4183,19 @@ namespace {
    */
   void present_folder_damage(SDL_Renderer *renderer, SDL_Window *window, const SDL_Rect &logicalDamage, int logicalWidth) {
 #ifdef NXDK
-    SDL_RendererInfo info {};
-    if (window != nullptr && SDL_GetRendererInfo(renderer, &info) == 0 && (info.flags & SDL_RENDERER_SOFTWARE) != 0) {
+    if (SDL_RendererInfo info {}; window != nullptr && SDL_GetRendererInfo(renderer, &info) == 0 && (info.flags & SDL_RENDERER_SOFTWARE) != 0) {
       SDL_RenderFlush(renderer);
       SDL_Surface *surface = SDL_GetWindowSurface(window);
       const VIDEO_MODE mode = XVideoGetMode();
       void *framebuffer = XVideoGetFB();
-      const Uint32 format = mode.bpp == 32 ? SDL_PIXELFORMAT_RGB888 : mode.bpp == 16 ? SDL_PIXELFORMAT_RGB565 :
-                                                                                       SDL_PIXELFORMAT_RGB555;
-      const int bytes = mode.bpp == 32 ? 4 : mode.bpp == 15 || mode.bpp == 16 ? 2 :
-                                                                                0;
+      const auto [format, bytes] = folder_framebuffer_format(mode.bpp);
       // The Xbox software window surface uses the video mode's RGB format.
       // Validate that relationship before copying into write-combined scanout.
       if (surface != nullptr && framebuffer != nullptr && bytes > 0 && surface->w == mode.width && surface->h == mode.height && surface->format->format == format && surface->format->BytesPerPixel == bytes && surface->pitch >= mode.width * bytes) {
         const auto area = ui::framebuffer_repaint_rect({logicalDamage.x, logicalDamage.y, logicalDamage.w, logicalDamage.h}, logicalWidth, mode.width, mode.height);
-        const bool locked = SDL_MUSTLOCK(surface) != 0;
-        if (locked && SDL_LockSurface(surface) != 0) {
-          SDL_RenderPresent(renderer);
+        if (copy_folder_framebuffer(*surface, static_cast<std::uint8_t *>(framebuffer), mode, area, bytes)) {
           return;
         }
-        for (int y = area.y; y < area.y + area.h; ++y) {
-          const auto *source = static_cast<const std::uint8_t *>(surface->pixels) + static_cast<std::size_t>(y) * surface->pitch + area.x * bytes;
-          auto *destination = static_cast<std::uint8_t *>(framebuffer) + (static_cast<std::size_t>(y) * mode.width + area.x) * bytes;
-          std::memcpy(destination, source, static_cast<std::size_t>(area.w) * bytes);
-        }
-        if (locked) {
-          SDL_UnlockSurface(surface);
-        }
-        XVideoFlushFB();
-        return;
       }
     }
 #else
@@ -4158,13 +4233,11 @@ namespace {
     if (file != nullptr) {
       std::fclose(file);
     }
-    const auto image = read ? ui::screenshot_bitmap_size({header.data(), header.size()}, size) : ui::ScreenshotImageSize {};
-    if (image.width == 0) {
+    if (const auto image = read ? ui::screenshot_bitmap_size({header.data(), header.size()}, size) : ui::ScreenshotImageSize {}; image.width == 0) {
       cache.error = "Cannot open this screenshot. The bitmap is damaged or unsupported.";
       return;
     }
-    SDL_Surface *surface = SDL_LoadBMP(path.c_str());
-    if (surface != nullptr) {
+    if (SDL_Surface *surface = SDL_LoadBMP(path.c_str()); surface != nullptr) {
       cache.texture = SDL_CreateTextureFromSurface(renderer, surface);
       SDL_FreeSurface(surface);
     }
@@ -4206,8 +4279,7 @@ namespace {
         return false;
       }
     }
-    const std::string details = !view.screenshot.status.empty() && !view.screenshot.path.empty() ? view.screenshot.status : view.screenshot.path;
-    if (!render_text_line_simple(renderer, smallFont, details, muted, bounds.x, picture.y + picture.h + 6, bounds.w) || !render_footer_actions(renderer, smallFont, assets, view.modal.footerActions, {bounds.x, bounds.y + bounds.h - footer, bounds.w, footer})) {
+    if (const std::string details = !view.screenshot.status.empty() && !view.screenshot.path.empty() ? view.screenshot.status : view.screenshot.path; !render_text_line_simple(renderer, smallFont, details, muted, bounds.x, picture.y + picture.h + 6, bounds.w) || !render_footer_actions(renderer, smallFont, assets, view.modal.footerActions, {bounds.x, bounds.y + bounds.h - footer, bounds.w, footer})) {
       return false;
     }
     SDL_RenderPresent(renderer);
@@ -4254,22 +4326,15 @@ namespace {
     auto *folder = keypadModalLayoutCache != nullptr ? &keypadModalLayoutCache->folder : nullptr;
     const bool folderBrowser = viewModel.modal.visible && !viewModel.modal.busy && !viewModel.modal.actions.empty() && !viewModel.logViewer.visible && !viewModel.screenshot.visible && !viewModel.overlay.visible && !viewModel.keypad.visible;
     if (folder != nullptr) {
-      const bool reusable = folderBrowser && folder->valid && folder->logicalWidth == screenWidth && folder->framebufferWidth == framebufferWidth && folder->framebufferHeight == framebufferHeight && folder->titleFont == titleFont && folder->bodyFont == bodyFont && folder->smallFont == smallFont && ui::same_action_dialog_content(folder->content, viewModel.modal);
-      if (reusable) {
-        std::size_t selected = 0;
-        for (std::size_t i = 0; i < viewModel.modal.actions.size(); ++i) {
-          if (viewModel.modal.actions[i].selected) {
-            selected = i;
-            break;
-          }
-        }
+      if (const bool reusable = folderBrowser && folder->valid && folder->logicalWidth == screenWidth && folder->framebufferWidth == framebufferWidth && folder->framebufferHeight == framebufferHeight && folder->titleFont == titleFont && folder->bodyFont == bodyFont && folder->smallFont == smallFont && ui::same_action_dialog_content(folder->content, viewModel.modal); reusable) {
+        const auto selected = selected_action_index(viewModel.modal.actions);
         if (selected == folder->selected) {
           return true;
         }
         SDL_RenderSetScale(renderer, horizontalScale, 1.0f);
         const auto oldFirst = folder->first;
         const auto oldSelected = folder->selected;
-        const bool painted = render_action_rows(renderer, bodyFont, viewModel.modal.actions, folder->rows, folder->rowHeight, assetCache, true, folder, true);
+        const bool painted = render_action_rows(renderer, bodyFont, viewModel.modal.actions, folder->rows, folder->rowHeight, {assetCache, true, folder, true});
         SDL_Rect damage = folder->rows;
         if (oldFirst == folder->first) {
           const auto top = std::min(oldSelected, selected) - folder->first;
@@ -4368,15 +4433,7 @@ namespace {
         return false;
       }
 
-      if (!render_action_rows(
-            renderer,
-            bodyFont,
-            viewModel.content.menuRows,
-            {menuPanel.x + panelPadding, menuHeaderRect.y + menuHeaderRect.h + 12, menuPanel.w - (panelPadding * 2), menuPanel.h - (menuHeaderRect.h + (panelPadding * 2) + 12)},
-            std::max(36, screenHeight / 13),
-            assetCache,
-            viewModel.content.leftPanelActive
-          )) {
+      if (!render_action_rows(renderer, bodyFont, viewModel.content.menuRows, {menuPanel.x + panelPadding, menuHeaderRect.y + menuHeaderRect.h + 12, menuPanel.w - (panelPadding * 2), menuPanel.h - (menuHeaderRect.h + (panelPadding * 2) + 12)}, std::max(36, screenHeight / 13), {assetCache, viewModel.content.leftPanelActive})) {
         return false;
       }
 
@@ -4450,10 +4507,8 @@ namespace {
         render_text_line_simple(renderer, smallFont, "The full log viewer could not be rendered safely.", {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54, modalRect.w - 32);
         render_text_line_simple(renderer, smallFont, (viewModel.modal.footerActions.empty() || viewModel.modal.footerActions.back().keyLabel.empty() ? "Press B to close." : "Press Esc to close."), {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_FontLineSkip(smallFont) + 8, modalRect.w - 32);
       }
-    } else if (viewModel.modal.visible) {
-      if (!render_shell_dialog(renderer, titleFont, bodyFont, smallFont, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
-        return false;
-      }
+    } else if (viewModel.modal.visible && !render_shell_dialog(renderer, {titleFont, bodyFont, smallFont}, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
+      return false;
     }
     if (viewModel.keypad.visible && !render_keypad_dialog(renderer, bodyFont, smallFont, assetCache, viewModel, screenWidth, screenHeight, keypadModalLayoutCache)) {
       return false;
@@ -4703,6 +4758,35 @@ namespace {
   }
 
   /**
+   * @brief Type printable physical keyboard input into a folder-name draft.
+   * @param state Active folder workflow.
+   * @param event Physical keyboard event.
+   * @return True when the folder-name keyboard consumes this key.
+   */
+  bool handle_directory_key(app::ClientState &state, const SDL_KeyboardEvent &event) {
+    if (state.modal.id != app::ModalId::directory_picker || !state.directoryPicker.creating || event.keysym.sym < 32 || event.keysym.sym >= 127 || (event.keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) != 0) {
+      return false;
+    }
+    const int code = input::keyboard_virtual_key(event.keysym.scancode);
+    if (code == 0x20) {
+      app::append_directory_name(state, " ");
+      return true;
+    }
+    for (std::size_t i = 0; i < 60; ++i) {
+      const auto &key = input::StreamMenu::KEYS[i];
+      if (key.code != code) {
+        continue;
+      }
+      const bool shifted = ((event.keysym.mod & KMOD_SHIFT) != 0) != (code >= 'A' && code <= 'Z' && (event.keysym.mod & KMOD_CAPS) != 0);
+      if (const std::string text = shifted ? key.shifted : key.label; text.size() == 1) {
+        app::append_directory_name(state, text);
+      }
+      break;
+    }
+    return true;
+  }
+
+  /**
    * @brief Route device transitions and maintain the input source used by contextual helpers.
    * @param state Reducer state and current input device.
    * @param event SDL event to process.
@@ -4749,24 +4833,7 @@ namespace {
           state.shell.shouldExit = true;
           return input::UiCommand::none;
         }
-        if (state.modal.id == app::ModalId::directory_picker && state.directoryPicker.creating && event.key.keysym.sym >= 32 && event.key.keysym.sym < 127 && (event.key.keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) == 0) {
-          const int code = input::keyboard_virtual_key(event.key.keysym.scancode);
-          if (code == 0x20) {
-            app::append_directory_name(state, " ");
-          } else {
-            for (std::size_t i = 0; i < 60; ++i) {
-              const auto &key = input::StreamMenu::KEYS[i];
-              if (key.code != code) {
-                continue;
-              }
-              const bool shifted = ((event.key.keysym.mod & KMOD_SHIFT) != 0) != (code >= 'A' && code <= 'Z' && (event.key.keysym.mod & KMOD_CAPS) != 0);
-              const std::string text = shifted ? key.shifted : key.label;
-              if (text.size() == 1) {
-                app::append_directory_name(state, text);
-              }
-              break;
-            }
-          }
+        if (handle_directory_key(state, event.key)) {
           return input::UiCommand::none;
         }
         return inputState->keyboardNavigation.press(event.key.keysym.scancode, translate_keyboard_key(event.key.keysym.sym, event.key.keysym.mod), SDL_GetTicks());
@@ -4874,11 +4941,10 @@ namespace {
    */
   int run_app_quit_task(void *context) {  // NOSONAR(cpp:S5008) SDL thread callback ABI
     auto &task = *static_cast<AppQuitTaskState *>(context);
-    network::PairingIdentity identity {};
-    if (load_saved_pairing_identity_for_streaming(&identity, &task.message)) {
+    if (network::PairingIdentity identity {}; load_saved_pairing_identity_for_streaming(&identity, &task.message)) {
       task.success = network::quit_host_app(task.target.address, task.target.port, identity, task.target.appId, &task.message);
     }
-    task.completed.store(true, std::memory_order_release);
+    task.completed.store(true);
     return 0;
   }
 
@@ -4894,7 +4960,7 @@ namespace {
     task.target = state.appQuit;
     task.success = false;
     task.message.clear();
-    task.completed.store(false, std::memory_order_relaxed);
+    task.completed.store(false);
     task.thread = SDL_CreateThread(run_app_quit_task, "quit-host-app", &task);
     if (task.thread == nullptr) {
       app::apply_app_quit_result(state, false, std::string("Could not start quit request: ") + SDL_GetError());
@@ -4907,7 +4973,7 @@ namespace {
    * @param task Runtime-owned quit worker.
    */
   void finish_app_quit_task(app::ClientState &state, AppQuitTaskState &task) {
-    if (task.thread == nullptr || !task.completed.load(std::memory_order_acquire)) {
+    if (task.thread == nullptr || !task.completed.load()) {
       return;
     }
     SDL_WaitThread(task.thread, nullptr);
@@ -5159,7 +5225,7 @@ namespace {
     }
 
     const auto ready = [](const auto &task) {
-      return task.thread != nullptr && task.completed.load(std::memory_order_acquire);
+      return task.thread != nullptr && task.completed.load();
     };
     bool changed = ready(runtime->connectionTestTask) || ready(runtime->appListTask) || ready(runtime->appArtTask) || ready(runtime->hostDiscoveryTask) || ready(runtime->appQuitTask);
     if (runtime->pairingTask.activeAttempt != nullptr) {

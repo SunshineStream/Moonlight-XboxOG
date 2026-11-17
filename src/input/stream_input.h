@@ -115,13 +115,13 @@ namespace input {
      * @param x Horizontal delta.
      * @param y Vertical delta.
      */
-    void mouse_move(int x, int y);
+    void mouse_move(int x, int y) const;
     /**
      * @brief Forward wheel ticks on both axes.
      * @param x Horizontal ticks.
      * @param y Vertical ticks.
      */
-    void scroll(int x, int y);
+    void scroll(int x, int y) const;
     /**
      * @brief Release every key and mouse button belonging to one source.
      * @param source Source that disconnected or changed mode.
@@ -163,7 +163,7 @@ namespace input {
      * @param pressed Transition direction.
      * @param modifiers Keyboard modifiers.
      */
-    void digital(StreamPacketType type, std::map<int, std::set<int>> &held, int source, int code, bool pressed, int modifiers);
+    void digital(StreamPacketType type, std::map<int, std::set<int>> &held, int source, int code, bool pressed, int modifiers) const;
     Sink sink_;  ///< Ordered transport sink.
     std::array<Slot, 4> slots_ {};  ///< Stable slots, never compacted on removal.
     std::map<int, std::set<int>> keys_;  ///< Sources holding each host key.

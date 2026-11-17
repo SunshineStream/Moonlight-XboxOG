@@ -12,7 +12,11 @@
 #include <SDL.h>
 
 // nxdk includes
-#include <windows.h>
+#ifdef NXDK
+  #include <windows.h>
+#else
+  #include <Windows.h>
+#endif
 #include <xboxkrnl/xboxkrnl.h>
 
 // lib includes
@@ -70,11 +74,33 @@ namespace {
     std::array<std::uint8_t, 8> bytes {};  ///< Maximum boot keyboard report.
   };
 
-  std::array<UsbReport, 128> reports {};  ///< Single-CPU DPC-to-event-thread queue.
-  unsigned head = 0;  ///< Next queue write index, guarded by DPC IRQL.
-  unsigned tail = 0;  ///< Next queue read index, guarded by DPC IRQL.
-  bool overflow = false;  ///< An overflow requires a full input release.
-  int nextDevice = 1;  ///< Distinguishes reused USB interface addresses.
+  /**
+   * @brief Stable USB callback context; zero marks a reusable disconnected interface.
+   */
+  struct UsbConnection {
+    int id = 0;  ///< Unique generation assigned when the interface connects.
+  };
+
+  /**
+   * @brief Fixed storage shared by USB callbacks and the SDL event-thread consumer.
+   */
+  struct UsbInputState {
+    std::array<UsbReport, 128> reports {};  ///< Single-CPU DPC-to-event-thread queue.
+    unsigned head = 0;  ///< Next queue write index, guarded by DPC IRQL.
+    unsigned tail = 0;  ///< Next queue read index, guarded by DPC IRQL.
+    bool overflow = false;  ///< An overflow requires a full input release.
+    int nextDevice = 1;  ///< Distinguishes reused USB interface addresses.
+    std::array<UsbConnection, 128> connections {};  ///< Callback contexts never allocate at DPC level.
+  };
+
+  /**
+   * @brief Access the statically initialized single-CPU USB bridge state.
+   * @return Queue and callback contexts, guarded by DPC IRQL where required.
+   */
+  UsbInputState &usb_state() {
+    static UsbInputState state {};
+    return state;
+  }
 
   /**
    * @brief Copy an operation without allocation or SDL calls from an interrupt callback.
@@ -82,12 +108,11 @@ namespace {
    */
   void enqueue(const UsbReport &report) {
     const KIRQL previous = KeRaiseIrqlToDpcLevel();
-    const unsigned next = (head + 1) % reports.size();
-    if (next == tail) {
-      overflow = true;
+    if (const unsigned next = (usb_state().head + 1) % usb_state().reports.size(); next == usb_state().tail) {
+      usb_state().overflow = true;
     } else {
-      reports[head] = report;
-      head = next;
+      usb_state().reports[usb_state().head] = report;
+      usb_state().head = next;
     }
     KfLowerIrql(previous);
   }
@@ -106,7 +131,7 @@ namespace {
       return;
     }
     UsbReport report;
-    report.device = static_cast<int>(reinterpret_cast<std::intptr_t>(device->user_data));
+    report.device = static_cast<const UsbConnection *>(device->user_data)->id;
     if (status < 0) {
       report.operation = -1;
     } else {
@@ -132,11 +157,20 @@ namespace {
     if (usbh_hid_set_protocol(device, 0) != 0) {
       return;
     }
-    const int id = nextDevice++;
-    device->user_data = reinterpret_cast<void *>(static_cast<std::intptr_t>(id));
+    auto &connections = usb_state().connections;
+    const auto context = std::find_if(connections.begin(), connections.end(), [](const UsbConnection &entry) {
+      return entry.id == 0;
+    });
+    if (context == connections.end()) {
+      return;
+    }
+    const int id = usb_state().nextDevice++;
+    context->id = id;
+    device->user_data = &*context;
     enqueue({id, device->bProtocolCode});
     if (usbh_hid_start_int_read(device, 0, receive) != 0) {
       enqueue({id, -1});
+      context->id = 0;
       device->user_data = nullptr;
     }
   }
@@ -149,7 +183,10 @@ namespace {
   void disconnected(HID_DEV_T *device, int status) {
     (void) status;
     if (device->user_data != nullptr) {
-      enqueue({static_cast<int>(reinterpret_cast<std::intptr_t>(device->user_data)), -1});
+      auto *context = static_cast<UsbConnection *>(device->user_data);
+      enqueue({context->id, -1});
+      context->id = 0;
+      device->user_data = nullptr;
     }
   }
 
@@ -163,9 +200,21 @@ namespace {
     } else if (event.type == input::BootHidEventType::motion) {
       SDL_SendMouseMotion(SDL_GetKeyboardFocus(), 0, 1, event.x, event.y);
     } else {
-      const Uint8 button = event.code == 1 ? SDL_BUTTON_LEFT : event.code == 2 ? SDL_BUTTON_RIGHT :
-                                                                                 SDL_BUTTON_MIDDLE;
+      const Uint8 button = std::array<Uint8, 3> {SDL_BUTTON_LEFT, SDL_BUTTON_RIGHT, SDL_BUTTON_MIDDLE}.at(event.code - 1);
       SDL_SendMouseButton(SDL_GetKeyboardFocus(), 0, event.pressed ? SDL_PRESSED : SDL_RELEASED, button);
+    }
+  }
+
+  /**
+   * @brief Re-register connected HID interfaces after releasing an overflowed report queue.
+   * @param input Event-thread boot HID decoder.
+   */
+  void reconnect_boot_devices(input::BootHidInput &input) {
+    for (auto *device = usbh_hid_get_device_list(); device != nullptr; device = device->next) {
+      if (device->user_data == nullptr) {
+        continue;
+      }
+      input.connect(static_cast<const UsbConnection *>(device->user_data)->id, device->bProtocolCode);
     }
   }
 }  // namespace
@@ -186,25 +235,21 @@ extern "C" void moonlight_usb_input_pump() {
   for (;;) {
     UsbReport report;
     const KIRQL previous = KeRaiseIrqlToDpcLevel();
-    const bool reset = overflow;
-    overflow = false;
+    const bool reset = usb_state().overflow;
+    usb_state().overflow = false;
     if (reset) {
-      tail = head;
+      usb_state().tail = usb_state().head;
     }
-    const bool available = tail != head;
+    const bool available = usb_state().tail != usb_state().head;
     if (available) {
-      report = reports[tail];
-      tail = (tail + 1) % reports.size();
+      report = usb_state().reports[usb_state().tail];
+      usb_state().tail = (usb_state().tail + 1) % usb_state().reports.size();
     }
     KfLowerIrql(previous);
     // Keep device identities after overflow; release their old state and accept future reports.
     if (reset) {
       input.clear();
-      for (auto *device = usbh_hid_get_device_list(); device != nullptr; device = device->next) {
-        if (device->user_data != nullptr) {
-          input.connect(static_cast<int>(reinterpret_cast<std::intptr_t>(device->user_data)), device->bProtocolCode);
-        }
-      }
+      reconnect_boot_devices(input);
     }
     if (!available) {
       break;

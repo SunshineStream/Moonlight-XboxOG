@@ -370,7 +370,8 @@ namespace streaming {
   }
 
   void FfmpegStreamBackend::invalidate_overlay_texture() {
-    statisticsBitmapChanged_ = statisticsTextureChanged_ = true;
+    statisticsBitmapChanged_ = true;
+    statisticsTextureChanged_ = true;
     statisticsTextureDamage_ = {0, 0, statisticsOverlay_.width(), statisticsOverlay_.height()};
     if (statisticsTexture_ != nullptr) {
       int width = 0;
@@ -396,7 +397,8 @@ namespace streaming {
     } else {
       statisticsTextureDamage_ = region;
     }
-    statisticsBitmapChanged_ = statisticsTextureChanged_ = true;
+    statisticsBitmapChanged_ = true;
+    statisticsTextureChanged_ = true;
   }
 
   bool FfmpegStreamBackend::has_pending_overlay() const {
@@ -415,7 +417,7 @@ namespace streaming {
     }
   }
 
-  bool FfmpegStreamBackend::request_screenshot(const std::string &directory, const app::ScreenshotSource &source) {
+  bool FfmpegStreamBackend::request_screenshot(std::string_view directory, const app::ScreenshotSource &source) {
     if (const auto result = take_screenshot_result(); !result.empty()) {
       logging::info("screenshots", result);
     }
@@ -444,9 +446,13 @@ namespace streaming {
     screenshot_.directory = directory;
     screenshot_.capturedAt = static_cast<std::int64_t>(std::time(nullptr));
     screenshot_.result.clear();
-    screenshot_.progress.store(0, std::memory_order_relaxed);
-    screenshot_.complete.store(false, std::memory_order_relaxed);
-    screenshot_.thread = SDL_CreateThread(save_screenshot_worker, "save-screenshot", &screenshot_);
+    screenshot_.progress.store(0);
+    screenshot_.complete.store(false);
+    screenshot_.thread = SDL_CreateThread([](auto *context) {
+      return save_screenshot_worker(static_cast<ScreenshotTask *>(context));
+    },
+                                          "save-screenshot",
+                                          &screenshot_);
     if (screenshot_.thread == nullptr) {
       screenshot_.frame = {};
       logging::warn("screenshots", std::string("Cannot start screenshot worker: ") + SDL_GetError());
@@ -455,7 +461,7 @@ namespace streaming {
   }
 
   std::string FfmpegStreamBackend::take_screenshot_result() {
-    if (screenshot_.thread == nullptr || !screenshot_.complete.load(std::memory_order_acquire)) {
+    if (screenshot_.thread == nullptr || !screenshot_.complete.load()) {
       return {};
     }
     SDL_WaitThread(screenshot_.thread, nullptr);
@@ -464,7 +470,7 @@ namespace streaming {
   }
 
   int FfmpegStreamBackend::screenshot_progress() const {
-    return screenshot_.thread != nullptr ? screenshot_.progress.load(std::memory_order_relaxed) : -1;
+    return screenshot_.thread != nullptr ? screenshot_.progress.load() : -1;
   }
 
   /**
@@ -504,60 +510,84 @@ namespace streaming {
     const auto written = SDL_RWwrite(writer.file, pixels, size, count);
     writer.position += static_cast<Sint64>(written * size);
     writer.written = std::max(writer.written, writer.position);
-    writer.progress.store(10 + static_cast<int>(85 * std::min(writer.written, writer.expected) / writer.expected), std::memory_order_relaxed);
+    writer.progress.store(10 + static_cast<int>(85 * std::min(writer.written, writer.expected) / writer.expected));
     return written;
   }
 
-  int FfmpegStreamBackend::save_screenshot_worker(void *context) {
-    auto &job = *static_cast<ScreenshotTask *>(context);
-    // Stay below the high-priority streaming event loop without starving behind
-    // ongoing USB/audio work on the Xbox's single CPU.
+  /**
+   * @brief Encode a BMP with byte-based progress, closing the file on every outcome.
+   * @param surface Converted BGR screenshot.
+   * @param path Destination filename.
+   * @param progress UI-readable completed percentage.
+   * @return True after both encoding and file finalization succeed.
+   */
+  bool save_screenshot_bitmap(SDL_Surface &surface, const std::string &path, std::atomic<int> &progress) {
+    SDL_RWops *file = SDL_RWFromFile(path.c_str(), "wb");
+    if (file == nullptr) {
+      return false;
+    }
+    ScreenshotFileProgress writer {file, progress, 54 + static_cast<Sint64>((surface.w * 3 + 3) & ~3) * surface.h};
+    SDL_RWops progressFile {};
+    progressFile.hidden.unknown.data1 = &writer;
+    progressFile.seek = screenshot_file_seek;
+    progressFile.write = screenshot_file_write;
+    const bool encoded = SDL_SaveBMP_RW(&surface, &progressFile, 0) == 0;
+    const bool closed = SDL_RWclose(file) == 0;
+    const bool saved = encoded && closed;
+    if (!saved) {
+      std::remove(path.c_str());
+    }
+    return saved;
+  }
+
+  SDL_Surface *FfmpegStreamBackend::convert_screenshot_frame(const LatestVideoFrame &frame) {
+    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, frame.width, frame.height, 24, SDL_PIXELFORMAT_BGR24);
+    if (surface == nullptr) {
+      return nullptr;
+    }
+    SwsContext *conversion = sws_getContext(frame.width, frame.height, AV_PIX_FMT_YUV420P, frame.width, frame.height, AV_PIX_FMT_BGR24, SWS_POINT, nullptr, nullptr, nullptr);
+    if (conversion == nullptr) {
+      SDL_FreeSurface(surface);
+      return nullptr;
+    }
+    const int *coefficients = sws_getCoefficients(frame.matrix == VideoColorMatrix::bt709 ? SWS_CS_ITU709 : SWS_CS_ITU601);
+    sws_setColorspaceDetails(conversion, coefficients, frame.fullRange, coefficients, 1, 0, 1 << 16, 1 << 16);
+    const std::array<const std::uint8_t *, 4> pixels {frame.yPlane.data(), frame.uPlane.data(), frame.vPlane.data(), nullptr};
+    const std::array<int, 4> pitch {frame.yPitch, frame.uPitch, frame.vPitch, 0};
+    std::array<std::uint8_t *, 4> output {static_cast<std::uint8_t *>(surface->pixels), nullptr, nullptr, nullptr};
+    const std::array<int, 4> outputPitch {surface->pitch, 0, 0, 0};
+    const bool converted = sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height;
+    sws_freeContext(conversion);
+    if (!converted) {
+      SDL_FreeSurface(surface);
+      return nullptr;
+    }
+    return surface;
+  }
+
+  int FfmpegStreamBackend::save_screenshot_worker(ScreenshotTask *context) {
+    auto &job = *context;
+    // Stay below the streaming event loop without starving behind USB/audio work.
     SDL_SetThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
-    job.progress.store(1, std::memory_order_relaxed);
+    job.progress.store(1);
     std::string error;
     const std::string path = app::next_screenshot_path(job.directory, job.capturedAt, error);
-    const auto &frame = job.frame;
-    SDL_Surface *surface = path.empty() ? nullptr : SDL_CreateRGBSurfaceWithFormat(0, frame.width, frame.height, 24, SDL_PIXELFORMAT_BGR24);
-    SwsContext *conversion = surface == nullptr ? nullptr : sws_getContext(frame.width, frame.height, AV_PIX_FMT_YUV420P, frame.width, frame.height, AV_PIX_FMT_BGR24, SWS_POINT, nullptr, nullptr, nullptr);
+    SDL_Surface *surface = path.empty() ? nullptr : convert_screenshot_frame(job.frame);
+    // Release the YUV snapshot before disk I/O so full-screen menus still fit in 64 MiB.
+    job.frame = {};
     bool saved = false;
-    if (conversion != nullptr) {
-      const int *coefficients = sws_getCoefficients(frame.matrix == VideoColorMatrix::bt709 ? SWS_CS_ITU709 : SWS_CS_ITU601);
-      sws_setColorspaceDetails(conversion, coefficients, frame.fullRange, coefficients, 1, 0, 1 << 16, 1 << 16);
-      const std::array<const std::uint8_t *, 4> pixels {frame.yPlane.data(), frame.uPlane.data(), frame.vPlane.data(), nullptr};
-      const std::array<int, 4> pitch {frame.yPitch, frame.uPitch, frame.vPitch, 0};
-      std::array<std::uint8_t *, 4> output {static_cast<std::uint8_t *>(surface->pixels), nullptr, nullptr, nullptr};
-      const std::array<int, 4> outputPitch {surface->pitch, 0, 0, 0};
-      const bool converted = sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height;
-      sws_freeContext(conversion);
-      // The BGR surface now owns the image. Return the YUV snapshot and scale
-      // buffers before disk I/O so opening a full-screen menu still fits in 64 MiB.
-      job.frame = {};
-      if (converted) {
-        job.progress.store(10, std::memory_order_relaxed);
-        if (SDL_RWops *file = SDL_RWFromFile(path.c_str(), "wb"); file != nullptr) {
-          ScreenshotFileProgress writer {file, job.progress, 54 + static_cast<Sint64>((surface->w * 3 + 3) & ~3) * surface->h};
-          SDL_RWops progressFile {};
-          progressFile.hidden.unknown.data1 = &writer;
-          progressFile.seek = screenshot_file_seek;
-          progressFile.write = screenshot_file_write;
-          const bool encoded = SDL_SaveBMP_RW(surface, &progressFile, 0) == 0;
-          const bool closed = SDL_RWclose(file) == 0;
-          saved = encoded && closed;
-          if (!saved) {
-            std::remove(path.c_str());
-          }
-        }
-      }
+    if (surface != nullptr) {
+      job.progress.store(10);
+      saved = save_screenshot_bitmap(*surface, path, job.progress);
     }
     SDL_FreeSurface(surface);
     if (saved) {
-      job.progress.store(99, std::memory_order_relaxed);
+      job.progress.store(99);
       job.result = app::append_screenshot({job.source, path, job.capturedAt}, app::screenshot_library_path(), error) ? "Saved " + path : "Saved " + path + "; could not update the screenshot library: " + error;
     } else {
       job.result = "Screenshot failed: " + (error.empty() ? std::string(SDL_GetError()) : error);
     }
-    job.frame = {};
-    job.complete.store(true, std::memory_order_release);
+    job.complete.store(true);
     return 0;
   }
 
@@ -820,8 +850,7 @@ namespace streaming {
     if (statisticsTextureChanged_) {
       const auto &pixels = statisticsOverlay_.argb_pixels();
       const SDL_Rect damage {statisticsTextureDamage_.x, statisticsTextureDamage_.y, statisticsTextureDamage_.width, statisticsTextureDamage_.height};
-      const auto offset = (static_cast<std::size_t>(damage.y) * width + damage.x) * 4;
-      if (SDL_UpdateTexture(statisticsTexture_, &damage, pixels.data() + offset, width * 4) != 0) {
+      if (const auto offset = (static_cast<std::size_t>(damage.y) * width + damage.x) * 4; SDL_UpdateTexture(statisticsTexture_, &damage, pixels.data() + offset, width * 4) != 0) {
         return;
       }
       statisticsTextureChanged_ = false;

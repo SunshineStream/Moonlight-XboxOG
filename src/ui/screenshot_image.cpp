@@ -36,14 +36,12 @@ namespace ui {
     const auto height = little_endian(header, 22, 4);
     const auto planes = little_endian(header, 26, 2);
     const auto bits = little_endian(header, 28, 2);
-    const auto compression = little_endian(header, 30, 4);
     // Captures are 24-bit BI_RGB. Also accept ordinary 32-bit BI_RGB files, with
     // a two-megapixel ceiling so a damaged header cannot exhaust the Xbox heap.
-    if (dibSize < 40 || dibSize > 124 || offset < 14U + dibSize || width == 0 || width > 1920 || height == 0 || height > 1080 || planes != 1 || (bits != 24 && bits != 32) || compression != 0) {
+    if (const auto compression = little_endian(header, 30, 4); dibSize < 40 || dibSize > 124 || offset < 14U + dibSize || width == 0 || width > 1920 || height == 0 || height > 1080 || planes != 1 || (bits != 24 && bits != 32) || compression != 0) {
       return {};
     }
-    const std::uint64_t stride = (static_cast<std::uint64_t>(width) * bits + 31U) / 32U * 4U;
-    if (offset + stride * height > fileSize) {
+    if (const std::uint64_t stride = (static_cast<std::uint64_t>(width) * bits + 31U) / 32U * 4U; offset + stride * height > fileSize) {
       return {};
     }
     return {static_cast<int>(width), static_cast<int>(height)};

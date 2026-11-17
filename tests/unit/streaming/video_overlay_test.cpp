@@ -149,7 +149,8 @@ TEST(VideoOverlayTest, WeightsGpuChromaByVisibleColorCoverage) {
   std::array<std::uint8_t, pitch * 16> frame;
   frame.fill(128);
   const int at = 8 * pitch + 8 * 2;
-  frame[at] = frame[at + 2] = 70;
+  frame[at] = 70;
+  frame[at + 2] = 70;
   ASSERT_TRUE(overlay.draw_yuy2(frame.data(), frame.size(), pitch, 24, 16, {0, 0, 24, 16}));
   EXPECT_EQ(frame[at], 81);
   EXPECT_EQ(frame[at + 1], 109);
@@ -274,7 +275,8 @@ TEST(VideoOverlayTest, AlphaBlendsYuy2WithoutBakingTheVideoIntoItsCache) {
   for (int row = 0; row < 16; ++row) {
     for (int column = 0; column < 24; column += 2) {
       const int at = row * pitch + column * 2;
-      frame[at] = frame[at + 2] = 50;
+      frame[at] = 50;
+      frame[at + 2] = 50;
       frame[at + 1] = 90;
       frame[at + 3] = 170;
     }
@@ -334,7 +336,7 @@ TEST(VideoOverlayTest, RasterizesWheelWithoutSoftwareRenderCommands) {
   const std::array<int, 4> y {5, 10, 15, 10};
   for (int selected = 0; selected < 4; ++selected) {
     pixels.fill(0xcc);
-    ASSERT_TRUE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), pitch, 20, 20, 10, 10, 6, selected));
+    ASSERT_TRUE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), pitch, 20, 20}, {10, 10, 6, selected}));
     for (int sector = 0; sector < 4; ++sector) {
       EXPECT_EQ(pixels[y[sector] * pitch + x[sector] * 4], sector == selected ? 85 : 36);
       EXPECT_EQ(pixels[y[sector] * pitch + x[sector] * 4 + 3], 255);
@@ -344,7 +346,7 @@ TEST(VideoOverlayTest, RasterizesWheelWithoutSoftwareRenderCommands) {
     EXPECT_EQ(pixels[0], 0xcc);
     EXPECT_EQ(pixels[10 * pitch + 20 * 4], 0xcc);
   }
-  ASSERT_TRUE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), pitch, 20, 20, 0, 0, 4, -1));
+  ASSERT_TRUE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), pitch, 20, 20}, {0, 0, 4, -1}));
   EXPECT_EQ(pixels[3 * 4], 36);
 }
 
@@ -354,17 +356,17 @@ TEST(VideoOverlayTest, RasterizesWheelWithoutSoftwareRenderCommands) {
 TEST(VideoOverlayTest, RejectsInvalidWheelRasterStorage) {
   std::array<std::uint8_t, 20 * 20 * 4> pixels;
   pixels.fill(0xcc);
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(nullptr, pixels.size(), 80, 20, 20, 10, 10, 6, 0));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), 1, 80, 20, 20, 10, 10, 6, 0));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 80, 20, 20, -1, 10, 6, 0));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 80, 20, 20, 20, 10, 6, 0));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 80, 20, 20, 10, -1, 6, 0));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 80, 20, 20, 10, 20, 6, 0));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 80, 20, 20, 10, 10, 0, 0));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 80, 20, 20, 10, 10, 2049, 0));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({nullptr, pixels.size(), 80, 20, 20}, {10, 10, 6, 0}));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), 1, 80, 20, 20}, {10, 10, 6, 0}));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 80, 20, 20}, {-1, 10, 6, 0}));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 80, 20, 20}, {20, 10, 6, 0}));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 80, 20, 20}, {10, -1, 6, 0}));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 80, 20, 20}, {10, 20, 6, 0}));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 80, 20, 20}, {10, 10, 0, 0}));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 80, 20, 20}, {10, 10, 2049, 0}));
   std::array<std::uint8_t, 2049 * 4> oversized {};
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(oversized.data(), oversized.size(), 2049 * 4, 2049, 1, 0, 0, 1, 0));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(oversized.data(), oversized.size(), 4, 1, 2049, 0, 0, 1, 0));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({oversized.data(), oversized.size(), 2049 * 4, 2049, 1}, {0, 0, 1, 0}));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({oversized.data(), oversized.size(), 4, 1, 2049}, {0, 0, 1, 0}));
   EXPECT_TRUE(std::all_of(pixels.begin(), pixels.end(), [](std::uint8_t value) {
     return value == 0xcc;
   }));
@@ -662,46 +664,57 @@ TEST(VideoOverlayTest, DimsTheStreamThroughBothPresentationPaths) {
   }
 }
 
+namespace {
+  /**
+   * @brief Compare incremental and complete overlay conversion for one output scale and color matrix.
+   * @param scale Output size relative to the source panel.
+   * @param matrix Host color matrix.
+   */
+  void compare_recolored_overlay(int scale, streaming::VideoColorMatrix matrix) {
+    streaming::VideoOverlay incremental;
+    std::vector<std::uint8_t> pixels(16 * 12 * 4, 0);
+    for (std::size_t i = 3; i < pixels.size(); i += 4) {
+      pixels[i] = 150;
+    }
+    const streaming::VideoRectangle destination {0, 0, scale, scale * 3 / 4};
+    for (int step = 0; step < 8; ++step) {
+      const auto index = static_cast<std::size_t>((step * 7) % (16 * 12)) * 4;
+      pixels[index] = 200;
+      pixels[index + 1] = 40;
+      pixels[index + 2] = 70;
+      pixels[index + 3] = step % 2 ? 255 : 0;
+      incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
+      if (step % 2 == 0) {
+        const auto other = static_cast<std::size_t>(16 * 12 - step - 1) * 4;
+        pixels[other + 1] = 240;
+        incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
+      }
+      // An identical update must preserve pending damage until presentation.
+      incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
+      streaming::VideoOverlay fresh;
+      fresh.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
+      std::vector<std::uint8_t> actual(64 * 48 * 2, 100);
+      auto expected = actual;
+      ASSERT_TRUE(incremental.draw_yuy2(actual.data(), actual.size(), 128, 64, 48, destination, matrix));
+      ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 128, 64, 48, destination, matrix));
+      EXPECT_EQ(actual, expected) << "scale=" << scale << " step=" << step;
+      // A new host frame must still be composed with the cached UI.
+      actual.assign(actual.size(), 180);
+      expected = actual;
+      ASSERT_TRUE(incremental.draw_yuy2(actual.data(), actual.size(), 128, 64, 48, destination, matrix));
+      ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 128, 64, 48, destination, matrix));
+      EXPECT_EQ(actual, expected);
+    }
+  }
+}  // namespace
+
 /**
  * @brief Cached UI damage produces the same colors, alpha and chroma as a fresh overlay at both scales.
  */
 TEST(VideoOverlayTest, RecolorsChangedRegionsWithoutStaleGpuPixels) {
   for (const int scale : {32, 128}) {
     for (const auto matrix : {streaming::VideoColorMatrix::bt601, streaming::VideoColorMatrix::bt709}) {
-      streaming::VideoOverlay incremental;
-      std::vector<std::uint8_t> pixels(16 * 12 * 4, 0);
-      for (std::size_t i = 3; i < pixels.size(); i += 4) {
-        pixels[i] = 150;
-      }
-      const streaming::VideoRectangle destination {0, 0, scale, scale * 3 / 4};
-      for (int step = 0; step < 8; ++step) {
-        const auto index = static_cast<std::size_t>((step * 7) % (16 * 12)) * 4;
-        pixels[index] = 200;
-        pixels[index + 1] = 40;
-        pixels[index + 2] = 70;
-        pixels[index + 3] = step % 2 ? 255 : 0;
-        incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
-        if (step % 2 == 0) {
-          const auto other = static_cast<std::size_t>(16 * 12 - step - 1) * 4;
-          pixels[other + 1] = 240;
-          incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
-        }
-        // An identical update must preserve pending damage until presentation.
-        incremental.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
-        streaming::VideoOverlay fresh;
-        fresh.set_argb_bitmap(16, 12, pixels, streaming::VideoOverlayPlacement::full_screen);
-        std::vector<std::uint8_t> actual(64 * 48 * 2, 100);
-        auto expected = actual;
-        ASSERT_TRUE(incremental.draw_yuy2(actual.data(), actual.size(), 128, 64, 48, destination, matrix));
-        ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 128, 64, 48, destination, matrix));
-        EXPECT_EQ(actual, expected) << "scale=" << scale << " step=" << step;
-        // A new host frame must still be composed with the cached UI.
-        actual.assign(actual.size(), 180);
-        expected = actual;
-        ASSERT_TRUE(incremental.draw_yuy2(actual.data(), actual.size(), 128, 64, 48, destination, matrix));
-        ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 128, 64, 48, destination, matrix));
-        EXPECT_EQ(actual, expected);
-      }
+      ASSERT_NO_FATAL_FAILURE(compare_recolored_overlay(scale, matrix));
     }
   }
 }
@@ -753,13 +766,12 @@ TEST(VideoOverlayTest, AppliesSmallPatchesAcrossBothPresentationPaths) {
     overlay.set_argb_bitmap(20, 16, pixels, streaming::VideoOverlayPlacement::full_screen);
     for (int step = 0; step < 6; ++step) {
       const streaming::VideoRectangle area {step * 3, step * 2, 3, 2};
-      std::vector<std::uint8_t> patch(area.width * area.height * 4, 0);
+      std::vector<std::uint8_t> patch(static_cast<std::size_t>(area.width) * area.height * 4, 0);
       for (std::size_t i = 0; i < patch.size(); i += 4) {
         patch[i] = step * 30;
         patch[i + 1] = 40;
         patch[i + 2] = 210;
-        patch[i + 3] = step % 3 == 0 ? 255 : step % 3 == 1 ? 150 :
-                                                             0;
+        patch[i + 3] = std::array<std::uint8_t, 3> {255, 150, 0}.at(step % 3);
       }
       for (int row = 0; row < area.height; ++row) {
         std::copy_n(patch.data() + row * area.width * 4, area.width * 4, pixels.data() + ((area.y + row) * 20 + area.x) * 4);
@@ -820,13 +832,13 @@ TEST(VideoOverlayTest, RepaintsWheelSectorsAndClippedLabelBackgrounds) {
   int previous = -1;
   for (int selected : {0, 1, 2, 3, -1, 2, 0}) {
     if (previous >= 0) {
-      ASSERT_TRUE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, selected, previous));
+      ASSERT_TRUE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 160, 40, 40}, {20, 20, 18, selected}, previous));
     }
     if (selected >= 0) {
-      ASSERT_TRUE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, selected, selected));
+      ASSERT_TRUE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 160, 40, 40}, {20, 20, 18, selected}, selected));
     }
     auto expected = backdrop;
-    ASSERT_TRUE(streaming::rasterize_menu_wheel(expected.data(), expected.size(), 160, 40, 40, 20, 20, 18, selected));
+    ASSERT_TRUE(streaming::rasterize_menu_wheel({expected.data(), expected.size(), 160, 40, 40}, {20, 20, 18, selected}));
     // Initialize the unchanged sectors on the first frame.
     if (previous == -1 && selected == 0) {
       pixels = expected;
@@ -834,7 +846,7 @@ TEST(VideoOverlayTest, RepaintsWheelSectorsAndClippedLabelBackgrounds) {
     EXPECT_EQ(pixels, expected);
     const streaming::VideoRectangle clip {17, 2, 6, 6};
     auto clipped = backdrop;
-    ASSERT_TRUE(streaming::rasterize_menu_wheel(clipped.data(), clipped.size(), 160, 40, 40, 20, 20, 18, selected, -1, &clip));
+    ASSERT_TRUE(streaming::rasterize_menu_wheel({clipped.data(), clipped.size(), 160, 40, 40}, {20, 20, 18, selected}, -1, &clip));
     for (int y = 0; y < 40; ++y) {
       for (int x = 0; x < 40; ++x) {
         const int index = (y * 40 + x) * 4;
@@ -843,9 +855,9 @@ TEST(VideoOverlayTest, RepaintsWheelSectorsAndClippedLabelBackgrounds) {
     }
     previous = selected;
   }
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, 0, -2));
-  EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, 0, 4));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 160, 40, 40}, {20, 20, 18, 0}, -2));
+  EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 160, 40, 40}, {20, 20, 18, 0}, 4));
   for (const auto clip : {streaming::VideoRectangle {-1, 0, 1, 1}, {0, -1, 1, 1}, {0, 0, 0, 1}, {0, 0, 1, 0}, {0, 0, 41, 1}, {0, 0, 1, 41}, {40, 0, 1, 1}, {0, 40, 1, 1}}) {
-    EXPECT_FALSE(streaming::rasterize_menu_wheel(pixels.data(), pixels.size(), 160, 40, 40, 20, 20, 18, 0, -1, &clip));
+    EXPECT_FALSE(streaming::rasterize_menu_wheel({pixels.data(), pixels.size(), 160, 40, 40}, {20, 20, 18, 0}, -1, &clip));
   }
 }

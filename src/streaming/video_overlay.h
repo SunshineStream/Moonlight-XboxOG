@@ -44,24 +44,35 @@ namespace streaming {
   OverlayLabelLayout layout_overlay_label(int width, int height, const VideoRectangle &bounds, bool shrinkToFit);
 
   /**
-   * @brief Rasterize a grayscale selection wheel directly into an ARGB panel.
-   *
-   * Avoid thousands of immediately flushed software-renderer commands per highlight.
-   *
-   * @param pixels ARGB8888 destination storage.
-   * @param capacity Accessible bytes.
-   * @param pitch Destination row stride.
-   * @param width Panel width, at most 2048.
-   * @param height Panel height, at most 2048.
-   * @param centerX Wheel center X inside the panel.
-   * @param centerY Wheel center Y inside the panel.
-   * @param radius Outer radius in pixels, between 1 and 2048.
-   * @param selected Selected clockwise sector starting at up, or -1 for none.
-   * @param sector Repaint only this clockwise sector, or -1 for the whole ring.
-   * @param clip Optional pixel rectangle restricting background restoration behind a sector label.
-   * @return False when storage or geometry is invalid, without writing pixels.
+   * @brief Writable ARGB bitmap view with validated row storage.
    */
-  bool rasterize_menu_wheel(std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, int centerX, int centerY, int radius, int selected, int sector = -1, const VideoRectangle *clip = nullptr);
+  struct OverlayBitmap {
+    std::uint8_t *pixels;  ///< First destination byte.
+    std::size_t capacity;  ///< Accessible destination byte count.
+    int pitch;  ///< Byte stride between rows.
+    int width;  ///< Pixel width.
+    int height;  ///< Pixel height.
+  };
+
+  /**
+   * @brief Circular menu geometry and clockwise highlighted sector.
+   */
+  struct MenuWheel {
+    int centerX;  ///< Horizontal center in destination pixels.
+    int centerY;  ///< Vertical center in destination pixels.
+    int radius;  ///< Outer radius in pixels.
+    int selected;  ///< Selected up/right/down/left sector, or minus one for none.
+  };
+
+  /**
+   * @brief Rasterize all or one sector of an opaque circular menu onto ARGB storage.
+   * @param target Destination bitmap, at most 2048 pixels in either dimension.
+   * @param wheel Geometry with a radius between 1 and 2048, and its highlighted sector.
+   * @param sector Repaint only this clockwise sector, or minus one for the whole ring.
+   * @param clip Optional repaint rectangle restricting background restoration.
+   * @return False for invalid storage or geometry, without changing destination pixels.
+   */
+  bool rasterize_menu_wheel(OverlayBitmap target, const MenuWheel &wheel, int sector = -1, const VideoRectangle *clip = nullptr);
 
   /**
    * @brief Placement of a shared panel inside the presented video rectangle.
@@ -176,6 +187,40 @@ namespace streaming {
     static constexpr int MARGIN = 8;  ///< Panel inset in output pixels.
 
   private:
+    /**
+     * @brief Prepare geometry and storage for a YUY2 presentation cache.
+     * @param frameWidth Video width.
+     * @param frameHeight Video height.
+     * @param destination Output video rectangle.
+     * @param matrix Host color matrix.
+     * @param rebuild Receives whether geometry or matrix changed.
+     * @return False when no overlay pixels are visible.
+     */
+    bool prepare_yuy2(int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix, bool &rebuild);
+    /**
+     * @brief Convert one YUY2 pixel pair into the retained cache.
+     * @param row Cache row.
+     * @param column Cache pair column.
+     * @param bitmapRow Mapped source row.
+     * @param firstBitmapColumn First mapped source column.
+     * @param secondBitmapColumn Second mapped source column.
+     * @param matrix Host color matrix.
+     */
+    void convert_yuy2_pair(int row, int column, int bitmapRow, int firstBitmapColumn, int secondBitmapColumn, VideoColorMatrix matrix);
+    /**
+     * @brief Refresh only damaged YUY2 cache rows and columns.
+     * @param destination Output video rectangle.
+     * @param matrix Host color matrix.
+     * @param rebuild True to convert the entire overlay.
+     */
+    void update_yuy2(const VideoRectangle &destination, VideoColorMatrix matrix, bool rebuild);
+    /**
+     * @brief Blend the prepared YUY2 cache into validated framebuffer storage.
+     * @param pixels Framebuffer storage.
+     * @param pitch Framebuffer row stride.
+     */
+    void blend_yuy2(std::uint8_t *pixels, int pitch);
+
     /**
      * @brief Resolve either source format to one straight ARGB pixel.
      * @param index Packed source pixel index.

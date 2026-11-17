@@ -10,10 +10,35 @@
 #include <cstdlib>
 
 namespace input {
+  UiCommand direction_command(int x, int y) {
+    if (x != 0) {
+      return x > 0 ? UiCommand::move_right : UiCommand::move_left;
+    }
+    if (y != 0) {
+      return y > 0 ? UiCommand::move_down : UiCommand::move_up;
+    }
+    return UiCommand::none;
+  }
+
+  std::pair<int, int> navigation_step(UiCommand command) {
+    switch (command) {
+      case UiCommand::move_left:
+        return {-1, 0};
+      case UiCommand::move_right:
+        return {1, 0};
+      case UiCommand::move_up:
+        return {0, -1};
+      case UiCommand::move_down:
+        return {0, 1};
+      default:
+        return {0, 0};
+    }
+  }
+
   UiCommand DirectionNavigation::update_stick(short x, short y, std::uint32_t now) {
     const int horizontal = std::abs(static_cast<int>(x));
     const int vertical = std::abs(static_cast<int>(y));
-    const auto direction = horizontal > vertical ? (x > 0 ? UiCommand::move_right : UiCommand::move_left) : (y > 0 ? UiCommand::move_up : UiCommand::move_down);
+    const auto direction = horizontal > vertical ? direction_command(x, 0) : direction_command(0, -static_cast<int>(y));
     const int threshold = direction == command_ ? STICK_NAVIGATION_RELEASE_THRESHOLD : STICK_NAVIGATION_THRESHOLD;
     return update(std::max(horizontal, vertical) >= threshold ? direction : UiCommand::none, now);
   }
@@ -25,7 +50,8 @@ namespace input {
     }
     if (command != command_) {
       command_ = command;
-      pressedAt_ = repeatedAt_ = now;
+      pressedAt_ = now;
+      repeatedAt_ = now;
       repeated_ = false;
       return command;
     }

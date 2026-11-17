@@ -7,6 +7,7 @@
 
 // standard includes
 #include <string>
+#include <string_view>
 
 // lib includes
 #include <lizardbyte/common/testing.h>
@@ -21,9 +22,9 @@ namespace {
    * @param configured Existing screenshot destination.
    * @return State with the folder picker open and a pending directory read.
    */
-  app::ClientState open_picker(const std::string &configured = {}) {
+  app::ClientState open_picker(std::string_view configured = {}) {
     auto state = app::create_initial_state();
-    state.settings.screenshotDirectory = configured;
+    state.settings.controls.screenshotDirectory = configured;
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
@@ -67,7 +68,7 @@ TEST(DirectoryPickerTest, StagesConfiguredAndDefaultLocationsUntilAccepted) {
     EXPECT_FALSE(view.modal.actions[0].enabled);
     const auto update = app::handle_command(state, input::UiCommand::back);
     EXPECT_TRUE(update.navigation.modalClosed);
-    EXPECT_EQ(state.settings.screenshotDirectory, configured);
+    EXPECT_EQ(state.settings.controls.screenshotDirectory, configured);
     EXPECT_TRUE(state.directoryPicker.folders.empty());
     EXPECT_FALSE(update.persistence.settingsChanged);
   }
@@ -89,7 +90,7 @@ TEST(DirectoryPickerTest, BrowsesChildrenParentsAndDrives) {
   EXPECT_EQ(state.directoryPicker.path, "F:\\");
   app::handle_command(state, input::UiCommand::previous_page);
   EXPECT_TRUE(state.directoryPicker.path.empty());
-  EXPECT_EQ(state.settings.screenshotDirectory, "F:\\Shots");
+  EXPECT_EQ(state.settings.controls.screenshotDirectory, "F:\\Shots");
   state.modal.selectedActionIndex = 0;
   EXPECT_FALSE(app::handle_command(state, input::UiCommand::activate).requests.directorySelectRequested);
   state.modal.selectedActionIndex = 1;
@@ -108,9 +109,9 @@ TEST(DirectoryPickerTest, AcceptsValidatedSelectionAndRestoresTheDefault) {
   EXPECT_TRUE(app::handle_command(state, input::UiCommand::open_context_menu).requests.directorySelectRequested);
   auto update = app::handle_command(state, input::UiCommand::activate);
   EXPECT_TRUE(update.requests.directorySelectRequested);
-  EXPECT_EQ(state.settings.screenshotDirectory, "F:\\Old");
+  EXPECT_EQ(state.settings.controls.screenshotDirectory, "F:\\Old");
   app::accept_screenshot_directory(state, update, state.directoryPicker.path);
-  EXPECT_EQ(state.settings.screenshotDirectory, "E:\\Screenshots");
+  EXPECT_EQ(state.settings.controls.screenshotDirectory, "E:\\Screenshots");
   EXPECT_TRUE(state.settings.dirty);
   EXPECT_TRUE(update.persistence.settingsChanged);
   EXPECT_TRUE(update.navigation.modalClosed);
@@ -119,13 +120,13 @@ TEST(DirectoryPickerTest, AcceptsValidatedSelectionAndRestoresTheDefault) {
   app::handle_command(state, input::UiCommand::activate);
   state.modal.selectedActionIndex = 3;
   update = app::handle_command(state, input::UiCommand::confirm);
-  EXPECT_TRUE(state.settings.screenshotDirectory.empty());
+  EXPECT_TRUE(state.settings.controls.screenshotDirectory.empty());
   EXPECT_TRUE(update.persistence.settingsChanged);
   app::handle_command(state, input::UiCommand::activate);
   state.modal.selectedActionIndex = 3;
   EXPECT_FALSE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
   app::accept_screenshot_directory(state, update, "ignored");
-  EXPECT_TRUE(state.settings.screenshotDirectory.empty());
+  EXPECT_TRUE(state.settings.controls.screenshotDirectory.empty());
 }
 
 /**
@@ -172,7 +173,7 @@ TEST(DirectoryPickerTest, TypesLocallyWithTheSharedKeyboardAndCaret) {
   app::handle_command(state, input::UiCommand::move_left);
   picker.keyboard.keyIndex = 46;
   EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).requests.directoryCreateRequested);
-  EXPECT_EQ(state.settings.screenshotDirectory, "F:\\Shots");
+  EXPECT_EQ(state.settings.controls.screenshotDirectory, "F:\\Shots");
   EXPECT_FALSE(state.settings.dirty);
 }
 
@@ -259,5 +260,5 @@ TEST(DirectoryPickerTest, KeepsStorageSeparateFromTheExistingDisplayCategory) {
   EXPECT_EQ(state.detailMenu.items().size(), 6);
   EXPECT_EQ(state.detailMenu.selected_item()->id, "cycle-stream-video-mode");
   EXPECT_FALSE(state.detailMenu.select_item_by_id("screenshot-directory"));
-  EXPECT_EQ(state.settings.screenshotDirectory, "F:\\Screenshots");
+  EXPECT_EQ(state.settings.controls.screenshotDirectory, "F:\\Screenshots");
 }

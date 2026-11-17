@@ -80,7 +80,20 @@ namespace input {
      * @param device Device being updated.
      * @param next New held inputs.
      */
-    void update(Device &device, const std::bitset<256> &next);
+    void update(Device &device, const std::bitset<256> &next) const;
+    /**
+     * @brief Decode keyboard modifiers and non-rollover key slots from a validated report pointer.
+     * @param device Retained keyboard interface.
+     * @param bytes Report data.
+     * @param length Available bytes, checked before reading a boot keyboard report.
+     */
+    void keyboard_report(Device &device, const std::uint8_t *bytes, std::size_t length) const;
+    /**
+     * @brief Decode the three standard buttons and signed axes from a boot mouse report.
+     * @param device Retained mouse interface.
+     * @param bytes Validated report containing at least three bytes.
+     */
+    void mouse_report(Device &device, const std::uint8_t *bytes) const;
     Sink sink_;  ///< Validated event consumer.
     std::map<int, Device> devices_;  ///< Per-interface state.
   };

@@ -7,11 +7,13 @@
 
 // standard includes
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
+#include <system_error>
 
 // platform includes
 #if defined(_WIN32) || defined(NXDK)
@@ -42,8 +44,8 @@ namespace {
       return;
     }
     constexpr std::string_view letters = "CEFGXYZ";
-    constexpr int partitions[] = {2, 1, 6, 7, 3, 4, 5};
-    const char letter = static_cast<char>(std::toupper(static_cast<unsigned char>(path[0])));
+    constexpr std::array<int, 7> partitions {2, 1, 6, 7, 3, 4, 5};
+    const auto letter = static_cast<char>(std::toupper(static_cast<unsigned char>(path[0])));
     const auto index = letters.find(letter);
     if (index != std::string_view::npos && !nxIsDriveMounted(letter)) {
       const auto target = std::string("\\Device\\Harddisk0\\Partition") + std::to_string(partitions[index]) + "\\";
@@ -82,7 +84,7 @@ namespace {
 #endif
 
     if (errorMessage != nullptr) {
-      *errorMessage = "Failed to create directory '" + path + "': " + std::strerror(errno);
+      *errorMessage = "Failed to create directory '" + path + "': " + std::error_code(errno, std::generic_category()).message();
     }
     return false;
   }
@@ -123,8 +125,7 @@ namespace platform {
       }
       return result;
     }
-    const DWORD attributes = GetFileAttributesA(path.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+    if (const DWORD attributes = GetFileAttributesA(path.c_str()); attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
       result.error = "Folder is unavailable: " + path;
       return result;
     }
@@ -155,7 +156,7 @@ namespace platform {
     }
     DIR *directory = opendir(path.c_str());
     if (directory == nullptr) {
-      result.error = "Unable to read folder: " + std::string(std::strerror(errno));
+      result.error = "Unable to read folder: " + std::string(std::error_code(errno, std::generic_category()).message());
       return result;
     }
     errno = 0;
@@ -173,7 +174,7 @@ namespace platform {
     const int readError = errno;
     closedir(directory);
     if (readError != 0) {
-      result.error = "Unable to finish reading folder: " + std::string(std::strerror(readError));
+      result.error = "Unable to finish reading folder: " + std::string(std::error_code(readError, std::generic_category()).message());
     }
 #endif
     std::sort(result.paths.begin(), result.paths.end());
@@ -196,7 +197,7 @@ namespace platform {
 
   bool valid_directory_name(std::string_view name) {
     return !name.empty() && name.size() <= 42 && name != "." && name != ".." && name.back() != ' ' && name.back() != '.' && std::none_of(name.begin(), name.end(), [](unsigned char character) {
-      return character < 32 || character >= 127 || std::string_view("<>:\"/\\|?*+=,;[]").find(static_cast<char>(character)) != std::string_view::npos;
+      return character < 32 || character >= 127 || std::string_view(R"(<>:"/\|?*+=,;[])").find(static_cast<char>(character)) != std::string_view::npos;
     });
   }
 
@@ -211,12 +212,11 @@ namespace platform {
 #endif
     const auto child = join_path(parent, name);
 #if defined(_WIN32) || defined(NXDK)
-    const int result = _mkdir(child.c_str());
+    if (const int result = _mkdir(child.c_str()); result != 0) {
 #else
-    const int result = mkdir(child.c_str(), 0750);
+    if (const int result = mkdir(child.c_str(), 0750); result != 0) {
 #endif
-    if (result != 0) {
-      error = errno == EEXIST ? "A file or folder with this name already exists." : "Could not create folder: " + std::string(std::strerror(errno));
+      error = errno == EEXIST ? "A file or folder with this name already exists." : "Could not create folder: " + std::string(std::error_code(errno, std::generic_category()).message());
       return false;
     }
     return true;
@@ -253,7 +253,7 @@ namespace platform {
         if (errno == EEXIST) {
           continue;
         }
-        error = "Cannot write to this folder: " + std::string(std::strerror(errno));
+        error = "Cannot write to this folder: " + std::string(std::error_code(errno, std::generic_category()).message());
         return false;
       }
       close(file);

@@ -619,7 +619,7 @@ namespace {
         };
       case app::SettingsCategory::storage:
         return {
-          {"screenshot-directory", "Screenshot Folder: " + (state.settings.screenshotDirectory.empty() ? std::string("Default") : state.settings.screenshotDirectory), "Choose or create a folder for stream screenshots. Default: " + startup::default_storage_path("screenshots"), true},
+          {"screenshot-directory", "Screenshot Folder: " + (state.settings.controls.screenshotDirectory.empty() ? std::string("Default") : state.settings.controls.screenshotDirectory), "Choose or create a folder for stream screenshots. Default: " + startup::default_storage_path("screenshots"), true},
         };
       case app::SettingsCategory::input:
         return {
@@ -1221,7 +1221,12 @@ namespace {
     state.apps.refreshFailureNotified = false;
     const bool offline = state.hosts.active.reachability == app::HostReachability::offline;
     state.hosts.active.appListState = offline ? app::HostAppListState::ready : app::HostAppListState::loading;
-    state.hosts.active.appListStatusMessage = offline ? "PC offline. Showing saved apps and local screenshots." : (state.hosts.active.apps.empty() ? "Loading apps for " : "Refreshing apps for ") + state.hosts.active.displayName + "...";
+    if (offline) {
+      state.hosts.active.appListStatusMessage = "PC offline. Showing saved apps and local screenshots.";
+    } else {
+      const std::string prefix = state.hosts.active.apps.empty() ? "Loading apps for " : "Refreshing apps for ";
+      state.hosts.active.appListStatusMessage = prefix + state.hosts.active.displayName + "...";
+    }
     state.shell.statusMessage.clear();
     set_screen(state, app::ScreenId::apps);
     return true;
@@ -1589,6 +1594,89 @@ namespace {
   }
 
   /**
+   * @brief Type the focused folder-name key or return its editing command.
+   * @param state Folder-name draft and keyboard focus.
+   * @return Confirm, delete or none after handling the selected key.
+   */
+  input::UiCommand activate_directory_key(app::ClientState &state) {
+    auto &picker = state.directoryPicker;
+    auto &keyboard = picker.keyboard;
+    if (keyboard.keyboard_cells()[keyboard.keyIndex].key == input::StreamMenu::KEYBOARD_PAGE_KEY) {
+      keyboard.keyboardLayout = keyboard.keyboardLayout == 0 ? 1 : 0;
+      return input::UiCommand::none;
+    }
+    const int code = keyboard.keyboard_key();
+    if (code == 0x0D) {
+      return input::UiCommand::confirm;
+    }
+    if (code == 0x08) {
+      return input::UiCommand::delete_character;
+    }
+    if (code == 0x125 && picker.caret > 0) {
+      --picker.caret;
+    } else if (code == 0x127 && picker.caret < picker.name.size()) {
+      ++picker.caret;
+    } else if (code == 0x20) {
+      app::append_directory_name(state, " ");
+      keyboard.key_sent();
+    } else if (code > 0 && keyboard.key_label(keyboard.keyIndex).size() == 1) {
+      app::append_directory_name(state, keyboard.key_label(keyboard.keyIndex));
+      keyboard.key_sent();
+    }
+    return input::UiCommand::none;
+  }
+
+  /**
+   * @brief Handle navigation and editing while creating a screenshot folder.
+   * @param state Folder-name draft and keyboard focus.
+   * @param command Local editing or navigation command.
+   * @param update Receives the create-directory request after validation.
+   */
+  void handle_directory_name_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
+    auto &picker = state.directoryPicker;
+    auto &keyboard = picker.keyboard;
+    if (command == input::UiCommand::activate) {
+      command = activate_directory_key(state);
+    }
+    switch (command) {
+      case input::UiCommand::back:
+        picker.creating = false;
+        picker.error.clear();
+        break;
+      case input::UiCommand::move_up:
+      case input::UiCommand::move_down:
+      case input::UiCommand::move_left:
+      case input::UiCommand::move_right:
+        {
+          const auto [dx, dy] = input::navigation_step(command);
+          keyboard.navigate(dx, dy);
+          break;
+        }
+      case input::UiCommand::previous_page:
+      case input::UiCommand::next_page:
+        keyboard.keyboardLayout = keyboard.keyboardLayout == 0 ? 1 : 0;
+        break;
+      case input::UiCommand::open_context_menu:
+        keyboard.toggle_shift();
+        break;
+      case input::UiCommand::delete_character:
+        if (picker.caret > 0) {
+          picker.name.erase(--picker.caret, 1);
+        }
+        break;
+      case input::UiCommand::confirm:
+        if (platform::valid_directory_name(picker.name)) {
+          update->requests.directoryCreateRequested = true;
+        } else {
+          picker.error = "Use 1-42 characters, without reserved characters or a trailing space or period.";
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
    * @brief Keep folder browsing and local text editing separate from saved settings until acceptance.
    * @param state Active client and picker state.
    * @param command Controller or keyboard action.
@@ -1601,54 +1689,7 @@ namespace {
     }
     auto &picker = state.directoryPicker;
     if (picker.creating) {
-      auto &keyboard = picker.keyboard;
-      if (command == input::UiCommand::back) {
-        picker.creating = false;
-        picker.error.clear();
-      } else if (command == input::UiCommand::move_up || command == input::UiCommand::move_down || command == input::UiCommand::move_left || command == input::UiCommand::move_right) {
-        keyboard.navigate(command == input::UiCommand::move_left ? -1 : command == input::UiCommand::move_right ? 1 :
-                                                                                                                  0,
-                          command == input::UiCommand::move_up ? -1 : command == input::UiCommand::move_down ? 1 :
-                                                                                                               0);
-      } else if (command == input::UiCommand::previous_page || command == input::UiCommand::next_page) {
-        keyboard.keyboardLayout = keyboard.keyboardLayout == 0 ? 1 : 0;
-      } else if (command == input::UiCommand::open_context_menu) {
-        keyboard.toggle_shift();
-      } else if (command == input::UiCommand::delete_character) {
-        if (picker.caret > 0) {
-          picker.name.erase(--picker.caret, 1);
-        }
-      } else if (command == input::UiCommand::activate) {
-        const int index = keyboard.keyboard_cells()[keyboard.keyIndex].key;
-        if (index == input::StreamMenu::KEYBOARD_PAGE_KEY) {
-          keyboard.keyboardLayout = keyboard.keyboardLayout == 0 ? 1 : 0;
-        } else {
-          const int code = keyboard.keyboard_key();
-          if (code == 0x0D) {
-            return handle_directory_picker_command(state, input::UiCommand::confirm, update);
-          }
-          if (code == 0x08) {
-            return handle_directory_picker_command(state, input::UiCommand::delete_character, update);
-          }
-          if (code == 0x125 && picker.caret > 0) {
-            --picker.caret;
-          } else if (code == 0x127 && picker.caret < picker.name.size()) {
-            ++picker.caret;
-          } else if (code == 0x20) {
-            app::append_directory_name(state, " ");
-            keyboard.key_sent();
-          } else if (code > 0 && keyboard.key_label(keyboard.keyIndex).size() == 1) {
-            app::append_directory_name(state, keyboard.key_label(keyboard.keyIndex));
-            keyboard.key_sent();
-          }
-        }
-      } else if (command == input::UiCommand::confirm) {
-        if (platform::valid_directory_name(picker.name)) {
-          update->requests.directoryCreateRequested = true;
-        } else {
-          picker.error = "Use 1-42 characters, without reserved characters or a trailing space or period.";
-        }
-      }
+      handle_directory_name_command(state, command, update);
       return true;
     }
     if (command == input::UiCommand::back) {
@@ -1670,8 +1711,7 @@ namespace {
     if (command != input::UiCommand::activate && command != input::UiCommand::confirm) {
       return true;
     }
-    const auto selected = state.modal.selectedActionIndex;
-    if (selected == 0 && picker.available && !picker.path.empty()) {
+    if (const auto selected = state.modal.selectedActionIndex; selected == 0 && picker.available && !picker.path.empty()) {
       update->requests.directorySelectRequested = true;
     } else if (selected == 1 && picker.available && !picker.path.empty()) {
       picker.creating = true;
@@ -1690,6 +1730,37 @@ namespace {
       picker.path = picker.folders[selected - 4];
       update->requests.directoryListRequested = true;
       state.modal.selectedActionIndex = 0;
+    }
+    return true;
+  }
+
+  /**
+   * @brief Handle screenshot browsing and deletion independently of other dialogs.
+   * @param state Screenshot viewer and modal state.
+   * @param command Navigation or deletion command.
+   * @return True while the screenshot viewer consumes input.
+   */
+  bool handle_screenshot_viewer_command(app::ClientState &state, input::UiCommand command) {
+    if (state.modal.id != app::ModalId::screenshot_viewer) {
+      return false;
+    }
+    auto &viewer = state.screenshotViewer;
+    if (command == input::UiCommand::back) {
+      viewer = {};
+      open_modal(state, app::ModalId::app_actions, 3U);
+    } else if (command == input::UiCommand::delete_character && !viewer.entries.empty()) {
+      viewer.selectedIndex = std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+      const auto &entry = viewer.entries[viewer.selectedIndex];
+      open_confirmation(state, app::ConfirmationAction::delete_screenshot, "Delete screenshot?", {"This permanently deletes the saved image.", app::screenshot_time_label(entry.capturedAt)}, entry.path);
+      state.confirmation.returnModal = app::ModalId::screenshot_viewer;
+    } else if (!viewer.entries.empty()) {
+      const auto count = viewer.entries.size();
+      viewer.selectedIndex = std::min(viewer.selectedIndex, count - 1);
+      if (command == input::UiCommand::move_left || command == input::UiCommand::previous_page) {
+        viewer.selectedIndex = (viewer.selectedIndex + count - 1) % count;
+      } else if (command == input::UiCommand::move_right || command == input::UiCommand::next_page) {
+        viewer.selectedIndex = (viewer.selectedIndex + 1) % count;
+      }
     }
     return true;
   }
@@ -1720,25 +1791,7 @@ namespace {
       return true;
     }
 
-    if (state.modal.id == app::ModalId::screenshot_viewer) {
-      auto &viewer = state.screenshotViewer;
-      if (command == input::UiCommand::back) {
-        viewer = {};
-        open_modal(state, app::ModalId::app_actions, 3U);
-      } else if (command == input::UiCommand::delete_character && !viewer.entries.empty()) {
-        viewer.selectedIndex = std::min(viewer.selectedIndex, viewer.entries.size() - 1);
-        const auto &entry = viewer.entries[viewer.selectedIndex];
-        open_confirmation(state, app::ConfirmationAction::delete_screenshot, "Delete screenshot?", {"This permanently deletes the saved image.", app::screenshot_time_label(entry.capturedAt)}, entry.path);
-        state.confirmation.returnModal = app::ModalId::screenshot_viewer;
-      } else if (!viewer.entries.empty()) {
-        const auto count = viewer.entries.size();
-        viewer.selectedIndex = std::min(viewer.selectedIndex, count - 1);
-        if (command == input::UiCommand::move_left || command == input::UiCommand::previous_page) {
-          viewer.selectedIndex = (viewer.selectedIndex + count - 1) % count;
-        } else if (command == input::UiCommand::move_right || command == input::UiCommand::next_page) {
-          viewer.selectedIndex = (viewer.selectedIndex + 1) % count;
-        }
-      }
+    if (handle_screenshot_viewer_command(state, command)) {
       return true;
     }
 
@@ -1844,8 +1897,8 @@ namespace app {
     state.settings.playAudioOnPc = false;
     state.settings.showPerformanceStats = false;
     state.settings.playAudioOnXbox = true;
-    state.settings.screenshotDirectory.clear();
-    state.settings.keyboardDockTop = false;
+    state.settings.controls.screenshotDirectory.clear();
+    state.settings.controls.keyboardDockTop = false;
     state.settings.dirty = false;
     state.settings.savedFilesDirty = true;
     return state;
@@ -2477,7 +2530,7 @@ namespace app {
     }
     if (detailUpdate.activatedItemId == "screenshot-directory") {
       state.directoryPicker = {};
-      state.directoryPicker.path = state.settings.screenshotDirectory.empty() ? startup::default_storage_path("screenshots") : state.settings.screenshotDirectory;
+      state.directoryPicker.path = state.settings.controls.screenshotDirectory.empty() ? startup::default_storage_path("screenshots") : state.settings.controls.screenshotDirectory;
       open_modal(state, ModalId::directory_picker);
       update->requests.directoryListRequested = true;
       update->navigation.modalOpened = true;
@@ -2862,12 +2915,12 @@ namespace app {
     picker.error.clear();
   }
 
-  void accept_screenshot_directory(ClientState &state, AppUpdate &update, const std::string &path) {
+  void accept_screenshot_directory(ClientState &state, AppUpdate &update, std::string_view path) {
     if (state.modal.id != ModalId::directory_picker) {
       return;
     }
-    if (state.settings.screenshotDirectory != path) {
-      state.settings.screenshotDirectory = path;
+    if (state.settings.controls.screenshotDirectory != path) {
+      state.settings.controls.screenshotDirectory = path;
       state.settings.dirty = true;
       update.persistence.settingsChanged = true;
     }
@@ -2921,7 +2974,7 @@ namespace app {
     if (state.modal.id == ModalId::quit_progress) {
       close_modal(state);
     }
-    show_notification(state, succeeded ? NotificationKind::success : NotificationKind::error, succeeded ? "App closed" : "Couldn't quit app", message.empty() ? target.appName : std::move(message), succeeded ? 5000 : 0);
+    show_notification(state, succeeded ? NotificationKind::success : NotificationKind::error, succeeded ? "App closed" : "Couldn't quit app", message.empty() ? target.appName : message, succeeded ? 5000 : 0);
     state.appQuit = {};
   }
 

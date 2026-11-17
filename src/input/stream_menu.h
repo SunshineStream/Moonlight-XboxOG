@@ -165,6 +165,8 @@ namespace input {
      * @return Effective modifiers for that binding.
      */
     int binding_modifiers(int index) const;
+
+  public:
     int keyboardColumn_ = 4;  ///< Preferred column retained while traversing wide keys.
     int keyboardRow_ = 1;  ///< Preferred row retained while traversing tall side controls.
     std::array<short, 4> previousSticks_ {};  ///< Previous sampled axes so a stationary stick cannot steal the other wheel's selection.

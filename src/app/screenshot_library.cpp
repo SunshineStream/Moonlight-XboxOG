@@ -17,6 +17,9 @@
 #include <utility>
 
 // local includes
+#ifdef NXDK
+  #include "src/_nxdk_compat/include/moonlight_time.h"
+#endif
 #include "src/platform/filesystem_utils.h"
 #include "src/startup/storage_paths.h"
 
@@ -33,7 +36,7 @@ namespace {
     for (char c : field) {
       switch (c) {
         case '\\':
-          result += "\\\\";
+          result += R"(\\)";
           break;
         case '\t':
           result += "\\t";
@@ -140,8 +143,7 @@ namespace app {
     ScreenshotRecord record;
     record.deleted = fields[0] == "D";
     unsigned int port = 0;
-    std::istringstream numbers(fields[1] + " " + fields[2] + " " + fields[3]);
-    if (!(numbers >> record.capturedAt >> record.source.appId >> port) || !(numbers >> std::ws).eof() || port == 0 || port > 65535) {
+    if (std::istringstream numbers(fields[1] + " " + fields[2] + " " + fields[3]); !(numbers >> record.capturedAt >> record.source.appId >> port) || !(numbers >> std::ws).eof() || port == 0 || port > 65535) {
       return std::nullopt;
     }
     record.source.hostPort = static_cast<uint16_t>(port);
@@ -175,8 +177,7 @@ namespace app {
     // records are read, so an incomplete capture never poisons the remaining index.
     const std::string append = "\n" + line + "\n";
     const bool written = std::fwrite(append.data(), 1, append.size(), file) == append.size();
-    const bool closed = std::fclose(file) == 0;
-    if (!written || !closed) {
+    if (const bool closed = std::fclose(file) == 0; !written || !closed) {
       error = "Cannot finalize screenshot index.";
       return false;
     }
@@ -196,8 +197,7 @@ namespace app {
     bool oversized = false;
     while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), file) != nullptr) {
       std::string_view line(buffer.data());
-      const bool complete = !line.empty() && line.back() == '\n';
-      if (!complete || oversized) {
+      if (const bool complete = !line.empty() && line.back() == '\n'; !complete || oversized) {
         oversized = !complete;
         result.error = "Some incomplete or damaged screenshot records were skipped.";
         continue;
@@ -209,20 +209,22 @@ namespace app {
       if (line.empty()) {
         continue;
       }
-      if (auto record = parse_screenshot(line); record.has_value()) {
-        if (screenshot_source_matches(record->source, source)) {
-          if (record->deleted) {
-            auto &entries = result.entries;
-            entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const ScreenshotRecord &entry) {
-                            return entry.path == record->path;
-                          }),
-                          entries.end());
-          } else {
-            result.entries.push_back(std::move(*record));
-          }
-        }
-      } else {
+      auto record = parse_screenshot(line);
+      if (!record.has_value()) {
         result.error = "Some incomplete or damaged screenshot records were skipped.";
+        continue;
+      }
+      if (!screenshot_source_matches(record->source, source)) {
+        continue;
+      }
+      if (record->deleted) {
+        auto &entries = result.entries;
+        entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const ScreenshotRecord &entry) {
+                        return entry.path == record->path;
+                      }),
+                      entries.end());
+      } else {
+        result.entries.push_back(std::move(*record));
       }
     }
     if (std::ferror(file) != 0) {
@@ -261,8 +263,7 @@ namespace app {
     }
     const std::string append = "\n" + line + "\n";
     const bool written = std::fwrite(append.data(), 1, append.size(), file) == append.size();
-    const bool closed = std::fclose(file) == 0;
-    if (!written || !closed) {
+    if (const bool closed = std::fclose(file) == 0; !written || !closed) {
       error = "Screenshot deleted, but its index could not be updated.";
       return false;
     }
@@ -291,8 +292,18 @@ namespace app {
   std::string screenshot_time_label(std::int64_t capturedAt) {
     const auto time = static_cast<std::time_t>(capturedAt);
     std::array<char, 32> label {};
-    const std::tm *utc = capturedAt >= 0 && static_cast<std::int64_t>(time) == capturedAt ? std::gmtime(&time) : nullptr;
-    if (utc == nullptr || std::strftime(label.data(), label.size(), "%Y-%m-%d %H:%M:%S UTC", utc) == 0) {
+    if (capturedAt < 0 || static_cast<std::int64_t>(time) != capturedAt) {
+      return "Capture time unavailable";
+    }
+    std::tm utc {};
+#ifdef NXDK
+    const bool converted = moonlight_gmtime(time, utc);
+#elif defined(_WIN32)
+    const bool converted = gmtime_s(&utc, &time) == 0;
+#else
+    const bool converted = gmtime_r(&time, &utc) != nullptr;
+#endif
+    if (!converted || std::strftime(label.data(), label.size(), "%Y-%m-%d %H:%M:%S UTC", &utc) == 0) {
       return "Capture time unavailable";
     }
     return label.data();
