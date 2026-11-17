@@ -9,6 +9,14 @@
 #include <utility>
 
 namespace streaming {
+  ScreenshotNotificationLayout layout_screenshot_notification(int width, int height, int lineHeight, int titleWidth, int detailWidth, bool saving) {
+    if (width <= 16 || height <= 16 || lineHeight <= 0) {
+      return {};
+    }
+    const int textWidth = std::max(titleWidth, saving ? 0 : detailWidth);
+    return {std::min(width - 16, std::max(280, textWidth + 24)), std::min(height - 16, lineHeight * (saving ? 1 : 2) + (saving ? 28 : 32))};
+  }
+
   void ScreenshotNotification::begin() {
     *this = {};
     visible = true;
@@ -43,5 +51,17 @@ namespace streaming {
   std::string ScreenshotNotification::title() const {
     return saving ? "Saving screenshot... " + std::to_string(percent) + "%" : saved ? "Screenshot saved" :
                                                                                       "Screenshot failed";
+  }
+
+  std::string_view ScreenshotNotification::body() const {
+    if (saving) {
+      return {};
+    }
+    std::string_view text = detail;
+    const std::string_view prefix = saved ? "Saved " : "Screenshot failed: ";
+    if (text.substr(0, prefix.size()) == prefix) {
+      text.remove_prefix(prefix.size());
+    }
+    return text;
   }
 }  // namespace streaming

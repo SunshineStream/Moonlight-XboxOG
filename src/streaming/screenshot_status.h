@@ -7,8 +7,29 @@
 // standard includes
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace streaming {
+
+  /**
+   * @brief Content-sized screenshot popup constrained to the video safe area.
+   */
+  struct ScreenshotNotificationLayout {
+    int width = 0;  ///< Panel width including text padding.
+    int height = 0;  ///< One line while saving, two lines on completion.
+  };
+
+  /**
+   * @brief Fit a notification to measured text, reserving a second line only for a completed result.
+   * @param width Available video width.
+   * @param height Available video height.
+   * @param lineHeight Font line height.
+   * @param titleWidth Measured single-line title width.
+   * @param detailWidth Measured path or error width, ignored while saving.
+   * @param saving True while a capture is pending.
+   * @return Bounded panel dimensions, or an empty layout for an unusable viewport or font.
+   */
+  ScreenshotNotificationLayout layout_screenshot_notification(int width, int height, int lineHeight, int titleWidth, int detailWidth, bool saving);
 
   /**
    * @brief Keep saving feedback visible until completion, then dismiss it after a bounded interval.
@@ -43,6 +64,11 @@ namespace streaming {
      * @return Human-readable notification title.
      */
     std::string title() const;
+    /**
+     * @brief Return the saved path or error without repeating the popup title.
+     * @return Single-line detail, empty while saving.
+     */
+    std::string_view body() const;
 
     bool visible = false;  ///< True while saving or before the completion timer expires.
     bool saving = false;  ///< True until a worker publishes its result.

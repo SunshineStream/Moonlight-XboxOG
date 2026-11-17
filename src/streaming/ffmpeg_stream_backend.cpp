@@ -361,6 +361,12 @@ namespace streaming {
     invalidate_overlay_texture();
   }
 
+  void FfmpegStreamBackend::set_color_overlay_surface(int width, int height, const std::uint8_t *pixels, std::size_t capacity, int pitch, VideoOverlayPlacement placement, bool opaqueBackground) {
+    if (statisticsOverlay_.set_argb_surface(width, height, pixels, capacity, pitch, placement, opaqueBackground)) {
+      invalidate_overlay_texture();
+    }
+  }
+
   void FfmpegStreamBackend::invalidate_overlay_texture() {
     statisticsBitmapChanged_ = statisticsTextureChanged_ = true;
     statisticsTextureDamage_ = {0, 0, statisticsOverlay_.width(), statisticsOverlay_.height()};
@@ -519,10 +525,15 @@ namespace streaming {
       const std::array<int, 4> pitch {frame.yPitch, frame.uPitch, frame.vPitch, 0};
       std::array<std::uint8_t *, 4> output {static_cast<std::uint8_t *>(surface->pixels), nullptr, nullptr, nullptr};
       const std::array<int, 4> outputPitch {surface->pitch, 0, 0, 0};
-      if (sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height) {
+      const bool converted = sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height;
+      sws_freeContext(conversion);
+      // The BGR surface now owns the image. Return the YUV snapshot and scale
+      // buffers before disk I/O so opening a full-screen menu still fits in 64 MiB.
+      job.frame = {};
+      if (converted) {
         job.progress.store(10, std::memory_order_relaxed);
         if (SDL_RWops *file = SDL_RWFromFile(path.c_str(), "wb"); file != nullptr) {
-          ScreenshotFileProgress writer {file, job.progress, 54 + static_cast<Sint64>((frame.width * 3 + 3) & ~3) * frame.height};
+          ScreenshotFileProgress writer {file, job.progress, 54 + static_cast<Sint64>((surface->w * 3 + 3) & ~3) * surface->h};
           SDL_RWops progressFile {};
           progressFile.hidden.unknown.data1 = &writer;
           progressFile.seek = screenshot_file_seek;
@@ -535,7 +546,6 @@ namespace streaming {
           }
         }
       }
-      sws_freeContext(conversion);
     }
     SDL_FreeSurface(surface);
     if (saved) {

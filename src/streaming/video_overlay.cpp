@@ -104,11 +104,11 @@ namespace {
 }  // namespace
 
 namespace streaming {
-  std::vector<std::uint8_t> extract_overlay_bitmap(const std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, bool opaqueBackground) {
+  std::vector<std::uint8_t> extract_overlay_bitmap(const std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, bool opaqueBackground, std::vector<std::uint8_t> bitmap) {
     if (!valid_storage(pixels, capacity, pitch, width, height, 4) || width > 2048 || height > 2048) {
       return {};
     }
-    std::vector<std::uint8_t> bitmap(static_cast<std::size_t>(width) * height * 4);
+    bitmap.resize(static_cast<std::size_t>(width) * height * 4);
     for (int row = 0; row < height; ++row) {
       for (int column = 0; column < width; ++column) {
         const auto *pixel = pixels + static_cast<std::size_t>(row) * pitch + column * 4;
@@ -128,6 +128,7 @@ namespace streaming {
           continue;
         }
         if (opacity == 0) {
+          bitmap[index] = bitmap[index + 1] = bitmap[index + 2] = 0;
           continue;
         }
         for (int component = 0; component < 3; ++component) {
@@ -312,6 +313,18 @@ namespace streaming {
     }
     rgb_.clear();
     rgbBpp_ = 0;
+    return true;
+  }
+
+  bool VideoOverlay::set_argb_surface(int width, int height, const std::uint8_t *pixels, std::size_t capacity, int pitch, VideoOverlayPlacement placement, bool opaqueBackground) {
+    if (!valid_storage(pixels, capacity, pitch, width, height, 4) || width > 2048 || height > 2048) {
+      return false;
+    }
+    if (width != width_ || height != height_) {
+      set_bitmap(0, 0, {});
+    }
+    auto bitmap = extract_overlay_bitmap(pixels, capacity, pitch, width, height, opaqueBackground, std::move(argb_));
+    set_argb_bitmap(width, height, std::move(bitmap), placement);
     return true;
   }
 

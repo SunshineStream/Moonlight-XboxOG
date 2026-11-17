@@ -969,8 +969,17 @@ namespace streaming {
       return;
     }
     const int line = TTF_FontLineSkip(font);
-    const int panelWidth = std::min(width - 16, std::min(600, width * 3 / 4));
-    const int panelHeight = std::min(height - 16, line * 3 + 32);
+    const auto title = screenshotNotification_.title();
+    const std::string detail(screenshotNotification_.body());
+    int titleWidth = 0;
+    int detailWidth = 0;
+    TTF_SizeUTF8(font, title.c_str(), &titleWidth, nullptr);
+    if (!detail.empty()) {
+      TTF_SizeUTF8(font, detail.c_str(), &detailWidth, nullptr);
+    }
+    const auto layout = layout_screenshot_notification(width, height, line, titleWidth, detailWidth, screenshotNotification_.saving);
+    const int panelWidth = layout.width;
+    const int panelHeight = layout.height;
     if (panelWidth <= 0 || panelHeight <= 0) {
       return;
     }
@@ -985,11 +994,14 @@ namespace streaming {
       return;
     }
     auto *renderer = panelRenderer_.get();
-    SDL_SetRenderDrawColor(renderer, 22, 31, 46, 245);
+    SDL_SetRenderDrawColor(renderer, 22, 31, 46, 170);
     SDL_RenderClear(renderer);
-    label(renderer, font, screenshotNotification_.title(), {12, 8, panelWidth - 24, line}, false, false, true);
-    const auto detail = screenshotNotification_.saving ? "You can keep playing while the image is saved." : screenshotNotification_.detail;
-    label(renderer, font, detail, {12, line + 12, panelWidth - 24, line * 2}, true, false);
+    label(renderer, font, title, {12, 8, panelWidth - 24, line}, false, false, true);
+    if (!detail.empty()) {
+      // SDL_ttf's legacy wrapper cannot reliably split an uninterrupted Xbox
+      // path. Fit one complete line instead of clipping or overlapping it.
+      label(renderer, font, detail, {12, line + 12, panelWidth - 24, line}, false, false, true);
+    }
     SDL_Rect bar {12, panelHeight - 12, panelWidth - 24, 4};
     SDL_SetRenderDrawColor(renderer, 50, 65, 86, 255);
     SDL_RenderFillRect(renderer, &bar);
@@ -997,8 +1009,7 @@ namespace streaming {
     SDL_SetRenderDrawColor(renderer, screenshotNotification_.saving || screenshotNotification_.saved ? 130 : 255, screenshotNotification_.saving || screenshotNotification_.saved ? 180 : 110, screenshotNotification_.saving || screenshotNotification_.saved ? 255 : 110, 255);
     SDL_RenderFillRect(renderer, &bar);
     SDL_RenderPresent(renderer);
-    auto pixels = extract_overlay_bitmap(static_cast<const std::uint8_t *>(panel_->pixels), static_cast<std::size_t>(panel_->pitch) * panelHeight, panel_->pitch, panelWidth, panelHeight, false);
-    backend.set_color_overlay(panelWidth, panelHeight, std::move(pixels), VideoOverlayPlacement::bottom_center);
+    backend.set_color_overlay_surface(panelWidth, panelHeight, static_cast<const std::uint8_t *>(panel_->pixels), static_cast<std::size_t>(panel_->pitch) * panelHeight, panel_->pitch, VideoOverlayPlacement::bottom_center);
   }
 
   bool StreamControls::render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip) {
@@ -1331,8 +1342,7 @@ namespace streaming {
         backend.update_color_overlay(area, pixels);
       }
     } else {
-      auto pixels = extract_overlay_bitmap(static_cast<const std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height, keyboard);
-      backend.set_color_overlay(width, height, std::move(pixels), keyboard ? (keyboardTop_ ? VideoOverlayPlacement::dock_top : VideoOverlayPlacement::dock_bottom) : VideoOverlayPlacement::full_screen);
+      backend.set_color_overlay_surface(width, height, static_cast<const std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, keyboard ? (keyboardTop_ ? VideoOverlayPlacement::dock_top : VideoOverlayPlacement::dock_bottom) : VideoOverlayPlacement::full_screen, keyboard);
     }
     panelContent_ = content;
     panelSelection_ = keyboard ? menu_.keyIndex : static_cast<int>(menu_.selected);

@@ -17,6 +17,70 @@
 #include "src/streaming/video_overlay.h"
 
 /**
+ * @brief Full-screen dialog repaints reuse their color allocation while screenshots own additional buffers.
+ */
+TEST(VideoOverlayTest, ReusesFullScreenSurfaceStorageAcrossDialogRepaints) {
+  constexpr int width = 1280;
+  constexpr int height = 720;
+  std::vector<std::uint8_t> source(width * height * 4, 150);
+  streaming::VideoOverlay overlay;
+  ASSERT_TRUE(overlay.set_argb_surface(width, height, source.data(), source.size(), width * 4, streaming::VideoOverlayPlacement::full_screen));
+  const auto *allocation = overlay.argb_pixels().data();
+  source[0] = 15;
+  source[1] = 30;
+  source[2] = 60;
+  source[3] = 0;
+  ASSERT_TRUE(overlay.set_argb_surface(width, height, source.data(), source.size(), width * 4, streaming::VideoOverlayPlacement::full_screen));
+  EXPECT_EQ(overlay.argb_pixels().data(), allocation);
+  EXPECT_EQ(overlay.argb_pixels(), streaming::extract_overlay_bitmap(source.data(), source.size(), width * 4, width, height));
+  EXPECT_EQ(overlay.argb_pixels()[0], 0);
+  ASSERT_TRUE(overlay.set_argb_surface(8, 8, source.data(), source.size(), width * 4, streaming::VideoOverlayPlacement::bottom_center, true));
+  EXPECT_LT(overlay.argb_pixels().capacity(), static_cast<std::size_t>(width * height));
+  EXPECT_EQ(overlay.argb_pixels()[3], 255);
+  const auto expected = overlay.argb_pixels();
+  EXPECT_FALSE(overlay.set_argb_surface(8, 8, nullptr, source.size(), width * 4, streaming::VideoOverlayPlacement::top_left));
+  EXPECT_FALSE(overlay.set_argb_surface(2049, 1, source.data(), source.size(), 2049 * 4, streaming::VideoOverlayPlacement::top_left));
+  EXPECT_FALSE(overlay.set_argb_surface(1, 2049, source.data(), source.size(), 4, streaming::VideoOverlayPlacement::top_left));
+  EXPECT_FALSE(overlay.set_argb_surface(8, 8, source.data(), 1, width * 4, streaming::VideoOverlayPlacement::top_left));
+  EXPECT_EQ(overlay.argb_pixels(), expected);
+  EXPECT_EQ(overlay.width(), 8);
+}
+
+/**
+ * @brief Reused SDL surfaces refresh GPU and software caches when their colors or opacity change.
+ */
+TEST(VideoOverlayTest, RefreshesPresentationCachesAfterReusingSurfaceStorage) {
+  streaming::VideoOverlay overlay;
+  for (const std::uint8_t opacity : {255, 128, 0, 255}) {
+    std::vector<std::uint8_t> source(8 * 8 * 4);
+    for (std::size_t index = 0; index < source.size(); index += 4) {
+      source[index] = 20;
+      source[index + 1] = 40;
+      source[index + 2] = 60;
+      source[index + 3] = opacity;
+    }
+    ASSERT_TRUE(overlay.set_argb_surface(8, 8, source.data(), source.size(), 32, streaming::VideoOverlayPlacement::top_left));
+    streaming::VideoOverlay fresh;
+    fresh.set_argb_bitmap(8, 8, streaming::extract_overlay_bitmap(source.data(), source.size(), 32, 8, 8));
+    for (const auto matrix : {streaming::VideoColorMatrix::bt601, streaming::VideoColorMatrix::bt709}) {
+      std::vector<std::uint8_t> actual(32 * 32 * 2, 100);
+      auto expected = actual;
+      ASSERT_TRUE(overlay.draw_yuy2(actual.data(), actual.size(), 64, 32, 32, {0, 0, 32, 32}, matrix));
+      ASSERT_TRUE(fresh.draw_yuy2(expected.data(), expected.size(), 64, 32, 32, {0, 0, 32, 32}, matrix));
+      EXPECT_EQ(actual, expected);
+    }
+    for (const int bpp : {15, 16, 32}) {
+      const int bytes = bpp == 32 ? 4 : 2;
+      std::vector<std::uint8_t> actual(32 * 32 * bytes, 100);
+      auto expected = actual;
+      ASSERT_TRUE(overlay.draw_rgb(actual.data(), actual.size(), 32 * bytes, 32, 32, bpp, {0, 0, 32, 32}));
+      ASSERT_TRUE(fresh.draw_rgb(expected.data(), expected.size(), 32 * bytes, 32, 32, bpp, {0, 0, 32, 32}));
+      EXPECT_EQ(actual, expected);
+    }
+  }
+}
+
+/**
  * @brief Opaque OSK colors are not brightened or made translucent by legacy SDL alpha rounding.
  */
 TEST(VideoOverlayTest, KeepsTheOskOpaqueDespiteSdlAlphaRounding) {

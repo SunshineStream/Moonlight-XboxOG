@@ -15,9 +15,10 @@ namespace streaming {
    * @param width Surface width, at most 2048.
    * @param height Surface height, at most 2048.
    * @param opaqueBackground Source was drawn onto an opaque panel; preserve colors and correct SDL's alpha rounding.
+   * @param bitmap Optional reusable destination storage, avoiding a second full-screen allocation on repaint.
    * @return Unpremultiplied B, G, R, A bytes, or empty storage for invalid dimensions.
    */
-  std::vector<std::uint8_t> extract_overlay_bitmap(const std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, bool opaqueBackground = false);
+  std::vector<std::uint8_t> extract_overlay_bitmap(const std::uint8_t *pixels, std::size_t capacity, int pitch, int width, int height, bool opaqueBackground = false, std::vector<std::uint8_t> bitmap = {});
 
   /**
    * @brief Source crop and destination for a centered overlay label.
@@ -94,6 +95,22 @@ namespace streaming {
      * @param placement Anchor inside the video rectangle.
      */
     void set_argb_bitmap(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left);
+    /**
+     * @brief Copy a premultiplied SDL panel using the existing color buffer for same-size repaints.
+     *
+     * Release obsolete geometry and conversion caches before allocating a new panel. This avoids
+     * overlapping full-screen copies while a background screenshot owns its capture buffers.
+     *
+     * @param width Source width, at most 2048.
+     * @param height Source height, at most 2048.
+     * @param pixels Premultiplied B, G, R, A source bytes, independent of this overlay's storage.
+     * @param capacity Accessible source byte count.
+     * @param pitch Source row stride.
+     * @param placement Panel anchor inside the video rectangle.
+     * @param opaqueBackground Source was rendered onto an opaque panel.
+     * @return False for invalid source storage, preserving the previous overlay.
+     */
+    bool set_argb_surface(int width, int height, const std::uint8_t *pixels, std::size_t capacity, int pitch, VideoOverlayPlacement placement, bool opaqueBackground = false);
     /**
      * @brief Replace a bounded part of an existing colored panel without scanning or copying unchanged pixels.
      * @param region Rectangle in panel pixels; must be wholly inside the current panel.
