@@ -2,11 +2,6 @@
  * @file src/main.cpp
  * @brief Runs the Moonlight Xbox startup sequence and main loop.
  */
-// nxdk includes
-#include <hal/debug.h>
-#include <SDL.h>
-#include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
-
 // standard includes
 #include <algorithm>
 #include <array>
@@ -14,6 +9,13 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// lib includes
+#include <SDL.h>
+
+// nxdk includes
+#include <hal/debug.h>
+#include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
 
 // local includes
 #include "src/app/client_state.h"
@@ -47,6 +49,8 @@ namespace {
     state.settings.playAudioOnPc = settings.playAudioOnPc;
     state.settings.showPerformanceStats = settings.showPerformanceStats;
     state.settings.playAudioOnXbox = settings.playAudioOnXbox;
+    state.settings.controls.screenshotDirectory = settings.screenshotDirectory;
+    state.settings.controls.keyboardDockTop = settings.keyboardDockTop;
     state.settings.dirty = false;
   }
 

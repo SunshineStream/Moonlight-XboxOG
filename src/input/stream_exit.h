@@ -1,16 +1,17 @@
 /**
  * @file src/input/stream_exit.h
- * @brief Defines a digital stream exit chord that does not invoke xemu's Start and Back menu.
+ * @brief Defines the former stream exit shortcut, now used to open the stream menu.
  */
 #pragma once
 
+// standard includes
 #include <cstdint>
 
 namespace input {
-  constexpr const char *STREAM_EXIT_HINT = "Press Back/Select + Black + White (LB + RB) together to stop streaming. No hold required.";  ///< Shared startup and streaming instruction.
+  constexpr const char *STREAM_EXIT_HINT = "Back/Select + Black + White (LB + RB): stream menu. No hold required.";  ///< Shared startup and streaming instruction.
 
   /**
-   * @brief Recognize the digital exit chord without consulting axes or a clock.
+   * @brief Recognize the digital stream menu chord without consulting axes or a clock.
    *
    * @param buttons Current Moonlight controller button flags.
    * @param controllerPresent True when the sampled controller is connected.
@@ -19,7 +20,7 @@ namespace input {
   bool is_stream_exit_requested(std::uint32_t buttons, bool controllerPresent);
 
   /**
-   * @brief Track digital button events so a complete chord is detected before queued releases are drained.
+   * @brief Track the menu shortcut so a complete chord is detected before queued releases are drained.
    */
   class StreamExitChord {
   public:

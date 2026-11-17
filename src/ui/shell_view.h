@@ -77,6 +77,8 @@ namespace ui {
     std::string iconAssetPath;  ///< Primary icon asset path.
     std::string secondaryIconAssetPath;  ///< Optional secondary icon asset path.
     bool emphasized = false;  ///< True when the action should receive visual emphasis.
+    std::string keyLabel;  ///< Primary keyboard keycap label, replacing the primary controller icon.
+    std::string secondaryKeyLabel;  ///< Optional second keyboard keycap label.
   };
 
   /**
@@ -90,12 +92,16 @@ namespace ui {
   };
 
   /**
-   * @brief Render-ready button in the keypad modal.
+   * @brief Render-ready numeric or text key with optional explicit keyboard geometry.
    */
   struct ShellModalButton {
     std::string label;  ///< User-facing button label.
     bool enabled = true;  ///< True when the button can be activated.
     bool selected = false;  ///< True when the button currently has focus.
+    int column = -1;  ///< Explicit half-column origin for the shared keyboard; negative uses the numeric grid.
+    int row = 0;  ///< Explicit keyboard row.
+    int width = 1;  ///< Explicit key width in half-columns.
+    int height = 1;  ///< Explicit key height in rows.
   };
 
   /**
@@ -151,12 +157,27 @@ namespace ui {
   struct ShellModalView {
     bool visible = false;  ///< True when a modal dialog should be rendered.
     bool busy = false;  ///< Show progress instead of dismissal controls while work is pending.
+    bool folderBrowser = false;  ///< Directory-dialog style; all static action dialogs share retained focus repainting.
     std::string title;  ///< Modal dialog title.
     std::string iconAssetPath;  ///< Optional status icon beside the dialog title.
     std::vector<std::string> lines;  ///< Modal dialog body lines.
     std::vector<ShellActionRow> actions;  ///< Modal action rows.
     std::vector<ShellFooterAction> footerActions;  ///< Footer actions displayed while a modal is open.
   };
+
+  /**
+   * @brief Check whether any action dialog can retain its pixels while list selection changes.
+   * @param previous Previously painted dialog.
+   * @param current Current dialog, including guidance, action rows and input helpers.
+   * @return True when every visible property except the focused action is unchanged.
+   */
+  bool same_action_dialog_content(const ShellModalView &previous, const ShellModalView &current);
+  /**
+   * @brief Identify views whose visible contents animate without input or a completed task.
+   * @param state Current shell and workflow state.
+   * @return True for diagnostics and active progress indicators; static pages retain their frame.
+   */
+  bool shell_requires_animation(const app::ClientState &state);
 
   /**
    * @brief Embedded log viewer state surfaced by the log-file modal.
@@ -170,7 +191,7 @@ namespace ui {
   };
 
   /**
-   * @brief Add-host keypad modal view rendered above the split add-host screen.
+   * @brief Local numeric or text entry modal, shared by host entry and folder creation.
    */
   struct ShellKeypadModalView {
     bool visible = false;  ///< True when the keypad modal should be rendered.
@@ -182,7 +203,18 @@ namespace ui {
     std::vector<std::string> lines;  ///< Instruction and draft lines shown in the keypad modal.
     std::vector<ShellModalButton> buttons;  ///< Buttons rendered inside the keypad modal.
     std::size_t columnCount = 0U;  ///< Number of columns used to lay out keypad buttons.
+    std::size_t rowCount = 0U;  ///< Explicit keyboard row count; zero derives rows from the numeric grid.
     std::vector<ShellFooterAction> footerActions;  ///< Input, delete, cancel and accept controls inside the dialog.
+  };
+
+  /**
+   * @brief Current screenshot and captions for the local full-screen image viewer.
+   */
+  struct ShellScreenshotView {
+    bool visible = false;  ///< True while the app screenshot viewer owns the display.
+    std::string path;  ///< Current bitmap path; empty when no captures are indexed.
+    std::string caption;  ///< Capture time and position within this app's library.
+    std::string status;  ///< Empty-library guidance or a recoverable journal warning.
   };
 
   /**
@@ -196,6 +228,7 @@ namespace ui {
     ShellModalView modal;  ///< Modal dialog content.
     ShellLogViewerView logViewer;  ///< Embedded log viewer surfaced by the log modal.
     ShellKeypadModalView keypad;  ///< Add-host keypad modal content.
+    ShellScreenshotView screenshot;  ///< Single-image local viewer with app-specific navigation.
   };
 
   /**

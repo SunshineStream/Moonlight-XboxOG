@@ -2,7 +2,7 @@
  * @file tests/unit/input/navigation_input_test.cpp
  * @brief Verifies controller navigation input handling.
  */
-// class header include
+// test header include
 #include "src/input/navigation_input.h"
 
 // lib includes
@@ -10,6 +10,9 @@
 
 namespace {
 
+  /**
+   * @brief Controller buttons map to their documented navigation and action commands.
+   */
   TEST(NavigationInputTest, MapsControllerButtonsToNavigationCommands) {
     EXPECT_EQ(input::map_gamepad_button_to_ui_command(input::GamepadButton::dpad_up), input::UiCommand::move_up);
     EXPECT_EQ(input::map_gamepad_button_to_ui_command(input::GamepadButton::dpad_down), input::UiCommand::move_down);
@@ -26,6 +29,9 @@ namespace {
     EXPECT_EQ(input::map_gamepad_button_to_ui_command(static_cast<input::GamepadButton>(999)), input::UiCommand::none);
   }
 
+  /**
+   * @brief Every signed stick direction maps to its corresponding navigation command.
+   */
   TEST(NavigationInputTest, MapsControllerAxisDirectionsToNavigationCommands) {
     EXPECT_EQ(input::map_gamepad_axis_direction_to_ui_command(input::GamepadAxisDirection::left_stick_up), input::UiCommand::move_up);
     EXPECT_EQ(input::map_gamepad_axis_direction_to_ui_command(input::GamepadAxisDirection::left_stick_down), input::UiCommand::move_down);
@@ -34,6 +40,9 @@ namespace {
     EXPECT_EQ(input::map_gamepad_axis_direction_to_ui_command(static_cast<input::GamepadAxisDirection>(999)), input::UiCommand::none);
   }
 
+  /**
+   * @brief Keyboard helper labels correspond to the same commands as the controller controls.
+   */
   TEST(NavigationInputTest, MapsKeyboardKeysToNavigationCommands) {
     EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::up), input::UiCommand::move_up);
     EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::down), input::UiCommand::move_down);
@@ -48,6 +57,8 @@ namespace {
     EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::tab, true), input::UiCommand::previous_page);
     EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::page_up), input::UiCommand::previous_page);
     EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::page_down), input::UiCommand::next_page);
+    EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::page_up, true), input::UiCommand::fast_previous_page);
+    EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::page_down, true), input::UiCommand::fast_next_page);
     EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::i), input::UiCommand::open_context_menu);
     EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::m), input::UiCommand::open_context_menu);
     EXPECT_EQ(input::map_keyboard_key_to_ui_command(input::KeyboardKey::f3), input::UiCommand::toggle_overlay);

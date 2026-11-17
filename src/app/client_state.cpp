@@ -15,6 +15,8 @@
 // local includes
 #include "src/app/stream_bitrate.h"
 #include "src/network/host_pairing.h"
+#include "src/platform/filesystem_utils.h"
+#include "src/startup/storage_paths.h"
 
 namespace {
 
@@ -78,6 +80,11 @@ namespace {
     return field == app::AddHostField::address ? "edit-address" : "edit-port";
   }
 
+  /**
+   * @brief Map each independent settings category to its stable navigation identifier.
+   * @param category Settings section to identify.
+   * @return Menu identifier for Logging, Display, Input, Storage or Reset.
+   */
   std::string settings_category_menu_id(app::SettingsCategory category) {
     switch (category) {
       case app::SettingsCategory::logging:
@@ -86,6 +93,8 @@ namespace {
         return std::string(SETTINGS_CATEGORY_PREFIX) + "display";
       case app::SettingsCategory::input:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "input";
+      case app::SettingsCategory::storage:
+        return std::string(SETTINGS_CATEGORY_PREFIX) + "storage";
       case app::SettingsCategory::reset:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "reset";
     }
@@ -93,6 +102,11 @@ namespace {
     return std::string(SETTINGS_CATEGORY_PREFIX) + "logging";
   }
 
+  /**
+   * @brief Resolve a category identifier while defaulting unknown identifiers to Logging.
+   * @param itemId Selected navigation identifier.
+   * @return Corresponding settings category.
+   */
   app::SettingsCategory settings_category_from_menu_id(std::string_view itemId) {
     if (itemId == settings_category_menu_id(app::SettingsCategory::display)) {
       return app::SettingsCategory::display;
@@ -100,20 +114,30 @@ namespace {
     if (itemId == settings_category_menu_id(app::SettingsCategory::input)) {
       return app::SettingsCategory::input;
     }
+    if (itemId == settings_category_menu_id(app::SettingsCategory::storage)) {
+      return app::SettingsCategory::storage;
+    }
     if (itemId == settings_category_menu_id(app::SettingsCategory::reset)) {
       return app::SettingsCategory::reset;
     }
     return app::SettingsCategory::logging;
   }
 
+  /**
+   * @brief Describe the options owned by a settings category.
+   * @param category Section whose scope should be explained.
+   * @return Category guidance, keeping file destinations separate from Display.
+   */
   const char *settings_category_description(app::SettingsCategory category) {
     switch (category) {
       case app::SettingsCategory::logging:
         return "Control the runtime log file, the in-app log viewer, and xemu debugger output verbosity.";
       case app::SettingsCategory::display:
-        return "Tune streaming video resolution, frame rate, bitrate, audio playback, and the in-stream diagnostics overlay.";
+        return "Tune streaming video resolution, frame rate, bitrate, audio playback and performance statistics.";
       case app::SettingsCategory::input:
         return "Input options will live here when controller and navigation customization is added.";
+      case app::SettingsCategory::storage:
+        return "Choose the folder used to save stream screenshots.";
       case app::SettingsCategory::reset:
         return "Review and delete Moonlight saved data, or remove everything with a full factory reset.";
     }
@@ -493,7 +517,7 @@ namespace {
   }
 
   /**
-   * @brief Build navigation actions, exposing host operations only after an address is supplied.
+   * @brief Build screen actions and settings categories, exposing host operations after an address is supplied.
    *
    * @param state Current screen and entered host information.
    * @return Menu entries available for the current task.
@@ -505,6 +529,7 @@ namespace {
           {settings_category_menu_id(app::SettingsCategory::logging), "Logging", settings_category_description(app::SettingsCategory::logging), true},
           {settings_category_menu_id(app::SettingsCategory::display), "Display", settings_category_description(app::SettingsCategory::display), true},
           {settings_category_menu_id(app::SettingsCategory::input), "Input", settings_category_description(app::SettingsCategory::input), true},
+          {settings_category_menu_id(app::SettingsCategory::storage), "Storage", settings_category_description(app::SettingsCategory::storage), true},
           {settings_category_menu_id(app::SettingsCategory::reset), "Reset", settings_category_description(app::SettingsCategory::reset), true},
         };
       case app::ScreenId::add_host:
@@ -536,6 +561,11 @@ namespace {
     return {};
   }
 
+  /**
+   * @brief Build the active settings options, including the screenshot destination picker.
+   * @param state Current screen and settings values.
+   * @return Selectable settings rows for the current category.
+   */
   std::vector<ui::MenuItem> build_detail_menu_for_state(const app::ClientState &state) {
     if (state.shell.activeScreen != app::ScreenId::settings) {
       return {};
@@ -587,6 +617,10 @@ namespace {
             true,
           },
         };
+      case app::SettingsCategory::storage:
+        return {
+          {"screenshot-directory", "Screenshot Folder: " + (state.settings.controls.screenshotDirectory.empty() ? std::string("Default") : state.settings.controls.screenshotDirectory), "Choose or create a folder for stream screenshots. Default: " + startup::default_storage_path("screenshots"), true},
+        };
       case app::SettingsCategory::input:
         return {
           {"input-placeholder", "Input settings are not implemented yet", "Input-specific options are planned, but there are no adjustable controller settings in this build yet.", true},
@@ -637,7 +671,17 @@ namespace {
     }
   }
 
+  /**
+   * @brief Close the active dialog and release staged picker data before streaming can begin.
+   * @param state Client state containing the dialog and any temporary folder listing.
+   */
   void close_modal(app::ClientState &state) {
+    if (state.modal.id == app::ModalId::directory_picker) {
+      state.directoryPicker = {};
+    }
+    if (state.modal.id == app::ModalId::screenshot_viewer) {
+      state.screenshotViewer = {};
+    }
     state.modal = {};
     reset_confirmation(state);
   }
@@ -713,20 +757,29 @@ namespace {
     state.settings.logViewerScrollOffset = state.settings.logViewerScrollOffset > step ? state.settings.logViewerScrollOffset - step : 0U;
   }
 
+  /**
+   * @brief Count available dialog rows, including directory entries and picker actions.
+   * @param state Current modal and staged folder list.
+   * @return Number of focusable action positions.
+   */
   std::size_t modal_action_count(const app::ClientState &state) {
     switch (state.modal.id) {
       case app::ModalId::host_actions:
         return 4U;
       case app::ModalId::app_actions:
-        return 3U;
+        return app::selected_app(state) != nullptr && app::selected_app(state)->running ? 5U : 4U;
       case app::ModalId::confirmation:
         return 2U;
+      case app::ModalId::directory_picker:
+        return state.directoryPicker.folders.size() + 4U;
       case app::ModalId::none:
       case app::ModalId::support:
       case app::ModalId::host_details:
       case app::ModalId::app_details:
       case app::ModalId::log_viewer:
       case app::ModalId::connection_test:
+      case app::ModalId::screenshot_viewer:
+      case app::ModalId::quit_progress:
         return 0U;
     }
     return 0U;
@@ -738,7 +791,7 @@ namespace {
       return false;
     }
 
-    const std::size_t current = state.modal.selectedActionIndex % count;
+    const std::size_t current = state.modal.id == app::ModalId::app_actions ? std::min(state.modal.selectedActionIndex, count - 1) : state.modal.selectedActionIndex % count;
     state.modal.selectedActionIndex = direction < 0 ? (current + count - 1U) % count : (current + 1U) % count;
     return state.modal.selectedActionIndex != current;
   }
@@ -1139,7 +1192,7 @@ namespace {
   }
 
   /**
-   * @brief Open a paired PC's library or notify the user why it cannot be opened.
+   * @brief Open a paired PC's library, retaining offline access to cached apps and screenshots.
    *
    * @param state Mutable client state.
    * @param showHiddenApps Include hidden apps in the library.
@@ -1150,7 +1203,7 @@ namespace {
     if (host == nullptr) {
       return false;
     }
-    if (host->reachability == app::HostReachability::offline) {
+    if (host->reachability == app::HostReachability::offline && host->apps.empty()) {
       state.shell.statusMessage = "Host is offline. Bring it online before opening apps.";
       app::show_notification(state, app::NotificationKind::error, "PC is offline", "Turn on the PC and make sure Sunshine is running to open its apps.");
       return false;
@@ -1166,8 +1219,14 @@ namespace {
     state.apps.selectedAppIndex = 0U;
     state.apps.scrollPage = 0U;
     state.apps.refreshFailureNotified = false;
-    state.hosts.active.appListState = app::HostAppListState::loading;
-    state.hosts.active.appListStatusMessage = (state.hosts.active.apps.empty() ? "Loading apps for " : "Refreshing apps for ") + state.hosts.active.displayName + "...";
+    const bool offline = state.hosts.active.reachability == app::HostReachability::offline;
+    state.hosts.active.appListState = offline ? app::HostAppListState::ready : app::HostAppListState::loading;
+    if (offline) {
+      state.hosts.active.appListStatusMessage = "PC offline. Showing saved apps and local screenshots.";
+    } else {
+      const std::string prefix = state.hosts.active.apps.empty() ? "Loading apps for " : "Refreshing apps for ";
+      state.hosts.active.appListStatusMessage = prefix + state.hosts.active.displayName + "...";
+    }
     state.shell.statusMessage.clear();
     set_screen(state, app::ScreenId::apps);
     return true;
@@ -1358,7 +1417,12 @@ namespace {
     const bool confirmed = state.modal.selectedActionIndex % 2U == 0U;
     const app::ConfirmationAction action = state.confirmation.action;
     const std::string targetPath = state.confirmation.targetPath;
+    const auto parent = state.confirmation.returnModal;
+    const auto parentIndex = state.confirmation.returnActionIndex;
     close_modal_and_mark_closed(state, update);
+    if (parent != app::ModalId::none) {
+      open_modal(state, parent, parentIndex);
+    }
     if (!confirmed) {
       state.shell.statusMessage = "Cancelled the pending reset action";
       return true;
@@ -1373,6 +1437,14 @@ namespace {
     }
     if (action == app::ConfirmationAction::factory_reset) {
       update->persistence.factoryResetRequested = true;
+    }
+    if (action == app::ConfirmationAction::delete_screenshot) {
+      update->requests.screenshotDeleteRequested = true;
+    }
+    if (action == app::ConfirmationAction::quit_app) {
+      state.appQuit.inProgress = true;
+      open_modal(state, app::ModalId::quit_progress);
+      update->requests.quitAppRequested = true;
     }
     return true;
   }
@@ -1391,7 +1463,7 @@ namespace {
       return true;
     }
 
-    switch (state.modal.selectedActionIndex % 4U) {
+    switch (state.modal.selectedActionIndex % modal_action_count(state)) {
       case 0:
         close_modal_and_mark_closed(state, update);
         if (host->pairingState == app::PairingState::paired) {
@@ -1444,7 +1516,7 @@ namespace {
     }
 
     app::HostAppRecord &appRecord = mutableHost->apps[indices[state.apps.selectedAppIndex]];
-    switch (state.modal.selectedActionIndex % 3U) {
+    switch (state.modal.selectedActionIndex) {
       case 0:
         appRecord.hidden = !appRecord.hidden;
         state.hosts.dirty = true;
@@ -1463,6 +1535,24 @@ namespace {
         close_modal_and_mark_closed(state, update);
         if (update != nullptr) {
           update->persistence.hostsChanged = true;
+        }
+        return true;
+      case 3:
+        state.screenshotViewer = {};
+        state.screenshotViewer.source = app::screenshot_source(*host, appRecord);
+        open_modal(state, app::ModalId::screenshot_viewer);
+        if (update != nullptr) {
+          update->requests.screenshotsRequested = true;
+        }
+        return true;
+      case 4:
+        if (appRecord.running) {
+          state.appQuit = {host->address, host->port, appRecord.id, appRecord.name, false};
+          open_confirmation(state, app::ConfirmationAction::quit_app, "Quit " + appRecord.name + "?", {"The app will close on your PC. Unsaved progress may be lost."});
+          state.confirmation.returnModal = app::ModalId::app_actions;
+          state.confirmation.returnActionIndex = 4;
+        } else {
+          state.modal.selectedActionIndex = 3;
         }
         return true;
       default:
@@ -1486,6 +1576,9 @@ namespace {
         close_modal_and_mark_closed(state, update);
         return true;
       case app::ModalId::log_viewer:
+      case app::ModalId::directory_picker:
+      case app::ModalId::screenshot_viewer:
+      case app::ModalId::quit_progress:
         return true;
       case app::ModalId::confirmation:
         return handle_confirmation_modal_activation(state, update);
@@ -1500,12 +1593,209 @@ namespace {
     return false;
   }
 
+  /**
+   * @brief Type the focused folder-name key or return its editing command.
+   * @param state Folder-name draft and keyboard focus.
+   * @return Confirm, delete or none after handling the selected key.
+   */
+  input::UiCommand activate_directory_key(app::ClientState &state) {
+    auto &picker = state.directoryPicker;
+    auto &keyboard = picker.keyboard;
+    if (keyboard.keyboard_cells()[keyboard.keyIndex].key == input::StreamMenu::KEYBOARD_PAGE_KEY) {
+      keyboard.keyboardLayout = keyboard.keyboardLayout == 0 ? 1 : 0;
+      return input::UiCommand::none;
+    }
+    const int code = keyboard.keyboard_key();
+    if (code == 0x0D) {
+      return input::UiCommand::confirm;
+    }
+    if (code == 0x08) {
+      return input::UiCommand::delete_character;
+    }
+    if (code == 0x125 && picker.caret > 0) {
+      --picker.caret;
+    } else if (code == 0x127 && picker.caret < picker.name.size()) {
+      ++picker.caret;
+    } else if (code == 0x20) {
+      app::append_directory_name(state, " ");
+      keyboard.key_sent();
+    } else if (code > 0 && keyboard.key_label(keyboard.keyIndex).size() == 1) {
+      app::append_directory_name(state, keyboard.key_label(keyboard.keyIndex));
+      keyboard.key_sent();
+    }
+    return input::UiCommand::none;
+  }
+
+  /**
+   * @brief Handle navigation and editing while creating a screenshot folder.
+   * @param state Folder-name draft and keyboard focus.
+   * @param command Local editing or navigation command.
+   * @param update Receives the create-directory request after validation.
+   */
+  void handle_directory_name_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
+    auto &picker = state.directoryPicker;
+    auto &keyboard = picker.keyboard;
+    if (command == input::UiCommand::activate) {
+      command = activate_directory_key(state);
+    }
+    switch (command) {
+      case input::UiCommand::back:
+        picker.creating = false;
+        picker.error.clear();
+        break;
+      case input::UiCommand::move_up:
+      case input::UiCommand::move_down:
+      case input::UiCommand::move_left:
+      case input::UiCommand::move_right:
+        {
+          const auto [dx, dy] = input::navigation_step(command);
+          keyboard.navigate(dx, dy);
+          break;
+        }
+      case input::UiCommand::previous_page:
+      case input::UiCommand::next_page:
+        keyboard.keyboardLayout = keyboard.keyboardLayout == 0 ? 1 : 0;
+        break;
+      case input::UiCommand::open_context_menu:
+        keyboard.toggle_shift();
+        break;
+      case input::UiCommand::delete_character:
+        if (picker.caret > 0) {
+          picker.name.erase(--picker.caret, 1);
+        }
+        break;
+      case input::UiCommand::confirm:
+        if (platform::valid_directory_name(picker.name)) {
+          update->requests.directoryCreateRequested = true;
+        } else {
+          picker.error = "Use 1-42 characters, without reserved characters or a trailing space or period.";
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
+   * @brief Keep folder browsing and local text editing separate from saved settings until acceptance.
+   * @param state Active client and picker state.
+   * @param command Controller or keyboard action.
+   * @param update Receives requested filesystem operations and persistence effects.
+   * @return True when the directory picker owns this command.
+   */
+  bool handle_directory_picker_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
+    if (state.modal.id != app::ModalId::directory_picker) {
+      return false;
+    }
+    auto &picker = state.directoryPicker;
+    if (picker.creating) {
+      handle_directory_name_command(state, command, update);
+      return true;
+    }
+    if (command == input::UiCommand::back) {
+      close_modal_and_mark_closed(state, update);
+      return true;
+    }
+    if (command == input::UiCommand::move_up || command == input::UiCommand::move_down) {
+      move_modal_selection(state, command == input::UiCommand::move_up ? -1 : 1);
+      return true;
+    }
+    if (command == input::UiCommand::move_left || command == input::UiCommand::previous_page) {
+      state.modal.selectedActionIndex = 2;
+      command = input::UiCommand::activate;
+    }
+    if (command == input::UiCommand::open_context_menu) {
+      state.modal.selectedActionIndex = 0;
+      command = input::UiCommand::activate;
+    }
+    if (command != input::UiCommand::activate && command != input::UiCommand::confirm) {
+      return true;
+    }
+    if (const auto selected = state.modal.selectedActionIndex; selected == 0 && picker.available && !picker.path.empty()) {
+      update->requests.directorySelectRequested = true;
+    } else if (selected == 1 && picker.available && !picker.path.empty()) {
+      picker.creating = true;
+      picker.name.clear();
+      picker.caret = 0;
+      picker.error.clear();
+      picker.keyboard.open(-1);
+      picker.keyboard.page = input::StreamMenuPage::keyboard;
+    } else if (selected == 2 && !picker.path.empty()) {
+      picker.path = platform::directory_parent(picker.path);
+      update->requests.directoryListRequested = true;
+      state.modal.selectedActionIndex = 0;
+    } else if (selected == 3) {
+      app::accept_screenshot_directory(state, *update, {});
+    } else if (selected >= 4 && selected - 4 < picker.folders.size()) {
+      picker.path = picker.folders[selected - 4];
+      update->requests.directoryListRequested = true;
+      state.modal.selectedActionIndex = 0;
+    }
+    return true;
+  }
+
+  /**
+   * @brief Handle screenshot browsing and deletion independently of other dialogs.
+   * @param state Screenshot viewer and modal state.
+   * @param command Navigation or deletion command.
+   * @return True while the screenshot viewer consumes input.
+   */
+  bool handle_screenshot_viewer_command(app::ClientState &state, input::UiCommand command) {
+    if (state.modal.id != app::ModalId::screenshot_viewer) {
+      return false;
+    }
+    auto &viewer = state.screenshotViewer;
+    if (command == input::UiCommand::back) {
+      viewer = {};
+      open_modal(state, app::ModalId::app_actions, 3U);
+    } else if (command == input::UiCommand::delete_character && !viewer.entries.empty()) {
+      viewer.selectedIndex = std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+      const auto &entry = viewer.entries[viewer.selectedIndex];
+      open_confirmation(state, app::ConfirmationAction::delete_screenshot, "Delete screenshot?", {"This permanently deletes the saved image.", app::screenshot_time_label(entry.capturedAt)}, entry.path);
+      state.confirmation.returnModal = app::ModalId::screenshot_viewer;
+    } else if (!viewer.entries.empty()) {
+      const auto count = viewer.entries.size();
+      viewer.selectedIndex = std::min(viewer.selectedIndex, count - 1);
+      if (command == input::UiCommand::move_left || command == input::UiCommand::previous_page) {
+        viewer.selectedIndex = (viewer.selectedIndex + count - 1) % count;
+      } else if (command == input::UiCommand::move_right || command == input::UiCommand::next_page) {
+        viewer.selectedIndex = (viewer.selectedIndex + 1) % count;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * @brief Route local dialog input before allowing the underlying screen to navigate.
+   * @param state Current dialog and shell state.
+   * @param command Abstract controller or keyboard input.
+   * @param update Receives modal lifecycle and requested operations.
+   * @return True when an active modal consumes the command.
+   */
   bool handle_modal_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
     if (!state.modal.active()) {
       return false;
     }
 
     if (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress) {
+      return true;
+    }
+    if (state.modal.id == app::ModalId::quit_progress) {
+      return true;
+    }
+    if (state.modal.id == app::ModalId::confirmation && command == input::UiCommand::back && state.confirmation.returnModal != app::ModalId::none) {
+      const auto parent = state.confirmation.returnModal;
+      const auto index = state.confirmation.returnActionIndex;
+      close_modal_and_mark_closed(state, update);
+      open_modal(state, parent, index);
+      return true;
+    }
+
+    if (handle_screenshot_viewer_command(state, command)) {
+      return true;
+    }
+
+    if (handle_directory_picker_command(state, command, update)) {
       return true;
     }
 
@@ -1607,6 +1897,8 @@ namespace app {
     state.settings.playAudioOnPc = false;
     state.settings.showPerformanceStats = false;
     state.settings.playAudioOnXbox = true;
+    state.settings.controls.screenshotDirectory.clear();
+    state.settings.controls.keyboardDockTop = false;
     state.settings.dirty = false;
     state.settings.savedFilesDirty = true;
     return state;
@@ -2156,7 +2448,7 @@ namespace app {
   }
 
   /**
-   * @brief Update settings inline without producing routine confirmation notifications.
+   * @brief Update settings inline or open the screenshot folder picker, emitting only required side effects.
    *
    * @param state Client state containing the settings menus.
    * @param detailUpdate Activated detail-menu update.
@@ -2234,6 +2526,14 @@ namespace app {
       update->persistence.settingsChanged = true;
       state.shell.statusMessage = std::string("Performance stats ") + (state.settings.showPerformanceStats ? "enabled" : "disabled");
       rebuild_menu(state, "toggle-show-performance-stats");
+      return;
+    }
+    if (detailUpdate.activatedItemId == "screenshot-directory") {
+      state.directoryPicker = {};
+      state.directoryPicker.path = state.settings.controls.screenshotDirectory.empty() ? startup::default_storage_path("screenshots") : state.settings.controls.screenshotDirectory;
+      open_modal(state, ModalId::directory_picker);
+      update->requests.directoryListRequested = true;
+      update->navigation.modalOpened = true;
       return;
     }
     if (detailUpdate.activatedItemId == "factory-reset") {
@@ -2599,6 +2899,83 @@ namespace app {
       set_screen(state, ScreenId::hosts);
       update->navigation.screenChanged = true;
     }
+  }
+
+  void append_directory_name(ClientState &state, std::string_view text) {
+    auto &picker = state.directoryPicker;
+    if (state.modal.id != ModalId::directory_picker || !picker.creating) {
+      return;
+    }
+    picker.caret = std::min(picker.caret, picker.name.size());
+    for (unsigned char character : text) {
+      if (picker.name.size() < 42 && character >= 32 && character < 127) {
+        picker.name.insert(picker.caret++, 1, static_cast<char>(character));
+      }
+    }
+    picker.error.clear();
+  }
+
+  void accept_screenshot_directory(ClientState &state, AppUpdate &update, std::string_view path) {
+    if (state.modal.id != ModalId::directory_picker) {
+      return;
+    }
+    if (state.settings.controls.screenshotDirectory != path) {
+      state.settings.controls.screenshotDirectory = path;
+      state.settings.dirty = true;
+      update.persistence.settingsChanged = true;
+    }
+    close_modal_and_mark_closed(state, &update);
+    rebuild_menu(state, "screenshot-directory");
+  }
+
+  void apply_screenshot_delete_result(ClientState &state, bool succeeded, std::string error) {
+    auto &viewer = state.screenshotViewer;
+    if (state.modal.id != ModalId::screenshot_viewer || viewer.entries.empty()) {
+      return;
+    }
+    viewer.selectedIndex = std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+    if (succeeded) {
+      viewer.entries.erase(viewer.entries.begin() + viewer.selectedIndex);
+      viewer.selectedIndex = viewer.entries.empty() ? 0 : std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+      viewer.error.clear();
+    } else {
+      viewer.error = std::move(error);
+    }
+  }
+
+  void apply_app_quit_result(ClientState &state, bool succeeded, const std::string &message) {
+    const auto target = state.appQuit;
+    if (!target.inProgress) {
+      return;
+    }
+    if (succeeded) {
+      const auto clearRunning = [&](HostRecord &host) {
+        if (!host_matches_endpoint(host, target.address, target.port)) {
+          return;
+        }
+        if (host.runningGameId == static_cast<uint32_t>(target.appId)) {
+          host.runningGameId = 0;
+        }
+        for (auto &application : host.apps) {
+          if (application.id == target.appId) {
+            application.running = false;
+          }
+        }
+      };
+      for (auto &host : state.hosts.items) {
+        clearRunning(host);
+      }
+      if (state.hosts.activeLoaded) {
+        clearRunning(state.hosts.active);
+        state.hosts.active.lastAppListRefreshTick = 0;
+      }
+      state.hosts.dirty = true;
+    }
+    if (state.modal.id == ModalId::quit_progress) {
+      close_modal(state);
+    }
+    show_notification(state, succeeded ? NotificationKind::success : NotificationKind::error, succeeded ? "App closed" : "Couldn't quit app", message.empty() ? target.appName : message, succeeded ? 5000 : 0);
+    state.appQuit = {};
   }
 
   AppUpdate handle_command(ClientState &state, input::UiCommand command) {

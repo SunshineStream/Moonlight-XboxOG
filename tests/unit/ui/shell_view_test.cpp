@@ -2,18 +2,19 @@
  * @file tests/unit/ui/shell_view_test.cpp
  * @brief Verifies the shell view renderer and layout helpers.
  */
-// test includes
-#include "tests/support/network_test_constants.h"
-
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/ui/shell_view.h"
 
 // standard includes
 #include <array>
 #include <string>
 #include <vector>
 
-// local includes
-#include "src/ui/shell_view.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
+
+// test includes
+#include "tests/support/network_test_constants.h"
 
 namespace {
 
@@ -150,7 +151,7 @@ namespace {
   }
 
   /**
-   * @brief Every settings category has a recognizable packaged Lucide icon.
+   * @brief All five settings categories, including separate Display and Storage sections, have packaged icons.
    */
   TEST(ShellViewTest, DecoratesSettingsCategoriesWithIcons) {
     app::ClientState state = app::create_initial_state();
@@ -158,11 +159,13 @@ namespace {
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
     const auto view = ui::build_shell_view_model(state, {});
-    ASSERT_EQ(view.content.menuRows.size(), 4U);
+    ASSERT_EQ(view.content.menuRows.size(), 5U);
     EXPECT_EQ(view.content.menuRows[0].iconAssetPath, "icons\\scroll-text.svg");
     EXPECT_EQ(view.content.menuRows[1].iconAssetPath, "icons\\monitor.svg");
     EXPECT_EQ(view.content.menuRows[2].iconAssetPath, "icons\\gamepad-2.svg");
-    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\rotate-ccw.svg");
+    EXPECT_EQ(view.content.menuRows[3].label, "Storage");
+    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\save.svg");
+    EXPECT_EQ(view.content.menuRows[4].iconAssetPath, "icons\\rotate-ccw.svg");
   }
 
   /**
@@ -510,7 +513,7 @@ namespace {
     state.hosts.active.apps = {{"Desktop", 1}};
     state.modal.id = app::ModalId::app_actions;
     auto view = ui::build_shell_view_model(state, {});
-    ASSERT_EQ(view.modal.actions.size(), 3U);
+    ASSERT_EQ(view.modal.actions.size(), 4U);
     EXPECT_TRUE(view.modal.actions[0].checkable);
     EXPECT_FALSE(view.modal.actions[0].checked);
     EXPECT_FALSE(view.modal.actions[1].checkable);
@@ -522,7 +525,7 @@ namespace {
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.hostsChanged);
     app::handle_command(state, input::UiCommand::open_context_menu);
     view = ui::build_shell_view_model(state, {});
-    ASSERT_EQ(view.modal.actions.size(), 3U);
+    ASSERT_EQ(view.modal.actions.size(), 4U);
     EXPECT_TRUE(view.modal.actions[2].checked);
     EXPECT_EQ(view.modal.actions[2].label, "Set favorite");
   }
@@ -550,12 +553,12 @@ namespace {
     EXPECT_EQ(viewModel.content.appTiles[0].name, "Steam");
     EXPECT_TRUE(viewModel.content.appTiles[0].selected);
     EXPECT_TRUE(viewModel.content.bodyLines.empty());
-    EXPECT_EQ(viewModel.content.appTiles[0].detail, "Running now");
+    EXPECT_EQ(viewModel.content.appTiles[0].detail, "In progress / Resume");
     EXPECT_EQ(viewModel.content.appTiles[0].badgeLabel, "HDR");
     EXPECT_TRUE(viewModel.content.appTiles[0].boxArtCached);
     EXPECT_TRUE(viewModel.content.appTiles[1].detail.empty());
     ASSERT_EQ(viewModel.frame.footerActions.size(), 3U);
-    EXPECT_EQ(viewModel.frame.footerActions[0].label, "Launch");
+    EXPECT_EQ(viewModel.frame.footerActions[0].label, "Resume");
     EXPECT_EQ(viewModel.frame.footerActions[1].label, "App Menu");
     EXPECT_EQ(viewModel.frame.footerActions[2].label, "Back");
   }
@@ -875,3 +878,91 @@ namespace {
   }
 
 }  // namespace
+
+/**
+ * @brief Folder focus changes can reuse retained pixels; path, listing, error and input-device changes invalidate them.
+ */
+TEST(ShellViewTest, InvalidatesRetainedFolderContentsForEveryVisibleChange) {
+  auto state = app::create_initial_state();
+  state.modal.id = app::ModalId::directory_picker;
+  state.directoryPicker.path = "E:\\Shots";
+  state.directoryPicker.available = true;
+  state.directoryPicker.folders = {"E:\\Shots\\Game"};
+  const auto original = ui::build_shell_view_model(state, {}).modal;
+  ASSERT_TRUE(original.folderBrowser);
+  auto changed = original;
+  changed.actions[0].selected = false;
+  changed.actions[4].selected = true;
+  EXPECT_TRUE(ui::same_action_dialog_content(original, changed));
+  const auto reject = [&](auto mutate) {
+    auto other = original;
+    mutate(other);
+    EXPECT_FALSE(ui::same_action_dialog_content(original, other));
+    EXPECT_FALSE(ui::same_action_dialog_content(other, original));
+  };
+  reject([](auto &view) {
+    view.visible = false;
+  });
+  reject([](auto &view) {
+    view.folderBrowser = false;
+  });
+  reject([](auto &view) {
+    view.busy = true;
+  });
+  reject([](auto &view) {
+    view.title += " changed";
+  });
+  reject([](auto &view) {
+    view.iconAssetPath = "icons\\info.svg";
+  });
+  reject([](auto &view) {
+    view.lines.push_back("Read-only folder");
+  });
+  reject([](auto &view) {
+    view.actions.pop_back();
+  });
+  reject([](auto &view) {
+    view.actions[0].id += "-new";
+  });
+  reject([](auto &view) {
+    view.actions[0].label += " changed";
+  });
+  reject([](auto &view) {
+    view.actions[0].enabled = false;
+  });
+  reject([](auto &view) {
+    view.actions[0].checked = true;
+  });
+  reject([](auto &view) {
+    view.actions[0].checkable = true;
+  });
+  reject([](auto &view) {
+    view.actions[0].iconAssetPath = "icons\\info.svg";
+  });
+  reject([](auto &view) {
+    view.footerActions.pop_back();
+  });
+  reject([](auto &view) {
+    view.footerActions[0].id += "-new";
+  });
+  reject([](auto &view) {
+    view.footerActions[0].label += " changed";
+  });
+  reject([](auto &view) {
+    view.footerActions[0].iconAssetPath.clear();
+  });
+  reject([](auto &view) {
+    view.footerActions[0].secondaryIconAssetPath = "icons\\button-b.svg";
+  });
+  reject([](auto &view) {
+    view.footerActions[0].emphasized = false;
+  });
+  reject([](auto &view) {
+    view.footerActions[0].keyLabel = "Enter";
+  });
+  reject([](auto &view) {
+    view.footerActions[0].secondaryKeyLabel = "Space";
+  });
+  state.shell.inputDevice = input::UiInputDevice::keyboard;
+  EXPECT_FALSE(ui::same_action_dialog_content(original, ui::build_shell_view_model(state, {}).modal));
+}

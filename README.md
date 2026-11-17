@@ -41,6 +41,10 @@ captions, and a blue focus ring shows which card will open. Running apps carry a
 Missing artwork uses Lucide desktop or gamepad placeholders.
 Use the D-pad or left stick to navigate, **A** to select, **B** to go back and **Y** for host or app
 actions. Move up from the first PC row to reach Settings, Support and Add Host.
+With a keyboard, hold the arrows to navigate, use **Enter** to select, **Esc** to go back, and **M**
+for host or app actions. Button hints follow the keyboard or controller you are using.
+On the hosts page, **Alt + F4** exits the client. **PgUp / PgDn** scroll the log viewer;
+hold **Shift** for faster scrolling. **Backspace** dismisses a notification or changes the log pane.
 
 PCs use grayscale moon artwork inspired by One: a full moon for paired online PCs, a half moon for
 online PCs awaiting pairing, and a crescent for offline PCs. A separate orbit shows controller focus.
@@ -78,9 +82,71 @@ Bitrates are displayed in Mbps. You can then adjust **Stream Bitrate** manually;
 until resolution or FPS changes again.
 These are starting values for image quality and bandwidth, not a guarantee of Xbox decoding performance.
 
-To quit a stream, press **Back/Select + Black + White (LB + RB)** together on any connected controller.
-The client displays **Stopping stream...**, then a stream summary. Release the buttons, then press a
-button to return to the menu.
+Press **Back/Select + Black + White (LB + RB)** together on any connected controller to open stream
+controls. Release the buttons, select a choice with either stick, then press **A** to choose it.
+**B** resumes playback. A USB keyboard can open the same menu with **Ctrl + Alt + Shift + Q**;
+use **Tab** to cycle through all choices, arrows to select the left wheel, **Enter** to choose, and
+**Esc** to go back. Center the sticks and release the buttons before resuming gameplay.
+The same shortcut returns to the wheels from the keyboard, logs or exit confirmation.
+
+| Stick | Up       | Right      | Down       | Left                   |
+| ----- | -------- | ---------- | ---------- | ---------------------- |
+| Left  | Keyboard | Mouse mode | View logs  | Exit                   |
+| Right | Guide    | Share      | Screenshot | Enable / disable stats |
+
+![Stream controls](./docs/images/screenshots/12-stream-controls.png)
+
+**Exit** opens a confirmation dialog: **A / Enter** disconnects, **X / Q** quits the host app and **B / Esc** cancels.
+**Disconnect** leaves the application running on the PC; select its pause-marked poster to resume.
+Its app action menu also offers **Quit app**. Quitting can lose unsaved progress.
+
+Use **D-pad / left stick** to move around the on-screen keyboard, **A** to type, **X** for Backspace,
+**Y** for Space, and **Start** for host Enter. **Right stick click** applies Shift to the next key;
+**left stick click** toggles Caps. **White / Black (LB / RB)** move the host text cursor left / right.
+**LT** cycles through letters, symbols, and PC keys, including function keys and common shortcuts.
+Focus a shortcut to see its combination above the keys. **RT** moves the keyboard between the top
+and bottom of the screen; **B** returns to the wheels. Keys use the host's US keyboard layout.
+When using a physical keyboard, use **Tab** to change page, **Shift** for one-shot Shift, **Caps Lock**
+to toggle Caps, **F2** to move the panel, **Space / Backspace** to send those keys, and **Esc** to return.
+
+![On-screen keyboard](./docs/images/screenshots/13-stream-keyboard.png)
+
+**View logs** shows live entries. Scroll upward to read older entries; return to the bottom to follow
+new entries. **Guide** and **Share** send their controller buttons to the PC; their behavior depends
+on the host's virtual controller and operating system.
+
+Screenshots are saved as BMP files, excluding local menus and statistics. The default folder is
+`E:\UDATA\<title-id>\screenshots`. Open **Settings > Storage > Screenshot Folder** to browse drives
+and subfolders, select the current folder, or create a new folder with the on-screen keyboard or a
+USB keyboard. Press **Start / Enter** to create a folder after entering its name.
+**Use default location** restores the default folder. **B / Esc** cancels without changing the destination.
+
+Open a game or app's action menu and choose **Screenshots** to view its captures. The viewer works
+offline and shows the newest capture first; use **LB / RB**, left / right or **PgUp / PgDn** to browse,
+and **B / Esc** to return. Use **X / Backspace / Delete** to delete the selected image after confirmation.
+
+Screenshots save in the background. A popup shows progress, then the saved path or an error.
+The wheels close automatically after screenshot, Guide, Share, statistics and mouse-mode actions.
+
+![Screenshot notification](./docs/images/screenshots/14-screenshot-notification.png)
+
+Mouse mode uses the invoking controller's **left stick** for movement and **A / B** for left / right
+clicks. Disable mouse mode through the wheels to use that controller for gameplay again.
+Other gamepads and physical keyboards and mice can be used at the same time.
+
+Up to four gamepads are supported as separate controllers in Sunshine.
+Standard USB boot keyboards and three-button boot mice are supported through Xbox-to-USB adapters
+attached to the controller ports. Devices must support HID boot protocol; mouse wheels, extra buttons
+and nonstandard gaming devices may not work.
+
+For xemu, open its Monitor with **~** and enter `device_add usb-kbd,id=kbd` or
+`device_add usb-mouse,id=mouse` to attach an emulated USB device to an available port.
+Remove them with `device_del kbd` and `device_del mouse`. See the
+[xemu keyboard setup guide](https://xemu.app/docs/keyboard/) for explicit controller-port selection.
+
+When Sunshine and xemu run on the same PC, prevent Sunshine's virtual controllers from being attached
+to xemu. Disable automatic controller binding in **Input**, manually assign the physical controller,
+and leave ports used for keyboards or mice unassigned to controllers to avoid USB port conflicts.
 
 Enable **Settings → Display → Performance Stats** for a live panel during playback and additional
 performance details in the summary. The panel works with GPU and software presentation, refreshes
@@ -89,6 +155,8 @@ decoded and rendered FPS, video bitrate, timing, frame drops, buffering and the 
 The stream header shows the requested FPS; the three FPS counters show measured rates.
 Network latency is round-trip time. Present measures CPU frame preparation and submission,
 including any scanout wait.
+The stream menu can toggle these statistics for the current session; the saved setting sets the
+initial state of the next session.
 
 Video decoding runs on the CPU. Optional experimental GPU presentation accelerates color conversion
 and scaling, with software fallback for unsupported frames or presentation failures. GPU

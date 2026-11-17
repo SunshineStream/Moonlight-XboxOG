@@ -2,11 +2,15 @@
  * @file src/streaming/pvideo_presenter.cpp
  * @brief Submits bounded YUY2 overlay buffers using documented NV2A PVIDEO registers.
  */
+// class header include
 #include "src/streaming/pvideo_presenter.h"
 
 #ifdef NXDK
+  // standard includes
   #include <algorithm>
   #include <cstring>
+
+  // nxdk includes
   #include <hal/video.h>
   #include <pbkit/pbkit.h>
   #include <windows.h>
@@ -269,7 +273,7 @@ namespace streaming {
     }
     if (failure.empty()) {
       if (overlay != nullptr) {
-        overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination);
+        overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination, frame.matrix);
       }
       __atomic_thread_fence(__ATOMIC_SEQ_CST);
       // Rotate memory buffers through overlay bank zero. xemu composes bank

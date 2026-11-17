@@ -74,9 +74,9 @@ namespace input {
       case KeyboardKey::tab:
         return shiftPressed ? UiCommand::previous_page : UiCommand::next_page;
       case KeyboardKey::page_up:
-        return UiCommand::previous_page;
+        return shiftPressed ? UiCommand::fast_previous_page : UiCommand::previous_page;
       case KeyboardKey::page_down:
-        return UiCommand::next_page;
+        return shiftPressed ? UiCommand::fast_next_page : UiCommand::next_page;
       case KeyboardKey::i:
       case KeyboardKey::m:
         return UiCommand::open_context_menu;

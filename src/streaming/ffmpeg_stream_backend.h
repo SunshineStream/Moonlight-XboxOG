@@ -9,16 +9,19 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
 #include <SDL.h>
 
 // local includes
+#include "src/app/screenshot_library.h"
 #include "src/streaming/aligned_media_buffer.h"
 #include "src/streaming/pvideo_presenter.h"
 #include "src/streaming/stats_overlay.h"
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 struct AVCodecContext;
 struct AVFrame;
@@ -71,7 +74,7 @@ namespace streaming {
     void set_audio_playback_enabled(bool enabled);
 
     /**
-     * @brief Release all FFmpeg, SDL, and cached frame resources.
+     * @brief Drain any pending screenshot and release FFmpeg, SDL, and cached frame resources.
      */
     void shutdown();
 
@@ -97,9 +100,76 @@ namespace streaming {
      * @brief Replace the shared GPU/software statistics bitmap on the render thread.
      * @param width Bitmap width.
      * @param height Bitmap height.
-     * @param grayscale Packed grayscale pixels with an opaque background.
+     * @param grayscale Packed, unpremultiplied grayscale pixels.
+     * @param placement Panel anchor shared by GPU and software paths.
+     * @param opacity Optional per-pixel coverage; empty for opaque statistics.
      */
-    void set_statistics_bitmap(int width, int height, std::vector<std::uint8_t> grayscale);
+    void set_statistics_bitmap(int width, int height, std::vector<std::uint8_t> grayscale, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left, std::vector<std::uint8_t> opacity = {});
+    /**
+     * @brief Replace the same shared overlay with colored UI pixels on the render thread.
+     * @param width Bitmap width.
+     * @param height Bitmap height.
+     * @param pixels Straight ARGB bytes preserving the bundled assets' colors and opacity.
+     * @param placement Panel anchor shared by GPU and software paths.
+     */
+    void set_color_overlay(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left);
+    /**
+     * @brief Replace the shared panel directly from SDL storage, reusing its full-screen color allocation.
+     * @param width Source width.
+     * @param height Source height.
+     * @param pixels Premultiplied B, G, R, A source bytes.
+     * @param capacity Accessible source byte count.
+     * @param pitch Source row stride.
+     * @param placement Shared GPU/software panel anchor.
+     * @param opaqueBackground Source was rendered onto an opaque panel.
+     */
+    void set_color_overlay_surface(int width, int height, const std::uint8_t *pixels, std::size_t capacity, int pitch, VideoOverlayPlacement placement, bool opaqueBackground = false);
+    /**
+     * @brief Submit a small focus repaint while retaining the rest of the panel and its conversion caches.
+     * @param region Updated rectangle in panel pixels.
+     * @param pixels Packed straight ARGB bytes for that rectangle.
+     */
+    void update_color_overlay(const VideoRectangle &region, const std::vector<std::uint8_t> &pixels);
+
+    /**
+     * @brief Check whether an overlay change requires presenting an otherwise idle frame.
+     * @return True when the shared bitmap changed since the last presentation.
+     */
+    bool has_pending_overlay() const;
+
+    /**
+     * @brief Draw local controls before a stream has produced its first video frame.
+     * @param renderer SDL renderer.
+     * @param width Output width.
+     * @param height Output height.
+     */
+    void render_local_overlay(SDL_Renderer *renderer, int width, int height);
+
+    /**
+     * @brief Snapshot the displayed host frame and save it on a bounded background worker.
+     * @param directory Configured screenshot destination, or empty for the default.
+     * @param source Server and app identity captured at request time.
+     * @return True when queued; false before the first frame or while another capture is pending.
+     */
+    bool request_screenshot(std::string_view directory, const app::ScreenshotSource &source);
+    /**
+     * @brief Reap a completed screenshot worker without blocking the streaming event loop.
+     * @return Completion or error detail, or empty when no result is ready.
+     */
+    std::string take_screenshot_result();
+
+    /**
+     * @brief Read background capture progress without waiting for conversion or disk I/O.
+     * @return Zero through 99 while a capture is pending, or -1 when there is no worker.
+     */
+    int screenshot_progress() const;
+
+    /**
+     * @brief Resolve the video rectangle available to shared GPU/software controls.
+     * @param width Output width, replaced with the fitted video width.
+     * @param height Output height, replaced with the fitted video height.
+     */
+    void local_overlay_size(int &width, int &height) const;
 
     /**
      * @brief Render the latest decoded video frame to the supplied renderer.
@@ -237,6 +307,10 @@ namespace streaming {
      */
     void render_sdl_statistics(SDL_Renderer *renderer, const SDL_Rect &destination);
     /**
+     * @brief Mark pixels changed, retaining the SDL texture when its dimensions still match.
+     */
+    void invalidate_overlay_texture();
+    /**
      * @brief Record a retrieved frame before any client discard.
      *
      * @param unit Completed network frame.
@@ -325,6 +399,33 @@ namespace streaming {
     };
 
     /**
+     * @brief Own one bounded screenshot job independently of live rendering and decoding.
+     */
+    struct ScreenshotTask {
+      SDL_Thread *thread = nullptr;  ///< Owned worker, joined after completion or at shutdown.
+      std::atomic<bool> complete = false;  ///< Publishes the completed result before the UI can read it.
+      std::atomic<int> progress = 0;  ///< Conversion, BMP write and index progress; completion is published separately.
+      LatestVideoFrame frame;  ///< Independently owned snapshot of the uncomposited YUV frame.
+      app::ScreenshotSource source;  ///< Original host and app identity.
+      std::string directory;  ///< Destination at request time.
+      std::int64_t capturedAt = 0;  ///< UTC capture time.
+      std::string result;  ///< Detail read only after the worker completes.
+    };
+
+    /**
+     * @brief Convert and save an owned YUV snapshot with lower priority than streaming.
+     * @param context ScreenshotTask owned by this backend until the worker is joined.
+     * @return Zero after publishing a completion result.
+     */
+    static int save_screenshot_worker(ScreenshotTask *context);
+    /**
+     * @brief Convert the owned YUV snapshot into a BGR screenshot without retaining conversion buffers.
+     * @param frame Stable screenshot snapshot.
+     * @return Owned BGR surface, or nullptr when conversion fails.
+     */
+    static SDL_Surface *convert_screenshot_frame(const LatestVideoFrame &frame);
+
+    /**
      * @brief Hold FFmpeg and SDL state used by the video path.
      */
     struct VideoState {  // NOSONAR(cpp:S1820) Owned video pipeline state intentionally groups FFmpeg, SDL, queue, and metric lifetimes.
@@ -394,12 +495,14 @@ namespace streaming {
 
     VideoState video_ {};
     AudioState audio_ {};
+    ScreenshotTask screenshot_ {};  ///< Single capture slot, bounded to one additional YUV frame.
     PvideoPresenter presenter_;  ///< Main-thread GPU presentation resources.
     VideoOverlay statisticsOverlay_;  ///< Shared cached panel for all presentation paths.
     VideoStatistics statistics_;  ///< Cumulative decode and presentation telemetry.
     SDL_Texture *statisticsTexture_ = nullptr;  ///< Cached panel texture for SDL's final fallback.
     bool statisticsBitmapChanged_ = false;  ///< A panel update requires refreshing a paused video frame.
     bool statisticsTextureChanged_ = false;  ///< SDL texture requires the current bitmap.
+    VideoRectangle statisticsTextureDamage_ {};  ///< Pending SDL texture upload, accumulated until software presentation.
     VideoAccelerationReport acceleration_;  ///< Session diagnostics survive decoder cleanup.
     bool overlayFailed_ = false;  ///< Avoid repeating a known failing hardware path this session.
     std::atomic<bool> audioPlaybackEnabled_ = false;

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <iterator>
 #include <string>
 
 // lib includes
@@ -82,6 +83,110 @@ namespace {
 #else
     EXPECT_FALSE(platform::path_has_prefix("/Moonlight/Data", "/moonlight"));
 #endif
+  }
+
+  /**
+   * @brief Directory parents preserve absolute drive and POSIX roots and handle trailing separators.
+   */
+  TEST(FolderPickerFilesystemTest, KeepsRootsAbsoluteWhenGoingUp) {
+    EXPECT_EQ(platform::directory_parent("F:\\Shots\\Games\\"), "F:\\Shots");
+    EXPECT_EQ(platform::directory_parent("F:\\Shots"), "F:\\");
+    EXPECT_EQ(platform::directory_parent("F:\\"), "");
+    EXPECT_EQ(platform::directory_parent("F:"), "");
+    EXPECT_EQ(platform::directory_parent("/shots/games/"), "/shots");
+    EXPECT_EQ(platform::directory_parent("/shots"), "/");
+    EXPECT_EQ(platform::directory_parent("/"), "");
+    EXPECT_EQ(platform::directory_parent("\\"), "");
+    EXPECT_EQ(platform::directory_parent("relative"), "");
+    EXPECT_EQ(platform::directory_parent(""), "");
+  }
+
+  /**
+   * @brief Folder names exclude traversal, reserved characters and Xbox-incompatible component lengths.
+   */
+  TEST(FolderPickerFilesystemTest, ValidatesSingleFolderNames) {
+    for (const std::string name : {"Screenshots", "Game captures", "Shots-2026_(1)", "!#$%&'@^{}~"}) {
+      EXPECT_TRUE(platform::valid_directory_name(name)) << name;
+    }
+    EXPECT_TRUE(platform::valid_directory_name(std::string(42, 'x')));
+    EXPECT_FALSE(platform::valid_directory_name(std::string(43, 'x')));
+    for (const std::string name : {"", ".", "..", "../outside", "child\\outside", "F:Shots", " trailing ", "end.", "one\ntwo", "\x7f", "bad?", "bad*", "bad|", "bad<", "bad>", "bad\"", "bad+", "bad=", "bad,", "bad;", "bad[", "bad]"}) {
+      EXPECT_FALSE(platform::valid_directory_name(name)) << name;
+    }
+  }
+
+  /**
+   * @brief Listing returns sorted immediate folders, including empty ones, and never files or dot entries.
+   */
+  TEST_F(FilesystemUtilsTest, ListsOnlyImmediateDirectoriesAndReportsUnavailablePaths) {
+    ASSERT_TRUE(platform::ensure_directory_exists(nestedDirectory));
+    const auto empty = platform::list_directories(nestedDirectory);
+    EXPECT_TRUE(empty.error.empty());
+    EXPECT_TRUE(empty.paths.empty());
+    const auto another = test_support::join_path(rootDirectory, "another");
+    ASSERT_TRUE(platform::ensure_directory_exists(another));
+    write_test_file(test_support::join_path(rootDirectory, "file.txt"), "keep");
+    auto result = platform::list_directories(rootDirectory);
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.paths.size(), 2);
+    EXPECT_EQ(result.paths[0], another);
+    EXPECT_EQ(result.paths[1], test_support::join_path(rootDirectory, "level-one"));
+    EXPECT_FALSE(platform::list_directories(test_support::join_path(rootDirectory, "missing")).error.empty());
+    EXPECT_FALSE(platform::list_directories(test_support::join_path(rootDirectory, "file.txt")).error.empty());
+    result = platform::list_directories({});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_FALSE(result.paths.empty());
+  }
+
+  /**
+   * @brief Folder creation refuses existing files/directories and cannot create traversal paths or missing parents.
+   */
+  TEST_F(FilesystemUtilsTest, CreatesOnlyANewValidatedChildFolder) {
+    ASSERT_TRUE(platform::ensure_directory_exists(rootDirectory));
+    std::string error = "old";
+    EXPECT_TRUE(platform::create_child_directory(rootDirectory, "New folder", error));
+    EXPECT_TRUE(error.empty());
+    EXPECT_TRUE(std::filesystem::is_directory(test_support::join_path(rootDirectory, "New folder")));
+    EXPECT_FALSE(platform::create_child_directory(rootDirectory, "New folder", error));
+    EXPECT_FALSE(error.empty());
+    write_test_file(test_support::join_path(rootDirectory, "file.txt"), "keep");
+    EXPECT_FALSE(platform::create_child_directory(rootDirectory, "file.txt", error));
+    EXPECT_FALSE(platform::create_child_directory(rootDirectory, "../escape", error));
+    EXPECT_FALSE(platform::create_child_directory({}, "Folder", error));
+    EXPECT_FALSE(platform::create_child_directory(test_support::join_path(rootDirectory, "missing"), "Folder", error));
+    EXPECT_EQ(std::filesystem::file_size(test_support::join_path(rootDirectory, "file.txt")), 4);
+  }
+
+  /**
+   * @brief Destination validation removes its own probe and never overwrites a pre-existing probe name.
+   */
+  TEST_F(FilesystemUtilsTest, ChecksWritabilityWithoutLeavingFilesOrOverwritingCollisions) {
+    ASSERT_TRUE(platform::ensure_directory_exists(rootDirectory));
+    const auto sentinel = test_support::join_path(rootDirectory, "moonlight-write-1.tmp");
+    write_test_file(sentinel, "keep");
+    std::string error = "old";
+    EXPECT_TRUE(platform::directory_is_writable(rootDirectory, error)) << error;
+    EXPECT_TRUE(error.empty());
+    EXPECT_EQ(std::filesystem::file_size(sentinel), 4);
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(rootDirectory), std::filesystem::directory_iterator {}), 1);
+    EXPECT_FALSE(platform::directory_is_writable({}, error));
+    EXPECT_FALSE(platform::directory_is_writable(sentinel, error));
+    EXPECT_FALSE(platform::directory_is_writable(test_support::join_path(rootDirectory, "missing"), error));
+    EXPECT_FALSE(error.empty());
+  }
+
+  /**
+   * @brief Exhausted temporary names fail safely and leave every existing file intact.
+   */
+  TEST_F(FilesystemUtilsTest, FailsSafelyWhenAllWriteProbeNamesAlreadyExist) {
+    ASSERT_TRUE(platform::ensure_directory_exists(rootDirectory));
+    for (int i = 1; i <= 32; ++i) {
+      write_test_file(test_support::join_path(rootDirectory, "moonlight-write-" + std::to_string(i) + ".tmp"), "keep");
+    }
+    std::string error;
+    EXPECT_FALSE(platform::directory_is_writable(rootDirectory, error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(rootDirectory), std::filesystem::directory_iterator {}), 32);
   }
 
 }  // namespace

@@ -9,15 +9,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // nxdk includes
 #include <hal/video.h>
 
-// standard includes
+// local includes
 #include "src/app/host_records.h"
 #include "src/app/pairing_flow.h"
+#include "src/app/screenshot_library.h"
 #include "src/input/navigation_input.h"
+#include "src/input/stream_menu.h"
+#include "src/input/ui_input.h"
 #include "src/logging/logger.h"
 #include "src/startup/saved_files.h"
 #include "src/ui/menu_model.h"
@@ -57,6 +61,9 @@ namespace app {
     confirmation,  ///< Destructive-action confirmation dialog.
     log_viewer,  ///< Dedicated log viewer modal.
     connection_test,  ///< Progress and result of a manual connection test.
+    directory_picker,  ///< Screenshot destination browser and local folder-name keyboard.
+    screenshot_viewer,  ///< Local captures associated with the selected server and app.
+    quit_progress,  ///< Authenticated host-app quit operation running in the background.
   };
 
   /**
@@ -81,8 +88,9 @@ namespace app {
    */
   enum class SettingsCategory {
     logging,  ///< Logging and diagnostics options.
-    display,  ///< Display and video presentation options.
+    display,  ///< Display, stream video, audio and telemetry options.
     input,  ///< Input and controller options.
+    storage,  ///< Screenshot destinations and other saved-file location options.
     reset,  ///< Reset and cleanup actions.
   };
 
@@ -93,6 +101,8 @@ namespace app {
     none,  ///< No destructive action is pending confirmation.
     delete_saved_file,  ///< Delete one saved file or directory.
     factory_reset,  ///< Remove all persisted Moonlight state.
+    delete_screenshot,  ///< Remove the selected screenshot and its journal entry.
+    quit_app,  ///< Terminate the selected in-progress app on its host.
   };
 
   /**
@@ -165,6 +175,8 @@ namespace app {
     std::string targetPath;  ///< File or directory path targeted by the action, when applicable.
     std::string title;  ///< Modal title presented to the user.
     std::vector<std::string> lines;  ///< Body lines describing the consequence of the action.
+    ModalId returnModal = ModalId::none;  ///< Dialog restored after confirmation or cancellation.
+    std::size_t returnActionIndex = 0;  ///< Focus to restore in the parent dialog.
   };
 
   /**
@@ -192,6 +204,7 @@ namespace app {
    */
   struct ShellState {
     ScreenId activeScreen = ScreenId::hosts;  ///< Screen currently shown by the shell.
+    input::UiInputDevice inputDevice = input::UiInputDevice::gamepad;  ///< Last intentional UI input, used for contextual helper glyphs.
     bool overlayVisible = false;  ///< True when the diagnostics overlay is visible.
     bool shouldExit = false;  ///< True when the application should terminate.
     std::size_t overlayScrollOffset = 0U;  ///< Scroll offset used by long overlay content.
@@ -344,6 +357,28 @@ namespace app {
   };
 
   /**
+   * @brief Staged directory selection; the saved setting changes only after successful selection.
+   */
+  struct DirectoryPickerState {
+    std::string path;  ///< Current directory, or empty for mounted drives.
+    std::vector<std::string> folders;  ///< Immediate child directory paths.
+    std::string error;  ///< Listing, creation or destination validation feedback.
+    bool available = false;  ///< The current directory was read successfully.
+    bool creating = false;  ///< Show the local folder-name keyboard.
+    std::string name;  ///< Draft child folder name.
+    std::size_t caret = 0;  ///< Insertion point inside the folder name.
+    input::StreamMenu keyboard;  ///< Reuse the stream keyboard's pages, labels and focus geometry locally.
+  };
+
+  /**
+   * @brief Persisted storage and placement preferences for local streaming controls.
+   */
+  struct LocalStreamPreferences {
+    std::string screenshotDirectory;  ///< Screenshot folder; empty selects the title-scoped screenshots directory.
+    bool keyboardDockTop = false;  ///< Dock the stream keyboard to the top instead of the bottom.
+  };
+
+  /**
    * @brief State owned by the settings, log viewer, and saved-file workflows.
    */
   struct SettingsState {
@@ -363,13 +398,35 @@ namespace app {
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
+    LocalStreamPreferences controls;  ///< Screenshot storage and keyboard placement preferences.
     bool dirty = false;  ///< True when persisted TOML-backed settings changed and should be saved.
     std::vector<startup::SavedFileEntry> savedFiles;  ///< Saved-file catalog shown on the reset settings page.
     bool savedFilesDirty = true;  ///< True when the saved-file catalog should be refreshed.
   };
 
   /**
-   * @brief Serializable app state for the menu-driven client shell.
+   * @brief Transient captures and selection for one app's local screenshot viewer.
+   */
+  struct ScreenshotViewerState {
+    ScreenshotSource source;  ///< Stable app and host identity captured when the viewer opens.
+    std::vector<ScreenshotRecord> entries;  ///< Matching captures ordered newest first.
+    std::size_t selectedIndex = 0;  ///< Image currently displayed; zero for an empty library.
+    std::string error;  ///< Any recoverable journal warning or read error.
+  };
+
+  /**
+   * @brief Retain the user-confirmed host and app until its quit operation completes.
+   */
+  struct AppQuitState {
+    std::string address;  ///< Saved server endpoint captured before confirmation.
+    uint16_t port = 0;  ///< Saved HTTP port override.
+    int appId = 0;  ///< Expected running app; prevents quitting a different session.
+    std::string appName;  ///< App label for progress and completion feedback.
+    bool inProgress = false;  ///< True while the background quit request owns the progress dialog.
+  };
+
+  /**
+   * @brief Complete local application state, including transient dialogs and screenshot browsing.
    */
   struct ClientState {
     ShellState shell;  ///< Shell-wide status and overlay state.
@@ -382,6 +439,9 @@ namespace app {
     PairingDraft pairingDraft;  ///< Draft state for the active pairing workflow.
     ModalState modal;  ///< Context modal currently stacked over the shell.
     SettingsState settings;  ///< Settings, log viewer, and saved-file workflow state.
+    DirectoryPickerState directoryPicker;  ///< Pending screenshot-directory workflow.
+    ScreenshotViewerState screenshotViewer;  ///< Local app screenshot library, released when browsing ends.
+    AppQuitState appQuit;  ///< Retained target for a confirmed host-app quit operation.
     ConfirmationDialogState confirmation;  ///< Confirmation dialog content for destructive actions.
   };
 
@@ -414,6 +474,12 @@ namespace app {
     bool appsBrowseShowHidden = false;  ///< Hidden-app visibility requested for the app browse action.
     bool streamLaunchRequested = false;  ///< True when the selected host app should start or resume streaming.
     bool logViewRequested = false;  ///< True when the log viewer should be refreshed from disk.
+    bool directoryListRequested = false;  ///< Read the picker's current directory or mounted drives.
+    bool directoryCreateRequested = false;  ///< Create the named child of the current picker directory.
+    bool directorySelectRequested = false;  ///< Check destination writability before accepting the picker directory.
+    bool screenshotsRequested = false;  ///< Load captures for the viewer's retained server and app identity.
+    bool screenshotDeleteRequested = false;  ///< Delete the selected capture after confirmation.
+    bool quitAppRequested = false;  ///< Start the retained host-app quit request in a background task.
   };
 
   /**
@@ -663,5 +729,35 @@ namespace app {
    * @return Summary of the resulting state transition.
    */
   AppUpdate handle_command(ClientState &state, input::UiCommand command);
+
+  /**
+   * @brief Apply a completed quit operation and clear only the confirmed app's in-progress state.
+   * @param state Client state containing the retained quit target.
+   * @param succeeded True after the host confirmed that no app is running.
+   * @param message Completion or actionable failure detail.
+   */
+  void apply_app_quit_result(ClientState &state, bool succeeded, const std::string &message);
+  /**
+   * @brief Remove a deleted capture from the open viewer and keep its selection in range.
+   * @param state Viewer that requested deletion.
+   * @param succeeded True when the bitmap and index deletion both succeeded.
+   * @param error Failure detail to keep visible without hiding the selected image.
+   */
+  void apply_screenshot_delete_result(ClientState &state, bool succeeded, std::string error);
+
+  /**
+   * @brief Insert printable text into the local folder-name draft, without forwarding it to a host.
+   * @param state Current client state.
+   * @param text ASCII text to append, limited to the Xbox component length.
+   */
+  void append_directory_name(ClientState &state, std::string_view text);
+
+  /**
+   * @brief Complete a validated directory selection and rebuild its settings label.
+   * @param state Current client state.
+   * @param update Receives persistence and modal closure flags.
+   * @param path Selected folder; empty restores the title-scoped default.
+   */
+  void accept_screenshot_directory(ClientState &state, AppUpdate &update, std::string_view path);
 
 }  // namespace app

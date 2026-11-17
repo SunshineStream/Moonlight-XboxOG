@@ -84,6 +84,8 @@ target_include_directories(${CMAKE_PROJECT_NAME}
         "${MOONLIGHT_NXDK_NET_INCLUDE_DIR}"
         "${MOONLIGHT_NXDK_LIBC_EXTENSIONS_DIR}"
         "${MOONLIGHT_NXDK_LWIP_POSIX_COMPAT_DIR}"
+        "${NXDK_DIR}/lib/usb/libusbohci/inc"
+        "${NXDK_DIR}/lib/usb/libusbohci_xbox"
 )
 target_link_libraries(${CMAKE_PROJECT_NAME}
         PUBLIC
@@ -111,6 +113,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME}
         PRIVATE
         XBOX
         NXDK
+        USBH_USE_EXTERNAL_CONFIG="usbh_config_xbox.h"
         TOML_EXCEPTIONS=0
         TOML_ENABLE_WINDOWS_COMPAT=0)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE

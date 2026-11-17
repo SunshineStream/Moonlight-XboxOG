@@ -8,8 +8,54 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace platform {
+
+  /**
+   * @brief Immediate subdirectories, or mounted drive roots, available in the folder picker.
+   */
+  struct DirectoryListing {
+    std::vector<std::string> paths;  ///< Sorted full paths; files and dot entries are excluded.
+    std::string error;  ///< Empty on success, including an empty directory.
+  };
+
+  /**
+   * @brief List child directories, or mounted drives when the path is empty.
+   * @param path Directory to inspect; empty selects the drive list.
+   * @return Child paths and any enumeration failure.
+   */
+  DirectoryListing list_directories(const std::string &path);
+
+  /**
+   * @brief Find the parent folder without turning a drive root into a drive-relative path.
+   * @param path Folder path, optionally ending in separators.
+   * @return Parent folder, or empty to return to the drive list.
+   */
+  std::string directory_parent(std::string path);
+
+  /**
+   * @brief Validate a single printable folder name using the Xbox's 42-byte component limit.
+   * @param name Proposed name, without its parent directory.
+   * @return True for a usable component, excluding traversal and reserved characters.
+   */
+  bool valid_directory_name(std::string_view name);
+  /**
+   * @brief Create one new child folder, refusing existing names and multi-component paths.
+   * @param parent Existing parent folder.
+   * @param name Valid single-component child name.
+   * @param error Receives creation or validation failures; cleared on success.
+   * @return True only when a new directory was created.
+   */
+  bool create_child_directory(const std::string &parent, const std::string &name, std::string &error);
+
+  /**
+   * @brief Verify a destination by creating and removing a unique empty file.
+   * @param path Existing destination directory.
+   * @param error Receives an actionable failure; cleared on success.
+   * @return True when the directory permits creating and deleting files.
+   */
+  bool directory_is_writable(const std::string &path, std::string &error);
 
   /**
    * @brief Return the preferred path separator for the active platform.
@@ -52,7 +98,7 @@ namespace platform {
   std::string file_name_from_path(std::string_view path);
 
   /**
-   * @brief Ensure that a directory path exists, creating missing segments as needed.
+   * @brief Ensure a directory exists, mounting its standard Xbox drive and creating missing segments as needed.
    *
    * @param directoryPath Directory path to create.
    * @param errorMessage Optional output for creation failures.
@@ -61,7 +107,7 @@ namespace platform {
   bool ensure_directory_exists(const std::string &directoryPath, std::string *errorMessage = nullptr);
 
   /**
-   * @brief Try to read the size of a regular file.
+   * @brief Try to read the size of a regular file, mounting its standard Xbox drive when necessary.
    *
    * @param path File path to inspect.
    * @param sizeBytes Optional output for the file size in bytes.

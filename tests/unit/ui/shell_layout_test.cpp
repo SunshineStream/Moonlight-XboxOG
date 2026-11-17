@@ -2,16 +2,16 @@
  * @file tests/unit/ui/shell_layout_test.cpp
  * @brief Verifies TV-safe layout and focus visibility across Xbox display modes.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/ui/shell_layout.h"
 
 // standard includes
 #include <cstdlib>
 #include <limits>
 #include <utility>
 
-// local includes
-#include "src/ui/shell_layout.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 namespace {
 
@@ -305,3 +305,52 @@ namespace {
   }
 
 }  // namespace
+
+/**
+ * @brief A list retains its viewport until focus reaches an edge, then scrolls by the necessary rows.
+ */
+TEST(ShellListViewportTest, KeepsVisibleRowsStableAndScrollsAtTheEdges) {
+  EXPECT_EQ(ui::stable_list_first_row(80, 0, 8, 0), 0);
+  EXPECT_EQ(ui::stable_list_first_row(80, 7, 8, 0), 0);
+  EXPECT_EQ(ui::stable_list_first_row(80, 8, 8, 0), 1);
+  EXPECT_EQ(ui::stable_list_first_row(80, 9, 8, 1), 2);
+  EXPECT_EQ(ui::stable_list_first_row(80, 2, 8, 2), 2);
+  EXPECT_EQ(ui::stable_list_first_row(80, 1, 8, 2), 1);
+  EXPECT_EQ(ui::stable_list_first_row(80, 79, 8, 0), 72);
+  EXPECT_EQ(ui::stable_list_first_row(80, 0, 8, 72), 0);
+}
+
+/**
+ * @brief Empty, short and resized lists clamp stale selection and viewport values without unsigned underflow.
+ */
+TEST(ShellListViewportTest, HandlesEmptyShortAndResizedLists) {
+  EXPECT_EQ(ui::stable_list_first_row(0, 100, 8, 100), 0);
+  EXPECT_EQ(ui::stable_list_first_row(80, 100, 0, 100), 0);
+  EXPECT_EQ(ui::stable_list_first_row(4, 3, 8, 100), 0);
+  EXPECT_EQ(ui::stable_list_first_row(8, 7, 8, 100), 0);
+  EXPECT_EQ(ui::stable_list_first_row(20, 100, 8, 100), 12);
+  EXPECT_EQ(ui::stable_list_first_row(20, 15, 8, 100), 12);
+}
+
+/**
+ * @brief Partial presentation covers scaled row edges while remaining inside the physical framebuffer.
+ */
+TEST(ShellListViewportTest, MapsRepaintsToBoundedPhysicalPixels) {
+  auto area = ui::framebuffer_repaint_rect({138, 155, 684, 42}, 960, 1280, 720);
+  EXPECT_EQ(area.x, 182);
+  EXPECT_EQ(area.y, 154);
+  EXPECT_EQ(area.w, 916);
+  EXPECT_EQ(area.h, 44);
+  area = ui::framebuffer_repaint_rect({-10, -10, 1000, 800}, 960, 1280, 720);
+  EXPECT_EQ(area.x, 0);
+  EXPECT_EQ(area.y, 0);
+  EXPECT_EQ(area.w, 1280);
+  EXPECT_EQ(area.h, 720);
+  EXPECT_EQ(ui::framebuffer_repaint_rect({2000, 0, 10, 10}, 960, 1280, 720).w, 0);
+  EXPECT_EQ(ui::framebuffer_repaint_rect({0, 900, 10, 10}, 960, 1280, 720).h, 0);
+  EXPECT_EQ(ui::framebuffer_repaint_rect({0, 0, 0, 10}, 960, 1280, 720).w, 0);
+  EXPECT_EQ(ui::framebuffer_repaint_rect({0, 0, 10, -1}, 960, 1280, 720).h, 0);
+  EXPECT_EQ(ui::framebuffer_repaint_rect({0, 0, 10, 10}, 0, 1280, 720).w, 0);
+  EXPECT_EQ(ui::framebuffer_repaint_rect({0, 0, 10, 10}, 960, 0, 720).w, 0);
+  EXPECT_EQ(ui::framebuffer_repaint_rect({0, 0, 10, 10}, 960, 1280, 0).w, 0);
+}

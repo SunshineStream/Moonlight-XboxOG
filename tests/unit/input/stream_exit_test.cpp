@@ -1,20 +1,21 @@
 /**
  * @file tests/unit/input/stream_exit_test.cpp
- * @brief Verifies digital-only exit detection, event ordering and disconnect cleanup.
+ * @brief Verifies digital-only stream menu shortcut detection, event ordering and disconnect cleanup.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/input/stream_exit.h"
 
 // standard includes
 #include <algorithm>
 #include <array>
 
-// local includes
-#include "src/input/stream_exit.h"
+// lib includes
 #include "third-party/moonlight-common-c/src/Limelight.h"
 
+#include <lizardbyte/common/testing.h>
+
 /**
- * @brief Back and both shoulders quit immediately without Start, axes or a timer.
+ * @brief Back and both shoulders request the menu immediately without Start, axes or a timer.
  */
 TEST(StreamExitTest, RequiresAllThreeDigitalButtons) {
   const std::uint32_t chord = BACK_FLAG | LB_FLAG | RB_FLAG;

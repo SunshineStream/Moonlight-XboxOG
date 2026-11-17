@@ -22,6 +22,8 @@
 #include <vector>
 
 // lib includes
+#include "third-party/moonlight-common-c/src/Limelight.h"
+
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -35,9 +37,6 @@
 #include "src/network/runtime_network.h"
 #include "src/network/socket_bio.h"
 #include "src/platform/error_utils.h"
-
-// third-party includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 // platform includes
 #ifdef NXDK
@@ -2710,6 +2709,44 @@ namespace network {
       serverInfo->pairingStatusCurrentClient = resolvedServerInfo.paired;
     }
     return true;
+  }
+
+  bool quit_host_app(const std::string &address, uint16_t preferredHttpPort, const PairingIdentity &clientIdentity, int expectedAppId, std::string *errorMessage) {
+    if (address.empty() || expectedAppId <= 0) {
+      return append_error(errorMessage, "Quitting an app requires a valid host address and app ID");
+    }
+    if (!is_valid_pairing_identity(clientIdentity)) {
+      return append_error(errorMessage, std::string(UNPAIRED_CLIENT_ERROR_MESSAGE));
+    }
+    HostPairingServerInfo server {};
+    if (!query_server_info(address, preferredHttpPort, &clientIdentity, &server, errorMessage)) {
+      return false;
+    }
+    if (!server.paired || server.httpsPort == 0) {
+      return append_error(errorMessage, "The PC must be paired and provide HTTPS to quit an app");
+    }
+    if (server.runningGameId == 0) {
+      return true;
+    }
+    if (server.runningGameId != static_cast<uint32_t>(expectedAppId)) {
+      return append_error(errorMessage, "The running app changed. Refresh the library before quitting it");
+    }
+    const std::string requestAddress = resolve_reachable_address(address, server);
+    const std::string path = "/cancel?uniqueid=" + std::string(resolve_client_unique_id(&clientIdentity)) + "&uuid=" + std::string(DEFAULT_SERVERINFO_UUID);
+    HttpResponse response {};
+    if (!http_get(requestAddress, server.httpsPort, path, true, &clientIdentity, {}, &response, errorMessage)) {
+      return false;
+    }
+    uint32_t status = 0;
+    if (std::string message; response.statusCode != 200 || !extract_root_status(response.body, &status, &message) || status != 200) {
+      return append_error(errorMessage, message.empty() ? "The host rejected the quit request. Another client may own this session" : message);
+    }
+    // Like the other Moonlight clients, verify /serverinfo: some hosts return
+    // success from /cancel even when a different client owns the running app.
+    if (!query_server_info(address, preferredHttpPort, &clientIdentity, &server, errorMessage)) {
+      return false;
+    }
+    return server.runningGameId == 0 || append_error(errorMessage, "The app is still running. Only the client that started it may be able to quit it");
   }
 
   bool launch_or_resume_stream(

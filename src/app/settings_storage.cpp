@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -26,6 +27,7 @@
 extern "C" FILE *_wfopen(const wchar_t *path, const wchar_t *mode);
 #endif
 
+// lib includes
 #include <toml++/toml.hpp>
 
 // local includes
@@ -349,6 +351,11 @@ namespace {
     content += std::string("play_audio_on_pc = ") + (settings.playAudioOnPc ? "true" : "false") + "\n";
     content += std::string("play_audio_on_xbox = ") + (settings.playAudioOnXbox ? "true" : "false") + "\n";
     content += "# Show stream telemetry after streaming ends.\n";
+    std::ostringstream screenshotValue;
+    screenshotValue << toml::value<std::string>(settings.screenshotDirectory);
+    content += "# Empty selects the screenshots folder under this title's save directory.\n";
+    content += "screenshot_directory = " + screenshotValue.str() + "\n";
+    content += std::string("keyboard_dock_top = ") + (settings.keyboardDockTop ? "true" : "false") + "\n";
     content += std::string("show_performance_stats = ") + (settings.showPerformanceStats ? "true" : "false") + "\n";
     return content;
   }
@@ -392,7 +399,7 @@ namespace {
   void inspect_streaming_keys(const toml::table &streamingTable, const std::string &filePath, app::LoadAppSettingsResult *result) {
     for (const auto &[rawKey, node] : streamingTable) {
       const std::string key(rawKey.str());
-      if (key == "video_width" || key == "video_height" || key == "video_bpp" || key == "video_refresh" || key == "video_mode_selected" || key == "fps" || key == "bitrate_kbps" || key == "play_audio_on_pc" || key == "play_audio_on_xbox" || key == "show_performance_stats") {
+      if (key == "video_width" || key == "video_height" || key == "video_bpp" || key == "video_refresh" || key == "video_mode_selected" || key == "fps" || key == "bitrate_kbps" || key == "play_audio_on_pc" || key == "play_audio_on_xbox" || key == "show_performance_stats" || key == "screenshot_directory" || key == "keyboard_dock_top") {
         continue;
       }
 
@@ -493,6 +500,14 @@ namespace app {
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_pc"], filePath, "streaming.play_audio_on_pc", &result.settings.playAudioOnPc, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_xbox"], filePath, "streaming.play_audio_on_xbox", &result.settings.playAudioOnXbox, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["show_performance_stats"], filePath, "streaming.show_performance_stats", &result.settings.showPerformanceStats, &result.warnings);
+    load_boolean_setting(settingsTable["streaming"]["keyboard_dock_top"], filePath, "streaming.keyboard_dock_top", &result.settings.keyboardDockTop, &result.warnings);
+    if (const auto node = settingsTable["streaming"]["screenshot_directory"]; node) {
+      if (const auto path = node.value<std::string>(); path && path->find_first_of("\r\n") == std::string::npos && path->find('\0') == std::string::npos) {
+        result.settings.screenshotDirectory = *path;
+      } else {
+        append_invalid_value_warning(&result.warnings, filePath, "streaming.screenshot_directory", "<invalid path>");
+      }
+    }
 
     return result;
   }

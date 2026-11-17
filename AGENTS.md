@@ -38,9 +38,11 @@ The project uses GoogleTest. Tests must include `<lizardbyte/common/testing.h>` 
 GoogleTest directly. This supplies the shared test support and output capture; Sunshine's
 `tests/tests_common.h` is not part of this repository.
 
-Group test includes under `// test includes`, then `// standard includes`, `// lib includes` and
-`// local includes`, with blank lines between groups and no empty groups. Keep platform-specific headers
-inside their preprocessor guards. Preserve and explain intentional include-order dependencies.
+In test translation units, put the header under test first under `// test header include`. Group remaining
+includes under `// standard includes`, `// lib includes`, `// local includes` and `// test includes`, in that
+order, with blank lines between groups and no empty groups. Put `<lizardbyte/common/testing.h>` in the
+library group and test-only support headers in the final test group. Keep platform-specific headers inside
+their preprocessor guards. Preserve and explain intentional include-order dependencies.
 
 Add or update meaningful regression tests for new or changed source behavior. Target full coverage of
 changed testable source code. Keep platform-neutral logic accessible to native tests and document any

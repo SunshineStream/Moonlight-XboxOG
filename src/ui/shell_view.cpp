@@ -7,8 +7,12 @@
 
 // standard includes
 #include <algorithm>
+#include <tuple>
 #include <utility>
 #include <vector>
+
+// local includes
+#include "src/platform/filesystem_utils.h"
 
 namespace {
 
@@ -158,7 +162,7 @@ namespace {
         continue;
       }
 
-      const std::string detail = appRecord.running ? "Running now" : std::string {};
+      const std::string detail = appRecord.running ? "In progress / Resume" : std::string {};
 
       std::string badgeLabel;
       if (appRecord.favorite) {
@@ -201,6 +205,11 @@ namespace {
     return state.addHostDraft.portInput;
   }
 
+  /**
+   * @brief Name the selected settings section without conflating Display and Storage.
+   * @param category Active settings category.
+   * @return User-facing category name.
+   */
   const char *settings_category_label(app::SettingsCategory category) {
     switch (category) {
       case app::SettingsCategory::logging:
@@ -209,6 +218,8 @@ namespace {
         return "Display";
       case app::SettingsCategory::input:
         return "Input";
+      case app::SettingsCategory::storage:
+        return "Storage";
       case app::SettingsCategory::reset:
         return "Reset";
     }
@@ -342,6 +353,11 @@ namespace {
     return lines;
   }
 
+  /**
+   * @brief Describe the selected category and its supported settings.
+   * @param state Current settings and saved-file state.
+   * @return Context lines for the settings detail panel.
+   */
   std::vector<std::string> settings_body_lines(const app::ClientState &state) {
     std::vector<std::string> lines = {
       std::string("Category: ") + settings_category_label(state.settings.selectedCategory),
@@ -368,7 +384,12 @@ namespace {
       return lines;
     }
     if (state.settings.selectedCategory == app::SettingsCategory::display) {
-      lines.emplace_back("Display options will be added here.");
+      lines.emplace_back("Choose stream video, audio and performance statistics options.");
+      return lines;
+    }
+
+    if (state.settings.selectedCategory == app::SettingsCategory::storage) {
+      lines.emplace_back("Choose where screenshots are saved.");
       return lines;
     }
 
@@ -409,6 +430,9 @@ namespace {
     }
     if (id == "settings-category:input") {
       return "icons\\gamepad-2.svg";
+    }
+    if (id == "settings-category:storage") {
+      return "icons\\save.svg";
     }
     if (id == "settings-category:reset") {
       return "icons\\rotate-ccw.svg";
@@ -540,19 +564,24 @@ namespace {
   }
 
   /**
-   * @brief Build app actions with explicit hidden and favorite checkbox states.
+   * @brief Build app actions with hidden/favorite checkboxes and the local screenshot viewer entry.
    *
    * @param state Current app and modal selection.
    * @param viewModel Receives the modal action rows.
    */
   void fill_app_actions_modal_view(const app::ClientState &state, ui::ShellViewModel *viewModel) {
     if (const app::HostAppRecord *appRecord = app::selected_app(state); appRecord != nullptr) {
+      const auto selection = std::min(state.modal.selectedActionIndex, appRecord->running ? std::size_t {4} : std::size_t {3});
       viewModel->modal.title = appRecord->name;
       viewModel->modal.actions = {
-        {"toggle-hidden-app", "Hide app", true, state.modal.selectedActionIndex == 0U, appRecord->hidden, {}, true},
-        {"view-app-details", "View details", true, state.modal.selectedActionIndex == 1U, false},
-        {"toggle-favorite", "Set favorite", true, state.modal.selectedActionIndex == 2U, appRecord->favorite, {}, true},
+        {"toggle-hidden-app", "Hide app", true, selection == 0U, appRecord->hidden, {}, true},
+        {"view-app-details", "View details", true, selection == 1U, false},
+        {"toggle-favorite", "Set favorite", true, selection == 2U, appRecord->favorite, {}, true},
+        {"view-screenshots", "Screenshots", true, selection == 3U, false, "icons\\camera.svg"},
       };
+      if (appRecord->running) {
+        viewModel->modal.actions.push_back({"quit-app", "Quit app", true, state.modal.selectedActionIndex == 4U, false, "icons\\power.svg"});
+      }
     }
   }
 
@@ -594,6 +623,67 @@ namespace {
   }
 
   /**
+   * @brief Present staged folder selection or the same keyboard geometry used by stream controls.
+   * @param state Current directory picker and input source.
+   * @param viewModel Receives a scrollable folder dialog or local name-entry keyboard.
+   */
+  void fill_directory_picker_view(const app::ClientState &state, ui::ShellViewModel *viewModel) {
+    const auto &picker = state.directoryPicker;
+    if (picker.creating) {
+      viewModel->modal.visible = false;
+      auto &view = viewModel->keypad;
+      view.visible = true;
+      view.title = "New Folder";
+      view.value = picker.name;
+      view.value.insert(std::min(picker.caret, view.value.size()), "|");
+      if (!picker.error.empty()) {
+        view.lines = {picker.error};
+      }
+      view.columnCount = input::StreamMenu::KEYBOARD_COLUMNS;
+      view.rowCount = input::StreamMenu::KEYBOARD_ROWS;
+      const auto &cells = picker.keyboard.keyboard_cells();
+      for (std::size_t i = 0; i < cells.size(); ++i) {
+        const auto &cell = cells[i];
+        std::string label = picker.keyboard.key_label(static_cast<int>(i));
+        if (cell.key == input::StreamMenu::KEYBOARD_PAGE_KEY && picker.keyboard.keyboardLayout == 1) {
+          label = "ABC";
+        } else if (cell.key == 46) {
+          label = "OK";
+        }
+        view.buttons.push_back({label, true, i == static_cast<std::size_t>(picker.keyboard.keyIndex), cell.column, cell.row, cell.width, cell.height});
+      }
+      if (state.shell.inputDevice == input::UiInputDevice::keyboard) {
+        view.footerActions = {{"create", "Create", "icons\\button-start.svg", {}, false}, {"cancel", "Cancel", "icons\\button-b.svg", {}, false}};
+      } else {
+        view.footerActions = {{"type", "Type", "icons\\button-a.svg", {}, true}, {"delete", "Delete", "icons\\button-x.svg", {}, false}, {"shift", picker.keyboard.shiftOnce ? "Shift: On" : "Shift", "icons\\button-y.svg", {}, false}, {"create", "Create", "icons\\button-start.svg", {}, false}, {"cancel", "Cancel", "icons\\button-b.svg", {}, false}};
+      }
+      return;
+    }
+    auto &view = viewModel->modal;
+    view.title = "Screenshot Folder";
+    view.folderBrowser = true;
+    const auto path = picker.path.empty() ? std::string("Choose a drive") : picker.path;
+    view.lines = {path.size() > 72 ? "..." + path.substr(path.size() - 69) : path};
+    if (!picker.error.empty()) {
+      view.lines.push_back(picker.error);
+    } else if (!picker.path.empty() && picker.folders.empty()) {
+      view.lines.emplace_back("No subfolders here.");
+    }
+    const bool canUse = picker.available && !picker.path.empty();
+    view.actions = {
+      {"use-folder", "Use this folder", canUse, state.modal.selectedActionIndex == 0},
+      {"new-folder", "New folder...", canUse, state.modal.selectedActionIndex == 1},
+      {"parent-folder", "Up / Drives", !picker.path.empty(), state.modal.selectedActionIndex == 2},
+      {"default-folder", "Use default location", true, state.modal.selectedActionIndex == 3},
+    };
+    for (std::size_t i = 0; i < picker.folders.size(); ++i) {
+      const auto &folder = picker.folders[i];
+      view.actions.push_back({folder, picker.path.empty() ? folder : platform::file_name_from_path(folder), true, state.modal.selectedActionIndex == i + 4});
+    }
+    view.footerActions = {{"select", "Select", "icons\\button-a.svg", {}, true}, {"use-folder", "Use folder", "icons\\button-y.svg", {}, false}, {"up", "Up", "icons\\button-lb.svg", {}, false}, {"cancel", "Cancel", "icons\\button-b.svg", {}, false}};
+  }
+
+  /**
    * @brief Build the active dialog, including connection-test status icons and diagnostics.
    *
    * @param state Current reducer-owned modal state.
@@ -621,12 +711,43 @@ namespace {
       case app::ModalId::app_details:
         fill_app_details_modal_view(state, viewModel);
         return;
+      case app::ModalId::quit_progress:
+        viewModel->modal.title = "Quitting " + state.appQuit.appName;
+        viewModel->modal.lines = {"Waiting for the PC to close the app..."};
+        viewModel->modal.busy = true;
+        viewModel->modal.iconAssetPath = "icons\\loader-circle.svg";
+        return;
       case app::ModalId::log_viewer:
         fill_log_viewer_modal_view(state, viewModel);
         return;
       case app::ModalId::confirmation:
         fill_confirmation_modal_view(state, viewModel);
         return;
+      case app::ModalId::directory_picker:
+        fill_directory_picker_view(state, viewModel);
+        return;
+      case app::ModalId::screenshot_viewer:
+        {
+          const auto &viewer = state.screenshotViewer;
+          viewModel->modal.title = viewer.source.appName + " / " + viewer.source.hostName;
+          viewModel->screenshot.visible = true;
+          viewModel->screenshot.status = viewer.error;
+          if (viewer.entries.empty()) {
+            viewModel->screenshot.status = viewer.error.empty() ? "No screenshots for this app yet. Take one from the stream controls." : viewer.error;
+          } else {
+            const auto selected = std::min(viewer.selectedIndex, viewer.entries.size() - 1);
+            const auto &entry = viewer.entries[selected];
+            viewModel->screenshot.path = entry.path;
+            viewModel->screenshot.caption = std::to_string(selected + 1) + " / " + std::to_string(viewer.entries.size()) + "    " + app::screenshot_time_label(entry.capturedAt);
+            viewModel->modal.footerActions = {
+              {"previous-screenshot", "Previous", "icons\\button-lb.svg", {}, false},
+              {"next-screenshot", "Next", "icons\\button-rb.svg", {}, false},
+              {"delete-screenshot", "Delete", "icons\\button-x.svg", {}, false},
+            };
+          }
+          viewModel->modal.footerActions.push_back({"back", "Back", "icons\\button-b.svg", {}, false});
+          return;
+        }
       case app::ModalId::connection_test:
         viewModel->modal.busy = state.connectionTest.inProgress;
         viewModel->modal.title = state.connectionTest.inProgress ? "Testing connection" : (state.connectionTest.succeeded ? "Connection successful" : "Connection failed");
@@ -668,7 +789,7 @@ namespace {
         {
           std::vector<ui::ShellFooterAction> actions;
           if (app::selected_app(state) != nullptr) {
-            actions.emplace_back(ui::ShellFooterAction {"launch", "Launch", "icons\\button-a.svg", {}, true});
+            actions.emplace_back(ui::ShellFooterAction {"launch", app::selected_app(state)->running ? "Resume" : "Launch", "icons\\button-a.svg", {}, true});
             actions.emplace_back(ui::ShellFooterAction {"app-menu", "App Menu", "icons\\button-y.svg", {}, false});
           }
           actions.emplace_back(ui::ShellFooterAction {"back", "Back", "icons\\button-b.svg", {}, false});
@@ -705,9 +826,127 @@ namespace {
     return {};
   }
 
+  /**
+   * @brief Translate a bundled controller glyph to its working keyboard equivalent.
+   * @param icon Controller icon path.
+   * @return Keyboard keycap label, or an empty string for a non-controller icon.
+   */
+  std::string keyboard_hint_for_icon(std::string_view icon) {
+    if (icon == "icons\\button-a.svg" || icon == "icons\\button-start.svg") {
+      return "Enter";
+    }
+    if (icon == "icons\\button-b.svg" || icon == "icons\\button-select.svg") {
+      return "Esc";
+    }
+    if (icon == "icons\\button-x.svg") {
+      return "Bksp";
+    }
+    if (icon == "icons\\button-y.svg") {
+      return "M";
+    }
+    if (icon == "icons\\button-lb.svg") {
+      return "PgUp";
+    }
+    if (icon == "icons\\button-rb.svg") {
+      return "PgDn";
+    }
+    if (icon == "icons\\button-lt.svg") {
+      return "Shift+PgUp";
+    }
+    if (icon == "icons\\button-rt.svg") {
+      return "Shift+PgDn";
+    }
+    return {};
+  }
+
+  /**
+   * @brief Replace controller footer glyphs with scalable keyboard keycaps.
+   * @param actions Page, modal or notification actions.
+   */
+  void use_keyboard_hints(std::vector<ui::ShellFooterAction> &actions) {
+    for (auto &action : actions) {
+      action.keyLabel = keyboard_hint_for_icon(action.iconAssetPath);
+      action.secondaryKeyLabel = keyboard_hint_for_icon(action.secondaryIconAssetPath);
+      if (action.id == "exit") {
+        action.keyLabel = "Alt+F4";
+        action.secondaryKeyLabel.clear();
+      }
+      if (action.id == "enter") {
+        action.keyLabel = "Space";
+      }
+      if (action.keyLabel == action.secondaryKeyLabel) {
+        action.secondaryKeyLabel.clear();
+      }
+      if (!action.keyLabel.empty()) {
+        action.iconAssetPath.clear();
+      }
+      if (!action.secondaryKeyLabel.empty() || action.secondaryIconAssetPath == "icons\\button-start.svg") {
+        action.secondaryIconAssetPath.clear();
+      }
+    }
+  }
+
+  /**
+   * @brief Supply default modal actions and choose glyphs for the most recently used input device.
+   * @param state Source input device.
+   * @param viewModel Receives contextual helpers throughout the shell.
+   */
+  void fill_input_hints(const app::ClientState &state, ui::ShellViewModel &viewModel) {
+    if (viewModel.modal.visible && !viewModel.modal.busy && viewModel.modal.footerActions.empty()) {
+      if (viewModel.modal.actions.empty()) {
+        viewModel.modal.footerActions = {{"close", "Close", "icons\\button-b.svg", {}, false}};
+      } else {
+        viewModel.modal.footerActions = {{"select", "Select", "icons\\button-a.svg", {}, true}, {"back", "Back", "icons\\button-b.svg", {}, false}};
+      }
+    }
+    if (state.shell.inputDevice != input::UiInputDevice::keyboard) {
+      return;
+    }
+    use_keyboard_hints(viewModel.frame.footerActions);
+    use_keyboard_hints(viewModel.keypad.footerActions);
+    use_keyboard_hints(viewModel.modal.footerActions);
+    for (auto &notification : viewModel.notification.items) {
+      use_keyboard_hints(notification.actions);
+    }
+  }
+
 }  // namespace
 
 namespace ui {
+  bool shell_requires_animation(const app::ClientState &state) {
+    if (state.shell.overlayVisible || state.modal.id == app::ModalId::quit_progress || (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress)) {
+      return true;
+    }
+    if (state.modal.active()) {
+      return false;
+    }
+    if (state.shell.activeScreen == app::ScreenId::pair_host) {
+      return true;
+    }
+    const auto *host = app::apps_host(state);
+    return state.shell.activeScreen == app::ScreenId::apps && host != nullptr && host->appListState == app::HostAppListState::loading;
+  }
+
+  bool same_action_dialog_content(const ShellModalView &previous, const ShellModalView &current) {
+    if (previous.folderBrowser != current.folderBrowser || !previous.visible || !current.visible || previous.busy || current.busy || previous.title != current.title || previous.iconAssetPath != current.iconAssetPath || previous.lines != current.lines || previous.actions.size() != current.actions.size() || previous.footerActions.size() != current.footerActions.size()) {
+      return false;
+    }
+    for (std::size_t i = 0; i < current.actions.size(); ++i) {
+      const auto &a = previous.actions[i];
+      const auto &b = current.actions[i];
+      if (std::tie(a.id, a.label, a.enabled, a.checked, a.iconAssetPath, a.checkable) != std::tie(b.id, b.label, b.enabled, b.checked, b.iconAssetPath, b.checkable)) {
+        return false;
+      }
+    }
+    for (std::size_t i = 0; i < current.footerActions.size(); ++i) {
+      const auto &a = previous.footerActions[i];
+      const auto &b = current.footerActions[i];
+      if (std::tie(a.id, a.label, a.iconAssetPath, a.secondaryIconAssetPath, a.emphasized, a.keyLabel, a.secondaryKeyLabel) != std::tie(b.id, b.label, b.iconAssetPath, b.secondaryIconAssetPath, b.emphasized, b.keyLabel, b.secondaryKeyLabel)) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   /**
    * @brief Return whether a screen uses the split menu-and-detail layout.
@@ -835,6 +1074,7 @@ namespace ui {
     }
 
     fill_modal_view(state, &viewModel);
+    fill_input_hints(state, viewModel);
 
     fill_view_model_overlay(state, logEntries, statsLines, &viewModel);
 

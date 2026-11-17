@@ -1,9 +1,11 @@
 /**
  * @file src/input/stream_exit.cpp
- * @brief Recognizes the digital Back, Black and White exit chord from snapshots and events.
+ * @brief Recognizes the Back, Black and White stream menu shortcut from snapshots and events.
  */
+// class header include
 #include "src/input/stream_exit.h"
 
+// lib includes
 #include "third-party/moonlight-common-c/src/Limelight.h"
 
 namespace input {

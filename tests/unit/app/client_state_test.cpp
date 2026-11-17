@@ -2,10 +2,8 @@
  * @file tests/unit/app/client_state_test.cpp
  * @brief Verifies client state models and transitions.
  */
-// test includes
-#include "tests/support/network_test_constants.h"
-
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/app/client_state.h"
 
 // standard includes
 #include <array>
@@ -13,8 +11,11 @@
 #include <limits>
 #include <string>
 
-// local includes
-#include "src/app/client_state.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
+
+// test includes
+#include "tests/support/network_test_constants.h"
 
 namespace {
 
@@ -842,6 +843,7 @@ namespace {
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::reset);
     ASSERT_EQ(state.settings.focusArea, app::SettingsFocusArea::options);
@@ -865,6 +867,7 @@ namespace {
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.shell.activeScreen, app::ScreenId::settings);
 
+    app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
@@ -1506,6 +1509,7 @@ namespace {
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
