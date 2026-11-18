@@ -1566,9 +1566,9 @@ namespace streaming {
       "stream",
       std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps" + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
     );
-    resources.mediaBackend.set_audio_playback_enabled(settings.playAudioOnXbox);
+    resources.mediaBackend.audio_player().configure(settings.audioMode, settings.playAudioOnXbox);
     resources.mediaBackend.set_gpu_presentation_enabled(settings.presentation.gpuPresentation);
-    logging::info("stream", std::string("Xbox audio playback ") + (settings.playAudioOnXbox ? "enabled" : "disabled for lower decode latency"));
+    logging::info("stream", std::string("Xbox audio mode: ") + (settings.playAudioOnXbox ? audio_mode_label(settings.audioMode) : "Disabled"));
     logging::debug(
       "stream",
       std::string("Stream connection metadata | active=") + printable_log_value(startContext.serverInformation.address == nullptr ? std::string_view {} : std::string_view {startContext.serverInformation.address}) +

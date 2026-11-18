@@ -24,6 +24,7 @@
 #include "src/input/ui_input.h"
 #include "src/logging/logger.h"
 #include "src/startup/saved_files.h"
+#include "src/streaming/audio_configuration.h"
 #include "src/ui/menu_model.h"
 
 namespace app {
@@ -91,7 +92,8 @@ namespace app {
    */
   enum class SettingsCategory {
     logging,  ///< Logging and diagnostics options.
-    display,  ///< Display, stream video, audio and telemetry options.
+    display,  ///< Display, stream video and telemetry options.
+    audio,  ///< Playback destinations and audio mode.
     input,  ///< Input and controller options.
     storage,  ///< Screenshot destinations and other saved-file location options.
     reset,  ///< Reset and cleanup actions.
@@ -409,6 +411,7 @@ namespace app {
     VideoPresentationPreferences presentation;  ///< Presentation path and statistics overlay preferences.
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
+    streaming::AudioMode audioMode = streaming::AudioMode::stereo;  ///< Source channels and local playback mix.
     LocalStreamPreferences controls;  ///< Screenshot storage and keyboard placement preferences.
     bool dirty = false;  ///< True when persisted TOML-backed settings changed and should be saved.
     std::vector<startup::SavedFileEntry> savedFiles;  ///< Saved-file catalog shown on the reset settings page.

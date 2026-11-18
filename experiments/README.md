@@ -1,14 +1,14 @@
-# Video experiments
+# Xbox experiments
 
-These optional Xbox programs exercise video presentation and fractional sampling independently
-of a streaming host. They use the production presenter and are disabled in the default build.
+These optional Xbox programs exercise video presentation, fractional sampling and audio playback
+independently of a streaming host. They share production code and are disabled in the default build.
 
 ## Build and run
 
 From the repository root, using the normal build prerequisites and toolchain:
 
 ```bash
-cmake -S . -B cmake-build-experiments -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF -DMOONLIGHT_BUILD_VIDEO_EXPERIMENTS=ON
+cmake -S . -B cmake-build-experiments -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF -DMOONLIGHT_BUILD_VIDEO_EXPERIMENTS=ON -DMOONLIGHT_BUILD_AUDIO_EXPERIMENTS=ON
 cmake --build cmake-build-experiments
 ```
 
@@ -19,6 +19,7 @@ The Xbox child build selects Unix Makefiles automatically. The generated files a
 | ----------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
 | Presentation      | `cmake-build-experiments/xbox/PvideoPresentationProbe.iso` | `cmake-build-experiments/xbox/pvideo-presentation-probe/default.xbe` |
 | MPEG-2 prediction | `cmake-build-experiments/xbox/Mpeg2MotionProbe.iso`        | `cmake-build-experiments/xbox/mpeg2-motion-probe/default.xbe`        |
+| Audio playback    | `cmake-build-experiments/xbox/AudioPlaybackProbe.iso`      | `cmake-build-experiments/xbox/audio-playback-probe/default.xbe`      |
 
 Launch an ISO with the repository's configured xemu installation, for example:
 
@@ -27,7 +28,7 @@ Launch an ISO with the repository's configured xemu installation, for example:
 ```
 
 From a Windows command prompt, use `scripts\run-xemu.cmd --iso` with the same ISO path.
-The probes use GPU presentation directly. The streaming client selects its path in
+The video probes use GPU presentation directly. The streaming client selects its path in
 **Settings → Display → Video Presentation**.
 
 ## Presentation probe
@@ -50,3 +51,42 @@ This is a visual comparison of one prediction stage, not a compressed-video deco
 bit-exact reconstruction test. The overlay is composed during scanout and cannot be read back
 through the RGB framebuffer. Console testing is needed to assess image correctness and
 performance on hardware; emulator output alone cannot establish those properties.
+
+## Audio playback probe
+
+Launch `AudioPlaybackProbe.iso` with the same launcher. The probe runs two short tone tests through
+the stream client's FFmpeg Opus decoder, mixer and SDL playback device.
+
+| Test   | Encoded tone | Expected Xbox output |
+| ------ | ------------ | -------------------- |
+| Stereo | Front left   | 500 Hz on the left   |
+| Mono   | Front left   | 500 Hz on both sides |
+
+Listen for the listed speaker in each test. **AUDIO PROBE COMPLETE** confirms every mode decoded and
+queued the expected PCM byte count and the SDL queue drained. Audible output or a host audio capture
+verifies the channel routing. The probe uses local Opus packets and can run with Sunshine closed.
+
+## 5.1 channel check
+
+Generate the host-side test files from the repository root with Python and FFmpeg on your path.
+Pass `--ffmpeg` with the executable path if needed.
+
+```bash
+python experiments/generate_surround_channel_check.py cmake-build-experiments/audio
+```
+
+The 5.1 WAV plays a one-second tone on each channel with half a second of silence between tones.
+Play it through a 5.1-capable player and output to check speaker routing.
+
+| Time      | Active channel |
+| --------- | -------------- |
+| 0.5–1.5 s | Front left     |
+| 2.0–3.0 s | Front right    |
+| 3.5–4.5 s | Front center   |
+| 5.0–6.0 s | LFE            |
+| 6.5–7.5 s | Surround left  |
+| 8.0–9.0 s | Surround right |
+
+The `.spdif` file carries the same sequence as IEC 61937 bursts containing Dolby Digital AC-3.
+It provides test data for a future Xbox digital output backend. The xemu playback probe above
+exercises the existing stereo PCM output.

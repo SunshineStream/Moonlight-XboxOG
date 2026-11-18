@@ -81,7 +81,7 @@ namespace {
   /**
    * @brief Map each independent settings category to its stable navigation identifier.
    * @param category Settings section to identify.
-   * @return Menu identifier for Logging, Display, Input, Storage or Reset.
+   * @return Stable identifier for a settings category.
    */
   std::string settings_category_menu_id(app::SettingsCategory category) {
     switch (category) {
@@ -89,6 +89,8 @@ namespace {
         return std::string(SETTINGS_CATEGORY_PREFIX) + "logging";
       case app::SettingsCategory::display:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "display";
+      case app::SettingsCategory::audio:
+        return std::string(SETTINGS_CATEGORY_PREFIX) + "audio";
       case app::SettingsCategory::input:
         return std::string(SETTINGS_CATEGORY_PREFIX) + "input";
       case app::SettingsCategory::storage:
@@ -109,6 +111,9 @@ namespace {
     if (itemId == settings_category_menu_id(app::SettingsCategory::display)) {
       return app::SettingsCategory::display;
     }
+    if (itemId == settings_category_menu_id(app::SettingsCategory::audio)) {
+      return app::SettingsCategory::audio;
+    }
     if (itemId == settings_category_menu_id(app::SettingsCategory::input)) {
       return app::SettingsCategory::input;
     }
@@ -124,14 +129,16 @@ namespace {
   /**
    * @brief Describe the options owned by a settings category.
    * @param category Section whose scope should be explained.
-   * @return Category guidance, keeping file destinations separate from Display.
+   * @return Guidance for the selected settings category.
    */
   const char *settings_category_description(app::SettingsCategory category) {
     switch (category) {
       case app::SettingsCategory::logging:
         return "Control the runtime log file, the in-app log viewer, and xemu debugger output verbosity.";
       case app::SettingsCategory::display:
-        return "Tune streaming video resolution, frame rate, bitrate, audio playback and performance statistics.";
+        return "Tune streaming video resolution, frame rate, bitrate and performance statistics.";
+      case app::SettingsCategory::audio:
+        return "Choose where stream audio plays and how the Xbox mixes it.";
       case app::SettingsCategory::input:
         return "Input options will live here when controller and navigation customization is added.";
       case app::SettingsCategory::storage:
@@ -526,6 +533,7 @@ namespace {
         return {
           {settings_category_menu_id(app::SettingsCategory::logging), "Logging", settings_category_description(app::SettingsCategory::logging), true},
           {settings_category_menu_id(app::SettingsCategory::display), "Display", settings_category_description(app::SettingsCategory::display), true},
+          {settings_category_menu_id(app::SettingsCategory::audio), "Audio", settings_category_description(app::SettingsCategory::audio), true},
           {settings_category_menu_id(app::SettingsCategory::input), "Input", settings_category_description(app::SettingsCategory::input), true},
           {settings_category_menu_id(app::SettingsCategory::storage), "Storage", settings_category_description(app::SettingsCategory::storage), true},
           {settings_category_menu_id(app::SettingsCategory::reset), "Reset", settings_category_description(app::SettingsCategory::reset), true},
@@ -560,7 +568,7 @@ namespace {
   }
 
   /**
-   * @brief Build the active settings options, including the screenshot destination picker.
+   * @brief Build the active settings options, including audio mode and screenshot destination.
    * @param state Current screen and settings values.
    * @return Selectable settings rows for the current category.
    */
@@ -603,6 +611,15 @@ namespace {
             true,
           },
           {
+            "toggle-show-performance-stats",
+            std::string("Performance Stats: ") + (state.settings.presentation.showPerformanceStats ? "On" : "Off"),
+            "Show performance statistics during playback and after the stream ends.",
+            true,
+          },
+        };
+      case app::SettingsCategory::audio:
+        return {
+          {
             "toggle-play-audio-on-pc",
             std::string("Play Audio on PC: ") + (state.settings.playAudioOnPc ? "On" : "Off"),
             "Toggle whether the host PC should continue local audio playback while also streaming audio to this Xbox client.",
@@ -615,9 +632,9 @@ namespace {
             true,
           },
           {
-            "toggle-show-performance-stats",
-            std::string("Performance Stats: ") + (state.settings.presentation.showPerformanceStats ? "On" : "Off"),
-            "Show performance statistics during playback and after the stream ends.",
+            "cycle-audio-mode",
+            std::string("Audio Mode: ") + streaming::audio_mode_label(state.settings.audioMode),
+            "Choose separate left and right channels or the same mono mix through both speakers.",
             true,
           },
         };
@@ -2475,7 +2492,7 @@ namespace app {
   }
 
   /**
-   * @brief Update settings inline or open the screenshot folder picker, emitting only required side effects.
+   * @brief Update settings, including audio mode, or open the screenshot folder picker.
    *
    * @param state Client state containing the settings menus.
    * @param detailUpdate Activated detail-menu update.
@@ -2548,6 +2565,14 @@ namespace app {
       update->persistence.settingsChanged = true;
       state.shell.statusMessage = std::string("Play audio on Xbox ") + (state.settings.playAudioOnXbox ? "enabled" : "disabled");
       rebuild_menu(state, "toggle-play-audio-on-xbox");
+      return;
+    }
+    if (detailUpdate.activatedItemId == "cycle-audio-mode") {
+      state.settings.audioMode = streaming::next_audio_mode(state.settings.audioMode);
+      state.settings.dirty = true;
+      update->persistence.settingsChanged = true;
+      state.shell.statusMessage = std::string("Audio mode set to ") + streaming::audio_mode_label(state.settings.audioMode);
+      rebuild_menu(state, "cycle-audio-mode");
       return;
     }
     if (detailUpdate.activatedItemId == "screenshot-directory") {

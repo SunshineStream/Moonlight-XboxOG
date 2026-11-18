@@ -2493,7 +2493,7 @@ namespace {
   }
 
   /**
-   * @brief Snapshot persisted shell and stream preferences, including screenshot storage and OSK placement.
+   * @brief Snapshot persisted shell and stream preferences, including playback mode.
    * @param state Current client state.
    * @return Settings snapshot ready for TOML serialization.
    */
@@ -2512,6 +2512,7 @@ namespace {
       state.settings.controls.screenshotDirectory,
       state.settings.controls.keyboardDockTop,
       state.settings.presentation.gpuPresentation,
+      state.settings.audioMode,
     };
   }
 

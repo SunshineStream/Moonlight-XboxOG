@@ -31,6 +31,7 @@ namespace {
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_down);
     app::handle_command(state, input::UiCommand::activate);
     state.detailMenu.select_item_by_id("screenshot-directory");
     EXPECT_EQ(state.detailMenu.selected_item()->id, "screenshot-directory");
@@ -61,7 +62,7 @@ TEST(DirectoryPickerTest, StagesConfiguredAndDefaultLocationsUntilAccepted) {
     auto state = open_picker(configured);
     EXPECT_EQ(state.settings.selectedCategory, app::SettingsCategory::storage);
     EXPECT_EQ(state.menu.items()[1].label, "Display");
-    EXPECT_EQ(state.menu.items()[3].label, "Storage");
+    EXPECT_EQ(state.menu.items()[4].label, "Storage");
     EXPECT_EQ(state.directoryPicker.path, configured.empty() ? startup::default_storage_path("screenshots") : configured);
     auto view = ui::build_shell_view_model(state, {});
     EXPECT_EQ(view.modal.title, "Screenshot Folder");
@@ -240,19 +241,20 @@ TEST(DirectoryPickerTest, BuildsScrollableFoldersAndControllerOrKeyboardNameEntr
 }
 
 /**
- * @brief Storage owns screenshot destinations while Display retains its original stream and presentation options.
+ * @brief Storage owns screenshot destinations independently of the expanded settings list.
  */
 TEST(DirectoryPickerTest, KeepsStorageSeparateFromTheExistingDisplayCategory) {
   auto state = open_picker("F:\\Screenshots");
-  ASSERT_EQ(state.menu.items().size(), 5);
-  EXPECT_EQ(state.menu.items()[3].id, "settings-category:storage");
-  EXPECT_EQ(state.menu.items()[4].id, "settings-category:reset");
+  ASSERT_EQ(state.menu.items().size(), 6U);
+  EXPECT_EQ(state.menu.items()[4].id, "settings-category:storage");
+  EXPECT_EQ(state.menu.items()[5].id, "settings-category:reset");
   app::handle_command(state, input::UiCommand::back);
   ASSERT_EQ(state.detailMenu.items().size(), 1);
   EXPECT_EQ(state.detailMenu.selected_item()->id, "screenshot-directory");
   const auto view = ui::build_shell_view_model(state, {});
   EXPECT_EQ(view.content.bodyLines[0], "Category: Storage");
   app::handle_command(state, input::UiCommand::back);
+  app::handle_command(state, input::UiCommand::move_up);
   app::handle_command(state, input::UiCommand::move_up);
   app::handle_command(state, input::UiCommand::move_up);
   app::handle_command(state, input::UiCommand::activate);

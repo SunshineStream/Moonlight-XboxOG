@@ -206,7 +206,7 @@ namespace {
   }
 
   /**
-   * @brief Name the selected settings section without conflating Display and Storage.
+   * @brief Name the selected settings section.
    * @param category Active settings category.
    * @return User-facing category name.
    */
@@ -216,6 +216,8 @@ namespace {
         return "Logging";
       case app::SettingsCategory::display:
         return "Display";
+      case app::SettingsCategory::audio:
+        return "Audio";
       case app::SettingsCategory::input:
         return "Input";
       case app::SettingsCategory::storage:
@@ -384,7 +386,12 @@ namespace {
       return lines;
     }
     if (state.settings.selectedCategory == app::SettingsCategory::display) {
-      lines.emplace_back("Choose stream video, audio and performance statistics options.");
+      lines.emplace_back("Choose stream video and performance statistics options.");
+      return lines;
+    }
+
+    if (state.settings.selectedCategory == app::SettingsCategory::audio) {
+      lines.emplace_back("Choose where stream audio plays and select stereo or mono for the Xbox.");
       return lines;
     }
 
@@ -427,6 +434,9 @@ namespace {
     }
     if (id == "settings-category:display") {
       return "icons\\monitor.svg";
+    }
+    if (id == "settings-category:audio") {
+      return "icons\\volume-2.svg";
     }
     if (id == "settings-category:input") {
       return "icons\\gamepad-2.svg";

@@ -79,6 +79,18 @@ framebuffer when available and performed better in xemu. **GPU** uses NV2A color
 with automatic software fallback. The setting is saved as `streaming.gpu_presentation` and both paths
 are available in the same build.
 
+## Stream audio
+
+Choose **Settings → Audio → Audio Mode** before starting or resuming a stream. **Stereo** keeps
+left and right separate and is the default. **Mono** mixes the stereo stream locally and plays the
+same signal through both outputs. The selection is saved as `streaming.audio_mode` with a value
+of `stereo` or `mono`.
+
+**Play Audio on Xbox** defaults to **On**. Turn it off to skip local audio decoding and playback.
+**Play Audio on PC** defaults to **Off**. Turn it on to request playback on the host during the stream.
+Saved choices take precedence. To check Xbox audio without a host, use the
+[standalone audio probe](experiments/README.md#audio-playback-probe).
+
 ## Streaming controls and statistics
 
 The default stream profile is **640×480 at 60 FPS and 3 Mbps**. Saved settings take precedence.
@@ -263,11 +275,12 @@ For host and Xbox builds, CMake checks whether the compiler supports Clang's `un
 cmake -S . -B cmake-build-release -DBUILD_DOCS=OFF -DCMAKE_BUILD_TYPE=Release
 ```
 
-Video build settings:
+Optional Xbox build settings:
 
 | CMake option                        | Default | Purpose                                                                                        |
 | ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `MOONLIGHT_BUILD_VIDEO_EXPERIMENTS` | `OFF`   | Build the standalone probes described in [Video experiments](experiments/README.md).           |
+| `MOONLIGHT_BUILD_VIDEO_EXPERIMENTS` | `OFF`   | Build the standalone [video probes](experiments/README.md).                                    |
+| `MOONLIGHT_BUILD_AUDIO_EXPERIMENTS` | `OFF`   | Build the standalone [audio playback probe](experiments/README.md#audio-playback-probe).       |
 | `MOONLIGHT_INPUT_DIAGNOSTICS`       | `OFF`   | Show controller state and event counters. Select Software presentation to see the debug strip. |
 
 Pass these options when configuring. Existing build directories retain cached build options until
@@ -425,19 +438,18 @@ scripts\setup-xemu.cmd --skip-support-files
    - [x] Game/App Selection
    - [x] Host Details
    - [x] App Details
-   - [ ] Pause/Hotkey overlay
+   - [x] Pause/Hotkey overlay
 - Streaming
    - [x] Video - https://www.xbmc4xbox.org.uk/wiki/XBMC_Features_and_Supported_Formats#Xbox_supported_video_formats_and_resolutions
    - [ ] Audio
-      - [ ] Mono
-      - [ ] Stereo
-      - [ ] 5.1 Surround
-      - [ ] 7.1 Surround
+      - [x] Mono
+      - [x] Stereo
+      - [ ] Dolby Digital 5.1 output over optical S/PDIF
 - Input
    - [x] Gamepad Input
-   - [ ] Keyboard Input
-   - [ ] Mouse Input
-   - [ ] Mouse Emulation via Gamepad
+   - [x] Keyboard Input
+   - [x] Mouse Input
+   - [x] Mouse Emulation via Gamepad
 - Misc.
   - [x] Save config and pairing states
   - [x] Host pairing

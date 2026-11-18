@@ -20,14 +20,10 @@
 // lib includes
 extern "C" {
 #include <libavcodec/avcodec.h>
-#include <libavutil/channel_layout.h>
 #include <libavutil/cpu.h>
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
 #include <libavutil/log.h>
-#include <libavutil/mem.h>
-#include <libavutil/samplefmt.h>
-#include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
 
@@ -55,7 +51,6 @@ namespace {
    */
   using MoonlightCallbackContext = void;
 
-  constexpr Uint32 STREAM_OVERLAY_AUDIO_QUEUE_LIMIT_MS = 250U;
   constexpr std::uint64_t STREAM_VIDEO_SUBMISSION_LOG_INTERVAL = 120;
   constexpr int STREAM_VIDEO_DROPPED_FRAME_STATUS = -2;
   constexpr std::uint64_t STREAM_VIDEO_DROP_LOG_INTERVAL = 30;
@@ -185,16 +180,6 @@ namespace {
   }
 
   /**
-   * @brief Return the number of bytes generated per second for the SDL audio format.
-   *
-   * @param audioSpec SDL audio format in use for playback.
-   * @return Number of bytes generated per second.
-   */
-  Uint32 audio_bytes_per_second(const SDL_AudioSpec &audioSpec) {
-    return static_cast<Uint32>(audioSpec.freq) * static_cast<Uint32>(audioSpec.channels) * (SDL_AUDIO_BITSIZE(audioSpec.format) / 8U);
-  }
-
-  /**
    * @brief Compute a centered destination rectangle that preserves aspect ratio.
    *
    * @param screenWidth Renderer output width.
@@ -227,51 +212,6 @@ namespace {
     };
   }
 
-  /**
-   * @brief Create FFmpeg Opus extradata for the stereo Moonlight stream.
-   *
-   * @param channelCount Negotiated channel count.
-   * @param sampleRate Negotiated sample rate.
-   * @param codecContext Audio codec context that will own the extradata.
-   * @return True when the extradata was allocated successfully.
-   */
-  bool configure_opus_extradata(int channelCount, int sampleRate, AVCodecContext *codecContext) {
-    if (codecContext == nullptr || channelCount <= 0 || channelCount > 2) {
-      return false;
-    }
-
-    std::array<std::uint8_t, 19> opusHead {
-      static_cast<std::uint8_t>('O'),
-      static_cast<std::uint8_t>('p'),
-      static_cast<std::uint8_t>('u'),
-      static_cast<std::uint8_t>('s'),
-      static_cast<std::uint8_t>('H'),
-      static_cast<std::uint8_t>('e'),
-      static_cast<std::uint8_t>('a'),
-      static_cast<std::uint8_t>('d'),
-      1U,
-      static_cast<std::uint8_t>(channelCount),
-      0U,
-      0U,
-      static_cast<std::uint8_t>(sampleRate & 0xFF),
-      static_cast<std::uint8_t>((sampleRate >> 8) & 0xFF),
-      static_cast<std::uint8_t>((sampleRate >> 16) & 0xFF),
-      static_cast<std::uint8_t>((sampleRate >> 24) & 0xFF),
-      0U,
-      0U,
-      0U,
-    };
-
-    codecContext->extradata = static_cast<std::uint8_t *>(av_mallocz(opusHead.size() + AV_INPUT_BUFFER_PADDING_SIZE));
-    if (codecContext->extradata == nullptr) {
-      return false;
-    }
-
-    codecContext->extradata_size = static_cast<int>(opusHead.size());
-    std::memcpy(codecContext->extradata, opusHead.data(), opusHead.size());
-    return true;
-  }
-
   int on_video_setup(int videoFormat, int width, int height, int redrawRate, MoonlightCallbackContext *context, int drFlags) {  // NOSONAR(cpp:S5008) moonlight-common-c requires a void* render context callback.
     auto *backend = static_cast<streaming::FfmpegStreamBackend *>(context);
     if (backend == nullptr) {
@@ -301,38 +241,56 @@ namespace {
     }
   }
 
-  int on_audio_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATION opusConfig, MoonlightCallbackContext *context, int arFlags) {  // NOSONAR(cpp:S5008,cpp:S995) moonlight-common-c requires this callback signature.
+  /**
+   * @brief Prepare the active Opus decoder from the negotiated multistream configuration.
+   * @param audioConfiguration Negotiated Moonlight layout.
+   * @param opusConfig Negotiated Opus channels and mappings.
+   * @param context Stream backend supplied by Moonlight.
+   * @return Zero when playback can start or has been disabled.
+   */
+  int on_audio_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATION opusConfig, MoonlightCallbackContext *context, int) {  // NOSONAR(cpp:S5008,cpp:S995) moonlight-common-c requires this callback signature.
     auto *backend = static_cast<streaming::FfmpegStreamBackend *>(context);
     if (backend == nullptr) {
       return -1;
     }
 
-    active_audio_backend() = backend;
-    return backend->initialize_audio_decoder(audioConfiguration, opusConfig, arFlags);
+    const int result = backend->audio_player().initialize(audioConfiguration, opusConfig);
+    if (result == 0) {
+      active_audio_backend() = backend;
+    }
+    return result;
   }
 
+  /** @brief Start the active SDL audio queue. */
   void on_audio_start() {
     if (streaming::FfmpegStreamBackend *backend = active_audio_backend(); backend != nullptr) {
-      backend->start_audio_playback();
+      backend->audio_player().start();
     }
   }
 
+  /** @brief Pause the active SDL audio queue. */
   void on_audio_stop() {
     if (streaming::FfmpegStreamBackend *backend = active_audio_backend(); backend != nullptr) {
-      backend->stop_audio_playback();
+      backend->audio_player().stop();
     }
   }
 
+  /** @brief Release the active audio player after the transport audio thread exits. */
   void on_audio_cleanup() {
     if (streaming::FfmpegStreamBackend *backend = active_audio_backend(); backend != nullptr) {
-      backend->cleanup_audio_decoder();
+      backend->audio_player().cleanup();
       active_audio_backend() = nullptr;
     }
   }
 
+  /**
+   * @brief Decode and queue the next Moonlight Opus payload.
+   * @param sampleData Encoded payload, or null for a lost packet.
+   * @param sampleLength Payload length in bytes.
+   */
   void on_audio_decode_and_play_sample(char *sampleData, int sampleLength) {  // NOSONAR(cpp:S995) moonlight-common-c supplies mutable sample data by callback signature.
     if (streaming::FfmpegStreamBackend *backend = active_audio_backend(); backend != nullptr) {
-      backend->decode_and_play_audio_sample(sampleData, sampleLength);
+      backend->audio_player().decode_and_queue(sampleData, sampleLength);
     }
   }
 
@@ -604,14 +562,14 @@ namespace streaming {
       audioCallbacks->cleanup = on_audio_cleanup;
       audioCallbacks->decodeAndPlaySample = on_audio_decode_and_play_sample;
       audioCallbacks->capabilities = CAPABILITY_SLOW_OPUS_DECODER;
-      if (!audioPlaybackEnabled_.load()) {
+      if (!audio_.enabled()) {
         audioCallbacks->capabilities |= CAPABILITY_DIRECT_SUBMIT;
       }
     }
   }
 
-  void FfmpegStreamBackend::set_audio_playback_enabled(bool enabled) {
-    audioPlaybackEnabled_.store(enabled);
+  AudioPlayer &FfmpegStreamBackend::audio_player() {
+    return audio_;
   }
 
   void FfmpegStreamBackend::set_gpu_presentation_enabled(bool enabled) {
@@ -619,7 +577,7 @@ namespace streaming {
   }
 
   void FfmpegStreamBackend::shutdown() {
-    cleanup_audio_decoder();
+    audio_.cleanup();
     cleanup_video_decoder();
     if (screenshot_.thread != nullptr) {
       SDL_WaitThread(screenshot_.thread, nullptr);
@@ -700,13 +658,9 @@ namespace streaming {
   }
 
   std::string FfmpegStreamBackend::build_overlay_status_line() const {
-    std::string audioState = "audio decode disabled";
-    if (audioPlaybackEnabled_.load()) {
-      audioState = audio_.deviceId != 0 ? std::to_string(SDL_GetQueuedAudioSize(audio_.deviceId)) + " queued audio bytes" : "audio idle";
-    }
     return std::string("Video units: ") + std::to_string(video_.submittedDecodeUnitCount.load()) + " submitted / " + std::to_string(video_.decodedFrameCount.load()) + " decoded / " +
            std::to_string(video_.droppedDecodeUnitCount.load()) + " dropped | frame " + std::to_string(video_.lastDecodeFrameNumber.load()) + " queue " + std::to_string(video_.lastDecodeQueueUs.load() / 1000U) +
-           " ms / age " + std::to_string(video_.lastReceiveAgeUs.load() / 1000U) + " ms | " + audioState;
+           " ms / age " + std::to_string(video_.lastReceiveAgeUs.load() / 1000U) + " ms | " + audio_.describe_playback();
   }
 
   bool FfmpegStreamBackend::render_latest_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool allowDirectFramebuffer) {
@@ -1331,259 +1285,6 @@ namespace streaming {
     }
 
     return DR_OK;
-  }
-
-  int FfmpegStreamBackend::initialize_audio_decoder(int audioConfiguration, const OPUS_MULTISTREAM_CONFIGURATION *opusConfig, int arFlags) {
-    (void) arFlags;
-
-    cleanup_audio_decoder();
-
-    if (!audioPlaybackEnabled_.load()) {
-      logging::info("stream", "Xbox audio playback is disabled; dropping streamed audio before Opus decode");
-      return 0;
-    }
-
-    if (opusConfig == nullptr) {
-      logging::error("stream", "Moonlight did not provide an Opus configuration for audio startup");
-      return -1;
-    }
-
-    const int channelCount = CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(audioConfiguration);
-    if (channelCount <= 0 || channelCount > 2) {
-      logging::error("stream", "The FFmpeg backend currently supports mono or stereo audio only");
-      return -1;
-    }
-
-    SDL_AudioSpec desiredSpec {};
-    desiredSpec.freq = opusConfig->sampleRate > 0 ? opusConfig->sampleRate : 48000;
-    desiredSpec.format = AUDIO_S16SYS;
-    desiredSpec.channels = static_cast<Uint8>(channelCount);
-    desiredSpec.samples = 1024;
-    desiredSpec.callback = nullptr;
-
-    if ((SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) == 0 && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-      logging::error("stream", std::string("SDL_InitSubSystem(SDL_INIT_AUDIO) failed for streaming playback: ") + SDL_GetError());
-      cleanup_audio_decoder();
-      return -1;
-    }
-
-    audio_.deviceId = SDL_OpenAudioDevice(nullptr, 0, &desiredSpec, &audio_.obtainedSpec, 0);
-    if (audio_.deviceId == 0) {
-      logging::error("stream", std::string("SDL_OpenAudioDevice failed for streaming playback: ") + SDL_GetError());
-      cleanup_audio_decoder();
-      return -1;
-    }
-
-    const AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_OPUS);
-    if (codec == nullptr) {
-      logging::error("stream", "FFmpeg did not provide an Opus decoder");
-      cleanup_audio_decoder();
-      return -1;
-    }
-
-    audio_.codecContext = avcodec_alloc_context3(codec);
-    audio_.decodedFrame = av_frame_alloc();
-    audio_.packet = av_packet_alloc();
-    if (audio_.codecContext == nullptr || audio_.decodedFrame == nullptr || audio_.packet == nullptr) {
-      logging::error("stream", "Failed to allocate FFmpeg audio decoder resources");
-      cleanup_audio_decoder();
-      return -1;
-    }
-
-    audio_.codecContext->sample_rate = desiredSpec.freq;
-    av_channel_layout_default(&audio_.codecContext->ch_layout, channelCount);
-    if (!configure_opus_extradata(channelCount, desiredSpec.freq, audio_.codecContext)) {
-      logging::error("stream", "Failed to allocate Opus decoder extradata for FFmpeg");
-      cleanup_audio_decoder();
-      return -1;
-    }
-
-    if (const int openResult = avcodec_open2(audio_.codecContext, codec, nullptr); openResult < 0) {
-      logging::error("stream", std::string("avcodec_open2 failed for Opus: ") + describe_ffmpeg_error(openResult));
-      cleanup_audio_decoder();
-      return openResult;
-    }
-
-    return 0;
-  }
-
-  void FfmpegStreamBackend::start_audio_playback() {
-    if (audio_.deviceId != 0) {
-      SDL_ClearQueuedAudio(audio_.deviceId);
-      SDL_PauseAudioDevice(audio_.deviceId, 0);
-      audio_.deviceStarted.store(true);
-    }
-  }
-
-  void FfmpegStreamBackend::stop_audio_playback() {
-    if (audio_.deviceId != 0) {
-      SDL_PauseAudioDevice(audio_.deviceId, 1);
-      audio_.deviceStarted.store(false);
-    }
-  }
-
-  void FfmpegStreamBackend::cleanup_audio_decoder() {
-    stop_audio_playback();
-
-    if (audio_.deviceId != 0) {
-      SDL_ClearQueuedAudio(audio_.deviceId);
-      SDL_CloseAudioDevice(audio_.deviceId);
-      audio_.deviceId = 0;
-    }
-
-    if (audio_.packet != nullptr) {
-      av_packet_free(&audio_.packet);
-    }
-    if (audio_.decodedFrame != nullptr) {
-      av_frame_free(&audio_.decodedFrame);
-    }
-    if (audio_.codecContext != nullptr) {
-      avcodec_free_context(&audio_.codecContext);
-    }
-    if (audio_.resampleContext != nullptr) {
-      swr_free(&audio_.resampleContext);
-    }
-
-    audio_.obtainedSpec = SDL_AudioSpec {};
-    audio_.outputBuffer.clear();
-    audio_.resampleInputSampleRate = 0;
-    audio_.resampleInputSampleFormat = -1;
-    audio_.resampleInputChannelCount = 0;
-    audio_.queuedAudioBytes.store(0);
-  }
-
-  bool FfmpegStreamBackend::ensure_audio_resampler() {
-    if (audio_.decodedFrame == nullptr) {
-      return false;
-    }
-
-    const int inputSampleRate = audio_.decodedFrame->sample_rate;
-    const int inputSampleFormat = audio_.decodedFrame->format;
-    const int inputChannelCount = audio_.decodedFrame->ch_layout.nb_channels;
-    if (const bool needsReconfigure = audio_.resampleContext == nullptr || audio_.resampleInputSampleRate != inputSampleRate || audio_.resampleInputSampleFormat != inputSampleFormat || audio_.resampleInputChannelCount != inputChannelCount; !needsReconfigure) {
-      return true;
-    }
-
-    if (audio_.resampleContext != nullptr) {
-      swr_free(&audio_.resampleContext);
-    }
-
-    AVChannelLayout outputLayout {};
-    av_channel_layout_default(&outputLayout, audio_.obtainedSpec.channels);
-    const int resampleConfigResult = swr_alloc_set_opts2(
-      &audio_.resampleContext,
-      &outputLayout,
-      AV_SAMPLE_FMT_S16,
-      audio_.obtainedSpec.freq,
-      &audio_.decodedFrame->ch_layout,
-      static_cast<AVSampleFormat>(audio_.decodedFrame->format),
-      audio_.decodedFrame->sample_rate,
-      0,
-      nullptr
-    );
-    av_channel_layout_uninit(&outputLayout);
-    if (resampleConfigResult < 0) {
-      logging::warn("stream", std::string("swr_alloc_set_opts2 failed for Opus: ") + describe_ffmpeg_error(resampleConfigResult));
-      return false;
-    }
-    if (audio_.resampleContext == nullptr || swr_init(audio_.resampleContext) < 0) {
-      logging::warn("stream", "swr_init failed for the streaming audio resampler");
-      return false;
-    }
-
-    audio_.resampleInputSampleRate = inputSampleRate;
-    audio_.resampleInputSampleFormat = inputSampleFormat;
-    audio_.resampleInputChannelCount = inputChannelCount;
-    return true;
-  }
-
-  void FfmpegStreamBackend::decode_and_play_audio_sample(const char *sampleData, int sampleLength) {
-    if (!audioPlaybackEnabled_.load()) {
-      return;
-    }
-
-    if (audio_.codecContext == nullptr || audio_.packet == nullptr || audio_.decodedFrame == nullptr || audio_.deviceId == 0) {
-      return;
-    }
-
-    if (sampleData == nullptr || sampleLength <= 0) {
-      return;
-    }
-
-    if (const int packetResult = av_new_packet(audio_.packet, sampleLength); packetResult < 0) {
-      logging::warn("stream", std::string("av_new_packet failed for audio decode: ") + describe_ffmpeg_error(packetResult));
-      return;
-    }
-
-    std::memcpy(audio_.packet->data, sampleData, static_cast<std::size_t>(sampleLength));
-    audio_.packet->size = sampleLength;
-
-    const int sendResult = avcodec_send_packet(audio_.codecContext, audio_.packet);
-    av_packet_unref(audio_.packet);
-    if (sendResult < 0 && sendResult != AVERROR(EAGAIN)) {
-      logging::warn("stream", std::string("avcodec_send_packet failed for Opus: ") + describe_ffmpeg_error(sendResult));
-      return;
-    }
-
-    while (true) {
-      const int receiveResult = avcodec_receive_frame(audio_.codecContext, audio_.decodedFrame);
-      if (receiveResult == AVERROR(EAGAIN) || receiveResult == AVERROR_EOF) {
-        break;
-      }
-      if (receiveResult < 0) {
-        logging::warn("stream", std::string("avcodec_receive_frame failed for Opus: ") + describe_ffmpeg_error(receiveResult));
-        return;
-      }
-
-      if (!ensure_audio_resampler()) {
-        av_frame_unref(audio_.decodedFrame);
-        return;
-      }
-
-      const int outputSamples = av_rescale_rnd(
-        swr_get_delay(audio_.resampleContext, audio_.decodedFrame->sample_rate) + audio_.decodedFrame->nb_samples,
-        audio_.obtainedSpec.freq,
-        audio_.decodedFrame->sample_rate,
-        AV_ROUND_UP
-      );
-      const int outputBufferSize = av_samples_get_buffer_size(
-        nullptr,
-        audio_.obtainedSpec.channels,
-        outputSamples,
-        AV_SAMPLE_FMT_S16,
-        1
-      );
-      if (outputBufferSize <= 0) {
-        logging::warn("stream", "av_samples_get_buffer_size failed for decoded audio output");
-        av_frame_unref(audio_.decodedFrame);
-        return;
-      }
-
-      audio_.outputBuffer.resize(static_cast<std::size_t>(outputBufferSize));
-      std::array<std::uint8_t *, 1> outputData {audio_.outputBuffer.data()};
-      const int convertedSamples = swr_convert(
-        audio_.resampleContext,
-        outputData.data(),
-        outputSamples,
-        const_cast<const std::uint8_t **>(audio_.decodedFrame->extended_data),
-        audio_.decodedFrame->nb_samples
-      );
-      if (convertedSamples < 0) {
-        logging::warn("stream", std::string("swr_convert failed for Opus: ") + describe_ffmpeg_error(convertedSamples));
-        av_frame_unref(audio_.decodedFrame);
-        return;
-      }
-
-      const int convertedBytes = convertedSamples * audio_.obtainedSpec.channels * static_cast<int>(sizeof(std::int16_t));
-      if (const Uint32 maxQueuedBytes = (audio_bytes_per_second(audio_.obtainedSpec) * STREAM_OVERLAY_AUDIO_QUEUE_LIMIT_MS) / 1000U; SDL_GetQueuedAudioSize(audio_.deviceId) > maxQueuedBytes) {
-        SDL_ClearQueuedAudio(audio_.deviceId);
-      }
-      if (convertedBytes > 0 && SDL_QueueAudio(audio_.deviceId, audio_.outputBuffer.data(), static_cast<Uint32>(convertedBytes)) == 0) {
-        audio_.queuedAudioBytes.fetch_add(static_cast<std::uint64_t>(convertedBytes));
-      }
-
-      av_frame_unref(audio_.decodedFrame);
-    }
   }
 
 }  // namespace streaming
