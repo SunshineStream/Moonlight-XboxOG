@@ -118,14 +118,14 @@ namespace streaming {
     return 0;
   }
 
-  void AudioPlayer::start() {
+  void AudioPlayer::start() const {
     if (device_ != 0) {
       SDL_ClearQueuedAudio(device_);
       SDL_PauseAudioDevice(device_, 0);
     }
   }
 
-  void AudioPlayer::stop() {
+  void AudioPlayer::stop() const {
     if (device_ != 0) {
       SDL_PauseAudioDevice(device_, 1);
     }
@@ -161,8 +161,8 @@ namespace streaming {
     int result = swr_alloc_set_opts2(&resampler_, &stereo, AV_SAMPLE_FMT_S16, output_.freq, &frame_->ch_layout, static_cast<AVSampleFormat>(frame_->format), frame_->sample_rate, 0, nullptr);
     if (result >= 0 && mode_ == AudioMode::mono) {
       // Play the mean of left and right on both outputs of the stereo device.
-      constexpr double dualMono[] {0.5, 0.5, 0.5, 0.5};
-      result = swr_set_matrix(resampler_, dualMono, OUTPUT_CHANNELS);
+      constexpr std::array dualMono {0.5, 0.5, 0.5, 0.5};
+      result = swr_set_matrix(resampler_, dualMono.data(), OUTPUT_CHANNELS);
     }
     if (result >= 0) {
       result = swr_init(resampler_);
@@ -196,8 +196,7 @@ namespace streaming {
     }
 
     const Uint32 bytes = static_cast<Uint32>(converted) * bytesPerFrame;
-    const Uint32 maxQueuedBytes = output_.freq * bytesPerFrame * QUEUE_LIMIT_MS / 1000U;
-    if (pending_bytes() + bytes > maxQueuedBytes) {
+    if (const Uint32 maxQueuedBytes = output_.freq * bytesPerFrame * QUEUE_LIMIT_MS / 1000U; pending_bytes() + bytes > maxQueuedBytes) {
       SDL_ClearQueuedAudio(device_);
     }
     if (SDL_QueueAudio(device_, output, bytes) < 0) {

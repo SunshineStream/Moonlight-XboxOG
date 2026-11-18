@@ -1538,8 +1538,8 @@ namespace {
       state.settings.dirty = false;
       EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
       EXPECT_TRUE(state.settings.dirty);
-      EXPECT_TRUE(state.settings.playAudioOnXbox);
-      EXPECT_EQ(state.settings.audioMode, modes[i]);
+      EXPECT_TRUE(state.settings.audio.playOnXbox);
+      EXPECT_EQ(state.settings.audio.mode, modes[i]);
       ASSERT_NE(state.detailMenu.selected_item(), nullptr);
       EXPECT_EQ(state.detailMenu.selected_item()->id, "cycle-audio-mode");
       EXPECT_EQ(state.detailMenu.selected_item()->label, labels[i]);
@@ -1557,8 +1557,8 @@ namespace {
     EXPECT_EQ(state.detailMenu.selected_item()->id, "toggle-play-audio-on-pc");
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Play Audio on PC: Off");
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
-    EXPECT_TRUE(state.settings.playAudioOnPc);
-    EXPECT_TRUE(state.settings.playAudioOnXbox);
+    EXPECT_TRUE(state.settings.audio.playOnPc);
+    EXPECT_TRUE(state.settings.audio.playOnXbox);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Play Audio on PC: On");
 
     ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-play-audio-on-xbox"));
@@ -1566,8 +1566,8 @@ namespace {
     const auto update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(update.navigation.activatedItemId, "toggle-play-audio-on-xbox");
     EXPECT_TRUE(update.persistence.settingsChanged);
-    EXPECT_TRUE(state.settings.playAudioOnPc);
-    EXPECT_FALSE(state.settings.playAudioOnXbox);
+    EXPECT_TRUE(state.settings.audio.playOnPc);
+    EXPECT_FALSE(state.settings.audio.playOnXbox);
     EXPECT_EQ(state.settings.streamBitrateKbps, 1500);
     EXPECT_EQ(state.shell.statusMessage, "Play audio on Xbox disabled");
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);

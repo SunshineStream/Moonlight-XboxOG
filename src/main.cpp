@@ -52,10 +52,10 @@ namespace {
     state.settings.streamFramerate = settings.streamFramerate;
     state.settings.streamBitrateKbps = settings.streamBitrateKbps;
     state.settings.presentation.gpuPresentation = settings.gpuPresentation;
-    state.settings.playAudioOnPc = settings.playAudioOnPc;
+    state.settings.audio.playOnPc = settings.playAudioOnPc;
     state.settings.presentation.showPerformanceStats = settings.showPerformanceStats;
-    state.settings.playAudioOnXbox = settings.playAudioOnXbox;
-    state.settings.audioMode = settings.audioMode;
+    state.settings.audio.playOnXbox = settings.playAudioOnXbox;
+    state.settings.audio.mode = settings.audioMode;
     state.settings.controls.screenshotDirectory = settings.screenshotDirectory;
     state.settings.controls.keyboardDockTop = settings.keyboardDockTop;
     state.settings.dirty = false;

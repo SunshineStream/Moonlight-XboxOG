@@ -621,19 +621,19 @@ namespace {
         return {
           {
             "toggle-play-audio-on-pc",
-            std::string("Play Audio on PC: ") + (state.settings.playAudioOnPc ? "On" : "Off"),
+            std::string("Play Audio on PC: ") + (state.settings.audio.playOnPc ? "On" : "Off"),
             "Toggle whether the host PC should continue local audio playback while also streaming audio to this Xbox client.",
             true,
           },
           {
             "toggle-play-audio-on-xbox",
-            std::string("Play Audio on Xbox: ") + (state.settings.playAudioOnXbox ? "On" : "Off"),
+            std::string("Play Audio on Xbox: ") + (state.settings.audio.playOnXbox ? "On" : "Off"),
             "Toggle local audio playback on the Xbox. Disable this to skip Opus decode work when video latency matters more than sound.",
             true,
           },
           {
             "cycle-audio-mode",
-            std::string("Audio Mode: ") + streaming::audio_mode_label(state.settings.audioMode),
+            std::string("Audio Mode: ") + streaming::audio_mode_label(state.settings.audio.mode),
             "Choose separate left and right channels or the same mono mix through both speakers.",
             true,
           },
@@ -1913,8 +1913,6 @@ namespace app {
     state.settings.logViewerPlacement = LogViewerPlacement::full;
     state.settings.loggingLevel = logging::LogLevel::none;
     state.settings.xemuConsoleLoggingLevel = logging::LogLevel::none;
-    state.settings.playAudioOnPc = false;
-    state.settings.playAudioOnXbox = true;
     state.settings.controls.screenshotDirectory.clear();
     state.settings.controls.keyboardDockTop = false;
     state.settings.dirty = false;
@@ -2552,26 +2550,26 @@ namespace app {
       return;
     }
     if (detailUpdate.activatedItemId == "toggle-play-audio-on-pc") {
-      state.settings.playAudioOnPc = !state.settings.playAudioOnPc;
+      state.settings.audio.playOnPc = !state.settings.audio.playOnPc;
       state.settings.dirty = true;
       update->persistence.settingsChanged = true;
-      state.shell.statusMessage = std::string("Play audio on PC ") + (state.settings.playAudioOnPc ? "enabled" : "disabled");
+      state.shell.statusMessage = std::string("Play audio on PC ") + (state.settings.audio.playOnPc ? "enabled" : "disabled");
       rebuild_menu(state, "toggle-play-audio-on-pc");
       return;
     }
     if (detailUpdate.activatedItemId == "toggle-play-audio-on-xbox") {
-      state.settings.playAudioOnXbox = !state.settings.playAudioOnXbox;
+      state.settings.audio.playOnXbox = !state.settings.audio.playOnXbox;
       state.settings.dirty = true;
       update->persistence.settingsChanged = true;
-      state.shell.statusMessage = std::string("Play audio on Xbox ") + (state.settings.playAudioOnXbox ? "enabled" : "disabled");
+      state.shell.statusMessage = std::string("Play audio on Xbox ") + (state.settings.audio.playOnXbox ? "enabled" : "disabled");
       rebuild_menu(state, "toggle-play-audio-on-xbox");
       return;
     }
     if (detailUpdate.activatedItemId == "cycle-audio-mode") {
-      state.settings.audioMode = streaming::next_audio_mode(state.settings.audioMode);
+      state.settings.audio.mode = streaming::next_audio_mode(state.settings.audio.mode);
       state.settings.dirty = true;
       update->persistence.settingsChanged = true;
-      state.shell.statusMessage = std::string("Audio mode set to ") + streaming::audio_mode_label(state.settings.audioMode);
+      state.shell.statusMessage = std::string("Audio mode set to ") + streaming::audio_mode_label(state.settings.audio.mode);
       rebuild_menu(state, "cycle-audio-mode");
       return;
     }

@@ -69,7 +69,8 @@ verifies the channel routing. The probe uses local Opus packets and can run with
 ## 5.1 channel check
 
 Generate the host-side test files from the repository root with Python and FFmpeg on your path.
-Pass `--ffmpeg` with the executable path if needed.
+Choose an output directory under the current directory. Use a fresh directory for each run to
+preserve any existing test files.
 
 ```bash
 python experiments/generate_surround_channel_check.py cmake-build-experiments/audio

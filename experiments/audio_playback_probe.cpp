@@ -20,10 +20,14 @@
 
 // The staged SDL library references Moonlight's USB hooks even when only audio is initialized.
 /** @brief Satisfy the SDL joystick initializer's USB hook for this input-free probe. */
-extern "C" void moonlight_usb_input_initialize() {}
+extern "C" void moonlight_usb_input_initialize() {
+  // This probe initializes no input devices.
+}
 
 /** @brief Satisfy the SDL event driver's USB hook for this input-free probe. */
-extern "C" void moonlight_usb_input_pump() {}
+extern "C" void moonlight_usb_input_pump() {
+  // This probe has no input events to pump.
+}
 
 namespace {
 
@@ -106,13 +110,12 @@ namespace {
    * @param limit Maximum queued bytes before continuing.
    * @return True if the queue reached the limit before the timeout.
    */
-  bool wait_for_queue(streaming::AudioPlayer &player, Uint32 limit) {
+  bool wait_for_queue(const streaming::AudioPlayer &player, Uint32 limit) {
     const Uint32 deadline = SDL_GetTicks() + 2000;
     while (player.pending_bytes() > limit && !SDL_TICKS_PASSED(SDL_GetTicks(), deadline)) {
       SDL_Delay(10);
     }
-    const auto pending = player.pending_bytes();
-    if (pending > limit) {
+    if (const auto pending = player.pending_bytes(); pending > limit) {
       DbgPrint("AUDIO PROBE QUEUE TIMEOUT: %lu bytes remaining\n", static_cast<unsigned long>(pending));
       return false;
     }

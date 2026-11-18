@@ -60,10 +60,10 @@ namespace streaming {
     int initialize(int audioConfiguration, const _OPUS_MULTISTREAM_CONFIGURATION *opus);
 
     /** @brief Start SDL audio playback with an empty queue. */
-    void start();
+    void start() const;
 
     /** @brief Pause playback. */
-    void stop();
+    void stop() const;
 
     /** @brief Release playback and codec resources, retaining the configured preferences. */
     void cleanup();

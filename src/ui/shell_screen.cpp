@@ -2506,13 +2506,13 @@ namespace {
       state.settings.preferredVideoModeSet,
       state.settings.streamFramerate,
       state.settings.streamBitrateKbps,
-      state.settings.playAudioOnPc,
+      state.settings.audio.playOnPc,
       state.settings.presentation.showPerformanceStats,
-      state.settings.playAudioOnXbox,
+      state.settings.audio.playOnXbox,
       state.settings.controls.screenshotDirectory,
       state.settings.controls.keyboardDockTop,
       state.settings.presentation.gpuPresentation,
-      state.settings.audioMode,
+      state.settings.audio.mode,
     };
   }
 

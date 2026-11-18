@@ -13,6 +13,8 @@ GAP_FRAMES = SAMPLE_RATE // 2
 FADE_FRAMES = SAMPLE_RATE // 100
 # FFmpeg's 5.1(side) order is FL, FR, FC, LFE, SL, SR.
 CHANNEL_FREQUENCIES = (500, 500, 500, 80, 500, 500)
+WAV_NAME = "surround-channel-check.wav"
+SPDIF_NAME = "surround-channel-check.spdif"
 
 
 def channel_check_pcm() -> bytes:
@@ -44,23 +46,32 @@ def channel_check_pcm() -> bytes:
 
 
 def main() -> None:
-    """Write both test files to the requested output directory."""
+    """Write both test files under the current directory using FFmpeg on PATH."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("output_directory", type=Path)
-    parser.add_argument("--ffmpeg", default="ffmpeg", help="FFmpeg executable to run")
+    parser.add_argument("output_directory", type=Path, help="Output directory within the current directory")
     args = parser.parse_args()
 
-    args.output_directory.mkdir(parents=True, exist_ok=True)
-    wav = args.output_directory / "surround-channel-check.wav"
-    spdif = args.output_directory / "surround-channel-check.spdif"
+    base_directory = Path.cwd().resolve()
+    output_directory = args.output_directory.resolve()
+    if not output_directory.is_relative_to(base_directory):
+        parser.error("output directory must be within the current directory")
+
+    output_directory.mkdir(parents=True, exist_ok=True)
+    wav = output_directory / WAV_NAME
+    spdif = output_directory / SPDIF_NAME
+    for output in (wav, spdif):
+        if output.exists() or output.is_symlink():
+            parser.error(f"output already exists: {output}")
+
     subprocess.run(
         [
-            args.ffmpeg,
-            "-hide_banner", "-loglevel", "error", "-y",
+            "ffmpeg",
+            "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
             "-f", "s16le", "-ar", str(SAMPLE_RATE), "-channel_layout", "5.1(side)", "-i", "pipe:0",
-            "-map", "0:a:0", "-c:a", "pcm_s16le", str(wav),
-            "-map", "0:a:0", "-c:a", "ac3_fixed", "-b:a", "448k", "-f", "spdif", str(spdif),
+            "-map", "0:a:0", "-c:a", "pcm_s16le", WAV_NAME,
+            "-map", "0:a:0", "-c:a", "ac3_fixed", "-b:a", "448k", "-f", "spdif", SPDIF_NAME,
         ],
+        cwd=output_directory,
         input=channel_check_pcm(),
         check=True,
     )
