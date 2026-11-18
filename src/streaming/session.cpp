@@ -1398,7 +1398,10 @@ namespace {
   }
 
   /**
-   * @brief Start transport, retrying with standard codec negotiation and RTSP discovery when applicable.
+   * @brief Start transport with one retry per applicable RTSP fallback.
+   *
+   * A failed preferred MPEG-2 handshake can retry with standard codec negotiation.
+   *
    * @param attempt Stream startup state and UI resources.
    * @param videoCodec User's requested codec selection.
    * @param rtspFallbackAttempted Receives whether default RTSP discovery was attempted.
@@ -1411,8 +1414,7 @@ namespace {
     if (!run_stream_start_attempt(attempt)) {
       return false;
     }
-    auto &videoFormats = attempt.startContext.streamConfiguration.supportedVideoFormats;
-    if (videoCodec == app::VideoCodecSelection::preferMpeg2 && videoFormats == VIDEO_FORMAT_MPEG2 && can_retry_rtsp_handshake(attempt.connectionState)) {
+    if (auto &videoFormats = attempt.startContext.streamConfiguration.supportedVideoFormats; videoCodec == app::VideoCodecSelection::preferMpeg2 && videoFormats == VIDEO_FORMAT_MPEG2 && can_retry_rtsp_handshake(attempt.connectionState)) {
       logging::warn("stream", "MPEG-2 handshake failed; retrying with standard codec negotiation");
       attempt.resources.mediaBackend.shutdown();
       videoFormats = streaming::supported_video_formats(app::VideoCodecSelection::autoDetect, attempt.startContext.serverInformation.serverCodecModeSupport);
