@@ -401,7 +401,7 @@ namespace {
    */
   TEST(ShellViewTest, ShowsSelectedCodecInDisplaySettings) {
     auto state = app::create_initial_state();
-    state.settings.videoCodec = app::VideoCodecSelection::mpeg2;
+    state.settings.video.codec = app::VideoCodecSelection::mpeg2;
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);

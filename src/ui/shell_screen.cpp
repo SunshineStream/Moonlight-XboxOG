@@ -2541,15 +2541,15 @@ namespace {
       state.settings.preferredVideoModeSet,
       state.settings.streamFramerate,
       state.settings.streamBitrateKbps,
-      state.settings.videoCodec,
+      state.settings.video.codec,
       state.settings.audio.playOnPc,
-      state.settings.presentation.showPerformanceStats,
+      state.settings.video.showPerformanceStats,
       state.settings.audio.playOnXbox,
       state.settings.controls.screenshotDirectory,
       state.settings.controls.keyboardDockTop,
-      state.settings.presentation.gpuPresentation,
+      state.settings.video.gpuPresentation,
       state.settings.audio.mode,
-      state.settings.presentation.gpuBufferCount,
+      state.settings.video.gpuBufferCount,
     };
   }
 

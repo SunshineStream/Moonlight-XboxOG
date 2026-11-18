@@ -814,7 +814,7 @@ namespace {
     resolved.videoMode = select_effective_stream_video_mode(fallbackVideoMode, settings);
     resolved.fps = select_stream_fps(settings);
     resolved.bitrateKbps = select_stream_bitrate_kbps(settings);
-    resolved.videoCodec = settings.videoCodec;
+    resolved.videoCodec = settings.video.codec;
 
     return resolved;
   }
@@ -1630,7 +1630,7 @@ namespace streaming {
       resources.pendingVideoMode = streamPresentationVideoMode;
     }
     resources.startupTick = sessionStarted;
-    resources.statisticsEnabled = settings.presentation.showPerformanceStats;
+    resources.statisticsEnabled = settings.video.showPerformanceStats;
     std::string initializationError;
     const bool fontsReady = initialize_stream_fonts(startupVideoMode, resources, initializationError);
 #ifdef NXDK
@@ -1716,10 +1716,10 @@ namespace streaming {
     );
     logging::info(
       "stream",
-      std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps | decoder=" + describe_video_codec_selection(settings.videoCodec) + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
+      std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps | decoder=" + describe_video_codec_selection(settings.video.codec) + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
     );
     resources.mediaBackend.audio_player().configure(settings.audio.mode, settings.audio.playOnXbox);
-    resources.mediaBackend.presentation().configure_gpu_presentation(settings.presentation.gpuPresentation, settings.presentation.gpuBufferCount);
+    resources.mediaBackend.presentation().configure_gpu_presentation(settings.video.gpuPresentation, settings.video.gpuBufferCount);
     logging::info("stream", std::string("Xbox audio mode: ") + (settings.audio.playOnXbox ? audio_mode_label(settings.audio.mode) : "Disabled"));
     logging::debug(
       "stream",
@@ -1739,7 +1739,7 @@ namespace streaming {
     startContext.connectionCallbacks.logMessage = on_log_message;
 
     bool rtspFallbackAttempted = false;
-    if (const StreamStartAttemptContext startAttempt {host, app, startContext, connectionState, resources, report.message}; !run_stream_start_with_rtsp_fallback(startAttempt, settings.videoCodec, &rtspFallbackAttempted)) {
+    if (const StreamStartAttemptContext startAttempt {host, app, startContext, connectionState, resources, report.message}; !run_stream_start_with_rtsp_fallback(startAttempt, settings.video.codec, &rtspFallbackAttempted)) {
       return false;
     }
 

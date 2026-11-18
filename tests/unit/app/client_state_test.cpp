@@ -218,8 +218,8 @@ namespace {
     EXPECT_EQ(state.settings.loggingLevel, logging::LogLevel::none);
     EXPECT_EQ(state.settings.streamFramerate, 60);
     EXPECT_EQ(state.settings.streamBitrateKbps, 3000);
-    EXPECT_EQ(state.settings.videoCodec, app::VideoCodecSelection::preferMpeg2);
-    EXPECT_TRUE(state.settings.presentation.gpuPresentation);
+    EXPECT_EQ(state.settings.video.codec, app::VideoCodecSelection::preferMpeg2);
+    EXPECT_TRUE(state.settings.video.gpuPresentation);
   }
 
   TEST(ClientStateTest, ReplacesHostsFromPersistenceWithoutMarkingThemDirty) {
@@ -1512,16 +1512,19 @@ namespace {
     EXPECT_FALSE(state.detailMenu.select_item_by_id("cycle-audio-mode"));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-show-performance-stats"));
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
-    EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
+    EXPECT_TRUE(state.settings.video.showPerformanceStats);
     EXPECT_EQ(state.settings.streamBitrateKbps, 1500);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Performance Stats: On");
   }
 
   /**
-   * @brief Codec selection cycles through standard Auto and fixed codecs, then returns to the MPEG-2 preference.
+   * @brief Cycle codec choices independently of the bitrate, presenter, and statistics.
    */
   TEST(ClientStateTest, DisplaySettingsCanForceVideoCodec) {
     app::ClientState state = app::create_initial_state();
+    state.settings.streamBitrateKbps = 4500;
+    state.settings.video.gpuPresentation = true;
+    state.settings.video.showPerformanceStats = true;
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-video-codec"));
     const std::array<app::VideoCodecSelection, 5> choices {
@@ -1537,14 +1540,17 @@ namespace {
       const app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
       EXPECT_EQ(update.navigation.activatedItemId, "cycle-video-codec");
       EXPECT_TRUE(update.persistence.settingsChanged);
-      EXPECT_EQ(state.settings.videoCodec, choices[index]);
+      EXPECT_EQ(state.settings.video.codec, choices[index]);
+      EXPECT_EQ(state.settings.streamBitrateKbps, 4500);
+      EXPECT_TRUE(state.settings.video.gpuPresentation);
+      EXPECT_TRUE(state.settings.video.showPerformanceStats);
       EXPECT_EQ(state.shell.statusMessage, std::string("Video codec set to ") + labels[index]);
       ASSERT_NE(state.detailMenu.selected_item(), nullptr);
       EXPECT_EQ(state.detailMenu.selected_item()->label, std::string("Video Codec: ") + labels[index]);
     }
-    state.settings.videoCodec = static_cast<app::VideoCodecSelection>(-1);
+    state.settings.video.codec = static_cast<app::VideoCodecSelection>(-1);
     app::handle_command(state, input::UiCommand::activate);
-    EXPECT_EQ(state.settings.videoCodec, app::VideoCodecSelection::preferMpeg2);
+    EXPECT_EQ(state.settings.video.codec, app::VideoCodecSelection::preferMpeg2);
   }
 
   /** @brief Switch from the GPU default to software and back while preserving bitrate, codec, and statistics. */
@@ -1552,23 +1558,23 @@ namespace {
     auto state = app::create_initial_state();
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-presentation"));
-    ASSERT_TRUE(state.settings.presentation.gpuPresentation);
+    ASSERT_TRUE(state.settings.video.gpuPresentation);
     state.settings.streamBitrateKbps = 4500;
-    state.settings.videoCodec = app::VideoCodecSelection::mpeg2;
-    state.settings.presentation.showPerformanceStats = true;
+    state.settings.video.codec = app::VideoCodecSelection::mpeg2;
+    state.settings.video.showPerformanceStats = true;
 
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
-    EXPECT_FALSE(state.settings.presentation.gpuPresentation);
+    EXPECT_FALSE(state.settings.video.gpuPresentation);
     EXPECT_TRUE(state.settings.dirty);
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: Software");
     EXPECT_EQ(state.settings.streamBitrateKbps, 4500);
-    EXPECT_EQ(state.settings.videoCodec, app::VideoCodecSelection::mpeg2);
-    EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
+    EXPECT_EQ(state.settings.video.codec, app::VideoCodecSelection::mpeg2);
+    EXPECT_TRUE(state.settings.video.showPerformanceStats);
 
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
-    EXPECT_TRUE(state.settings.presentation.gpuPresentation);
-    EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
+    EXPECT_TRUE(state.settings.video.gpuPresentation);
+    EXPECT_TRUE(state.settings.video.showPerformanceStats);
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: GPU");
   }
@@ -1577,7 +1583,7 @@ namespace {
   TEST(ClientStateTest, DisplaySettingsCycleGpuBufferCount) {
     using streaming::GpuBufferCount;
     auto state = app::create_initial_state();
-    state.settings.presentation.gpuPresentation = false;
+    state.settings.video.gpuPresentation = false;
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-gpu-buffer-count"));
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
@@ -1590,8 +1596,8 @@ namespace {
          }) {
       EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
       EXPECT_TRUE(state.settings.dirty);
-      EXPECT_EQ(state.settings.presentation.gpuBufferCount, count);
-      EXPECT_FALSE(state.settings.presentation.gpuPresentation);
+      EXPECT_EQ(state.settings.video.gpuBufferCount, count);
+      EXPECT_FALSE(state.settings.video.gpuPresentation);
       ASSERT_NE(state.detailMenu.selected_item(), nullptr);
       EXPECT_EQ(state.detailMenu.selected_item()->label, label);
     }
