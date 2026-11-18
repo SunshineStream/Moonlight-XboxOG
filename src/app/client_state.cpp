@@ -288,14 +288,14 @@ namespace {
    * @param state Current client state containing the preferred codec.
    */
   void cycle_video_codec(app::ClientState &state) {
-    const auto current = std::find(VIDEO_CODEC_OPTIONS.begin(), VIDEO_CODEC_OPTIONS.end(), state.settings.videoCodec);
+    const auto current = std::find(VIDEO_CODEC_OPTIONS.begin(), VIDEO_CODEC_OPTIONS.end(), state.settings.video.codec);
     if (current == VIDEO_CODEC_OPTIONS.end()) {
-      state.settings.videoCodec = VIDEO_CODEC_OPTIONS.front();
+      state.settings.video.codec = VIDEO_CODEC_OPTIONS.front();
       return;
     }
 
     const std::size_t nextIndex = (static_cast<std::size_t>(std::distance(VIDEO_CODEC_OPTIONS.begin(), current)) + 1U) % VIDEO_CODEC_OPTIONS.size();
-    state.settings.videoCodec = VIDEO_CODEC_OPTIONS[nextIndex];
+    state.settings.video.codec = VIDEO_CODEC_OPTIONS[nextIndex];
   }
 
   std::string pairing_reset_endpoint_key(std::string_view address, uint16_t port) {
@@ -668,25 +668,25 @@ namespace {
           },
           {
             "cycle-video-codec",
-            std::string("Video Codec: ") + video_codec_selection_label(state.settings.videoCodec),
+            std::string("Video Codec: ") + video_codec_selection_label(state.settings.video.codec),
             "Prefer MPEG-2 for faster decoding, use standard automatic negotiation, or request a specific codec.",
             true,
           },
           {
             "toggle-gpu-presentation",
-            std::string("Video Presentation: ") + (state.settings.presentation.gpuPresentation ? "GPU" : "Software"),
+            std::string("Video Presentation: ") + (state.settings.video.gpuPresentation ? "GPU" : "Software"),
             "Choose how new streams display decoded video. GPU uses NV2A with automatic software fallback. Software can be faster in xemu.",
             true,
           },
           {
             "cycle-gpu-buffer-count",
-            std::string("GPU Video Buffers: ") + gpu_buffer_count_label(state.settings.presentation.gpuBufferCount),
+            std::string("GPU Video Buffers: ") + gpu_buffer_count_label(state.settings.video.gpuBufferCount),
             "Choose Auto, 2, or 3 buffers for GPU presentation on new streams. Auto tries three at 720p. The third buffer needs extra RAM.",
             true,
           },
           {
             "toggle-show-performance-stats",
-            std::string("Performance Stats: ") + (state.settings.presentation.showPerformanceStats ? "On" : "Off"),
+            std::string("Performance Stats: ") + (state.settings.video.showPerformanceStats ? "On" : "Off"),
             "Show performance statistics during playback and after the stream ends.",
             true,
           },
@@ -2560,7 +2560,7 @@ namespace app {
    * @return True when the activated row changed a presentation preference.
    */
   bool handle_presentation_setting_activation(ClientState &state, const std::string &itemId, AppUpdate &update) {
-    auto &presentation = state.settings.presentation;
+    auto &presentation = state.settings.video;
     if (itemId == "toggle-gpu-presentation") {
       presentation.gpuPresentation = !presentation.gpuPresentation;
       state.shell.statusMessage = std::string("Video presentation set to ") + (presentation.gpuPresentation ? "GPU" : "Software");
@@ -2652,7 +2652,7 @@ namespace app {
       cycle_video_codec(state);
       state.settings.dirty = true;
       update->persistence.settingsChanged = true;
-      state.shell.statusMessage = std::string("Video codec set to ") + video_codec_selection_label(state.settings.videoCodec);
+      state.shell.statusMessage = std::string("Video codec set to ") + video_codec_selection_label(state.settings.video.codec);
       rebuild_menu(state, "cycle-video-codec");
       return;
     }

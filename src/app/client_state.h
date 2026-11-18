@@ -398,9 +398,10 @@ namespace app {
   };
 
   /**
-   * @brief Preferences for presenting decoded video and its on-screen statistics.
+   * @brief Preferences for decoding and presenting video in new streams.
    */
-  struct VideoPresentationPreferences {
+  struct StreamVideoPreferences {
+    VideoCodecSelection codec = VideoCodecSelection::preferMpeg2;  ///< Preferred video codec for new streams.
     bool gpuPresentation = DEFAULT_GPU_PRESENTATION;  ///< Use NV2A presentation with software fallback on new streams.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     streaming::GpuBufferCount gpuBufferCount = streaming::GpuBufferCount::automatic;  ///< YUY2 buffer preference for new GPU streams.
@@ -430,8 +431,7 @@ namespace app {
     bool preferredVideoModeSet = false;  ///< True when preferredVideoMode contains a user-selected or default mode.
     int streamFramerate = DEFAULT_STREAM_FRAMERATE;  ///< Preferred stream frame rate in frames per second.
     int streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;  ///< Preferred stream bitrate in kilobits per second.
-    VideoCodecSelection videoCodec = VideoCodecSelection::preferMpeg2;  ///< Preferred video codec for new streams.
-    VideoPresentationPreferences presentation;  ///< Presentation path and statistics overlay preferences.
+    StreamVideoPreferences video;  ///< Codec, presentation path, and statistics overlay preferences.
     AudioPlaybackPreferences audio;  ///< Host and Xbox playback preferences.
     LocalStreamPreferences controls;  ///< Screenshot storage and keyboard placement preferences.
     bool dirty = false;  ///< True when persisted TOML-backed settings changed and should be saved.
