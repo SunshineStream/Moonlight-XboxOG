@@ -257,8 +257,8 @@ TEST(DirectoryPickerTest, KeepsStorageSeparateFromTheExistingDisplayCategory) {
   app::handle_command(state, input::UiCommand::move_up);
   app::handle_command(state, input::UiCommand::activate);
   EXPECT_EQ(state.settings.selectedCategory, app::SettingsCategory::display);
-  EXPECT_EQ(state.detailMenu.items().size(), 6);
   EXPECT_EQ(state.detailMenu.selected_item()->id, "cycle-stream-video-mode");
+  EXPECT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-presentation"));
   EXPECT_FALSE(state.detailMenu.select_item_by_id("screenshot-directory"));
   EXPECT_EQ(state.settings.controls.screenshotDirectory, "F:\\Screenshots");
 }

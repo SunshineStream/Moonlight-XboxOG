@@ -72,8 +72,16 @@ Only the required SVGs and their license are packaged on the ISO.
 No network connection or JavaScript runtime is needed to display the icons on the console.
 
 
+## Video presentation
+
+**Settings → Display → Video Presentation** defaults to **Software**, which writes directly to the
+framebuffer when available and performed better in xemu. **GPU** uses NV2A color conversion and scaling
+with automatic software fallback. The setting is saved as `streaming.gpu_presentation` and both paths
+are available in the same build.
+
 ## Streaming controls and statistics
 
+The default stream profile is **640×480 at 60 FPS and 3 Mbps**. Saved settings take precedence.
 Changing **Settings → Display → Stream Resolution** or **Stream Frame Rate** resets **Stream Bitrate**
 to a default calculated with Moonlight Android's resolution factors and pixel-count interpolation,
 scaled by the selected FPS and rounded to whole Mbps. At 30 / 60 FPS, the defaults are 1 / 3 Mbps for
@@ -158,12 +166,9 @@ including any scanout wait.
 The stream menu can toggle these statistics for the current session; the saved setting sets the
 initial state of the next session.
 
-Video decoding runs on the CPU. Optional experimental GPU presentation accelerates color conversion
-and scaling, with software fallback for unsupported frames or presentation failures. GPU
-presentation is enabled by default; the build options below control its use.
-
-Every stream summary reports GPU and software frame counts. **SOFTWARE FALLBACK USED** includes
-the reason software presentation was selected, even when Performance Stats is disabled.
+Video decoding runs on the CPU. Every stream summary reports GPU and software frame counts.
+**SOFTWARE FALLBACK USED** includes the reason GPU presentation switched to software, even when
+Performance Stats is disabled.
 
 ## 🛠️ Build
 
@@ -260,14 +265,13 @@ cmake -S . -B cmake-build-release -DBUILD_DOCS=OFF -DCMAKE_BUILD_TYPE=Release
 
 Video build settings:
 
-| CMake option                        | Default | Purpose                                                                                                                         |
-| ----------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `MOONLIGHT_ENABLE_GPU_PRESENTATION` | `ON`    | Enable experimental NV2A color conversion and scaling with software fallback.                                                   |
-| `MOONLIGHT_BUILD_VIDEO_EXPERIMENTS` | `OFF`   | Build the standalone probes described in [Video experiments](experiments/README.md).                                            |
-| `MOONLIGHT_INPUT_DIAGNOSTICS`       | `OFF`   | Show controller state and event counters for troubleshooting. Requires GPU presentation to be disabled so the strip is visible. |
+| CMake option                        | Default | Purpose                                                                                        |
+| ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `MOONLIGHT_BUILD_VIDEO_EXPERIMENTS` | `OFF`   | Build the standalone probes described in [Video experiments](experiments/README.md).           |
+| `MOONLIGHT_INPUT_DIAGNOSTICS`       | `OFF`   | Show controller state and event counters. Select Software presentation to see the debug strip. |
 
-Pass options when configuring, for example `-DMOONLIGHT_ENABLE_GPU_PRESENTATION=OFF` for software-only
-presentation. Existing build directories retain their cached settings until explicitly reconfigured.
+Pass these options when configuring. Existing build directories retain cached build options until
+explicitly reconfigured.
 
 ### Build
 

@@ -24,7 +24,6 @@ extern "C" {
 #include <libavutil/cpu.h>
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
-#include <libavutil/imgutils.h>
 #include <libavutil/log.h>
 #include <libavutil/mem.h>
 #include <libavutil/samplefmt.h>
@@ -452,8 +451,9 @@ namespace streaming {
   }
 
   void FfmpegStreamBackend::local_overlay_size(int &width, int &height) const {
-    if (video_.renderFrame.width > 0 && video_.renderFrame.height > 0) {
-      const auto destination = build_letterboxed_destination(width, height, video_.renderFrame.width, video_.renderFrame.height);
+    const auto &frame = video_.renderFrame.view();
+    if (frame.width > 0 && frame.height > 0) {
+      const auto destination = build_letterboxed_destination(width, height, frame.width, frame.height);
       width = destination.w;
       height = destination.h;
     }
@@ -463,26 +463,13 @@ namespace streaming {
     if (const auto result = take_screenshot_result(); !result.empty()) {
       logging::info("screenshots", result);
     }
-    if (screenshot_.thread != nullptr || video_.renderFrame.width <= 0 || video_.renderFrame.height <= 0) {
+    if (screenshot_.thread != nullptr || video_.renderFrame.view().width <= 0) {
       logging::warn("screenshots", "Capture not queued: another screenshot is pending or no video frame is available");
       return false;
     }
-    // The event thread owns renderFrame. Copy only its planar YUV payload here;
-    // conversion, directory creation, BMP writes and indexing belong to the worker.
-    const auto &frame = video_.renderFrame;
-    auto &snapshot = screenshot_.frame;
-    snapshot.width = frame.width;
-    snapshot.height = frame.height;
-    snapshot.yPitch = frame.yPitch;
-    snapshot.uPitch = frame.uPitch;
-    snapshot.vPitch = frame.vPitch;
-    snapshot.matrix = frame.matrix;
-    snapshot.fullRange = frame.fullRange;
-    const std::array<const AlignedMediaBuffer *, 3> sources {&frame.yPlane, &frame.uPlane, &frame.vPlane};
-    const std::array<AlignedMediaBuffer *, 3> destinations {&snapshot.yPlane, &snapshot.uPlane, &snapshot.vPlane};
-    for (std::size_t i = 0; i < sources.size(); ++i) {
-      destinations[i]->resize(sources[i]->size());
-      std::memcpy(destinations[i]->data(), sources[i]->data(), sources[i]->size());
+    if (!screenshot_.frame.retain(video_.renderFrame)) {
+      logging::warn("screenshots", "Capture not queued: could not retain the decoded frame");
+      return false;
     }
     screenshot_.source = source;
     screenshot_.directory = directory;
@@ -496,7 +483,7 @@ namespace streaming {
                                           "save-screenshot",
                                           &screenshot_);
     if (screenshot_.thread == nullptr) {
-      screenshot_.frame = {};
+      screenshot_.frame.clear();
       logging::warn("screenshots", std::string("Cannot start screenshot worker: ") + SDL_GetError());
     }
     return screenshot_.thread != nullptr;
@@ -541,7 +528,7 @@ namespace streaming {
     return saved;
   }
 
-  SDL_Surface *FfmpegStreamBackend::convert_screenshot_frame(const LatestVideoFrame &frame) {
+  SDL_Surface *FfmpegStreamBackend::convert_screenshot_frame(const Yuv420FrameView &frame) {
     SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, frame.width, frame.height, 24, SDL_PIXELFORMAT_BGR24);
     if (surface == nullptr) {
       return nullptr;
@@ -553,8 +540,8 @@ namespace streaming {
     }
     const int *coefficients = sws_getCoefficients(frame.matrix == VideoColorMatrix::bt709 ? SWS_CS_ITU709 : SWS_CS_ITU601);
     sws_setColorspaceDetails(conversion, coefficients, frame.fullRange, coefficients, 1, 0, 1 << 16, 1 << 16);
-    const std::array<const std::uint8_t *, 4> pixels {frame.yPlane.data(), frame.uPlane.data(), frame.vPlane.data(), nullptr};
-    const std::array<int, 4> pitch {frame.yPitch, frame.uPitch, frame.vPitch, 0};
+    const std::array<const std::uint8_t *, 4> pixels {frame.planes[0], frame.planes[1], frame.planes[2], nullptr};
+    const std::array<int, 4> pitch {frame.pitches[0], frame.pitches[1], frame.pitches[2], 0};
     std::array<std::uint8_t *, 4> output {static_cast<std::uint8_t *>(surface->pixels), nullptr, nullptr, nullptr};
     const std::array<int, 4> outputPitch {surface->pitch, 0, 0, 0};
     const bool converted = sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height;
@@ -573,9 +560,9 @@ namespace streaming {
     job.progress.store(1);
     std::string error;
     const std::string path = app::next_screenshot_path(job.directory, job.capturedAt, error);
-    SDL_Surface *surface = path.empty() ? nullptr : convert_screenshot_frame(job.frame);
+    SDL_Surface *surface = path.empty() ? nullptr : convert_screenshot_frame(job.frame.view());
     // Release the YUV snapshot before disk I/O so full-screen menus still fit in 64 MiB.
-    job.frame = {};
+    job.frame.clear();
     bool saved = false;
     if (surface != nullptr) {
       job.progress.store(10);
@@ -627,6 +614,10 @@ namespace streaming {
     audioPlaybackEnabled_.store(enabled);
   }
 
+  void FfmpegStreamBackend::set_gpu_presentation_enabled(bool enabled) {
+    gpuPresentationEnabled_ = enabled;
+  }
+
   void FfmpegStreamBackend::shutdown() {
     cleanup_audio_decoder();
     cleanup_video_decoder();
@@ -634,7 +625,7 @@ namespace streaming {
       SDL_WaitThread(screenshot_.thread, nullptr);
       screenshot_.thread = nullptr;
       logging::info("screenshots", screenshot_.result);
-      screenshot_.frame = {};
+      screenshot_.frame.clear();
     }
   }
 
@@ -739,36 +730,26 @@ namespace streaming {
     bool textureNeedsUpload = false;
     if (const std::uint64_t publishedFrameVersion = video_.publishedFrameVersion.load(); publishedFrameVersion != video_.renderedFrameVersion) {
       std::scoped_lock lock(video_.frame_mutex());
-      if (video_.latestFrameVersion != video_.renderedFrameVersion && video_.latestFrame.width > 0 && video_.latestFrame.height > 0) {
+      if (video_.latestFrameVersion != video_.renderedFrameVersion && video_.latestFrame.view().width > 0) {
         if (video_.latestFrameVersion > video_.renderedFrameVersion + 1) {
           statistics_.dropped(video_.latestFrameVersion - video_.renderedFrameVersion - 1);
         }
-        std::swap(video_.renderFrame, video_.latestFrame);
+        video_.renderFrame.swap(video_.latestFrame);
         video_.renderedFrameVersion = video_.latestFrameVersion;
         textureNeedsUpload = true;
       }
     }
 
-    if (video_.renderFrame.width <= 0 || video_.renderFrame.height <= 0) {
+    const auto &frame = video_.renderFrame.view();
+    if (frame.width <= 0 || frame.height <= 0) {
       return false;
     }
 
 #ifdef NXDK
-    if (allowDirectFramebuffer && !overlayFailed_) {
+    if (allowDirectFramebuffer && gpuPresentationEnabled_ && !overlayFailed_) {
       if (!textureNeedsUpload && !statisticsBitmapChanged_ && presenter_.active()) {
         return true;
       }
-      const LatestVideoFrame &frame = video_.renderFrame;
-      const Yuv420FrameView view {
-        frame.width,
-        frame.height,
-        {frame.yPlane.data(), frame.uPlane.data(), frame.vPlane.data()},
-        {frame.yPlane.size(), frame.uPlane.size(), frame.vPlane.size()},
-        {frame.yPitch, frame.uPitch, frame.vPitch},
-        frame.matrix,
-        frame.fullRange,
-        frame.interlaced,
-      };
       const SDL_Rect destination = build_letterboxed_destination(screenWidth, screenHeight, frame.width, frame.height);
       if (!presenter_.active()) {
         const VIDEO_MODE mode = XVideoGetMode();
@@ -778,7 +759,7 @@ namespace streaming {
         }
       }
       std::string reason;
-      if (presenter_.present(view, {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_)) {
+      if (presenter_.present(frame, {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_)) {
         if (textureNeedsUpload) {
           ++acceleration_.gpuFrames;
         }
@@ -798,29 +779,29 @@ namespace streaming {
     (void) allowDirectFramebuffer;
 #endif
 
-    if (video_.texture == nullptr || video_.textureWidth != video_.renderFrame.width || video_.textureHeight != video_.renderFrame.height) {
+    if (video_.texture == nullptr || video_.textureWidth != frame.width || video_.textureHeight != frame.height) {
       if (video_.texture != nullptr) {
         SDL_DestroyTexture(video_.texture);
         video_.texture = nullptr;
       }
 
-      video_.texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, video_.renderFrame.width, video_.renderFrame.height);
+      video_.texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, frame.width, frame.height);
       if (video_.texture == nullptr) {
         logging::error("stream", std::string("SDL_CreateTexture failed for video presentation: ") + SDL_GetError());
         return false;
       }
 
-      video_.textureWidth = video_.renderFrame.width;
-      video_.textureHeight = video_.renderFrame.height;
+      video_.textureWidth = frame.width;
+      video_.textureHeight = frame.height;
       textureNeedsUpload = true;
     }
 
-    if (textureNeedsUpload && SDL_UpdateYUVTexture(video_.texture, nullptr, reinterpret_cast<const Uint8 *>(video_.renderFrame.yPlane.data()), video_.renderFrame.yPitch, reinterpret_cast<const Uint8 *>(video_.renderFrame.uPlane.data()), video_.renderFrame.uPitch, reinterpret_cast<const Uint8 *>(video_.renderFrame.vPlane.data()), video_.renderFrame.vPitch) != 0) {
+    if (textureNeedsUpload && SDL_UpdateYUVTexture(video_.texture, nullptr, frame.planes[0], frame.pitches[0], frame.planes[1], frame.pitches[1], frame.planes[2], frame.pitches[2]) != 0) {
       logging::error("stream", std::string("SDL_UpdateYUVTexture failed during video presentation: ") + SDL_GetError());
       return false;
     }
 
-    const SDL_Rect destination = build_letterboxed_destination(screenWidth, screenHeight, video_.renderFrame.width, video_.renderFrame.height);
+    const SDL_Rect destination = build_letterboxed_destination(screenWidth, screenHeight, frame.width, frame.height);
     const bool presented = SDL_RenderCopy(renderer, video_.texture, nullptr, &destination) == 0;
     if (presented) {
       render_sdl_statistics(renderer, destination);
@@ -870,12 +851,9 @@ namespace streaming {
 
     cleanup_video_decoder();
     acceleration_ = {};
+    acceleration_.gpuPresentationRequested = gpuPresentationEnabled_;
     statistics_.reset();
     overlayFailed_ = false;
-#if defined(NXDK) && !MOONLIGHT_ENABLE_GPU_PRESENTATION
-    overlayFailed_ = true;
-    acceleration_.record_fallback("GPU presentation disabled in this build");
-#endif
     const int cpuFlags = av_get_cpu_flags();
     acceleration_.cpuFeatures = (cpuFlags & AV_CPU_FLAG_SSE) != 0 ? "MMX/SSE" : ((cpuFlags & AV_CPU_FLAG_MMX) != 0 ? "MMX" : "Scalar");
     acceleration_.threaded = std::string(avcodec_configuration()).find("--enable-w32threads") != std::string::npos;
@@ -992,13 +970,12 @@ namespace streaming {
       video_.presentScaleContext = nullptr;
     }
 
-    video_.convertedBuffer.clear();
     video_.packetBuffer.clear();
-    video_.renderFrame = LatestVideoFrame {};
-    video_.decodeFrame = LatestVideoFrame {};
+    video_.renderFrame.clear();
+    video_.decodeFrame.clear();
     {
       std::scoped_lock lock(video_.frame_mutex());
-      video_.latestFrame = LatestVideoFrame {};
+      video_.latestFrame.clear();
       video_.latestFrameVersion = 0;
     }
     video_.renderedFrameVersion = 0;
@@ -1118,51 +1095,17 @@ namespace streaming {
     return DR_NEED_IDR;
   }
 
-  bool FfmpegStreamBackend::publish_video_frame(const AVFrame *frameToPresent) {
-    if (frameToPresent == nullptr || frameToPresent->width <= 0 || frameToPresent->height <= 0 || frameToPresent->linesize[0] <= 0 || frameToPresent->linesize[1] <= 0 || frameToPresent->linesize[2] <= 0 || frameToPresent->data[0] == nullptr || frameToPresent->data[1] == nullptr || frameToPresent->data[2] == nullptr) {
+  bool FfmpegStreamBackend::publish_video_frame(AVFrame &frameToPresent) {
+    if (!video_.decodeFrame.take(frameToPresent)) {
       return false;
     }
-
-    LatestVideoFrame &nextFrame = video_.decodeFrame;
-    nextFrame.width = frameToPresent->width;
-    nextFrame.height = frameToPresent->height;
-    nextFrame.yPitch = frameToPresent->linesize[0];
-    nextFrame.uPitch = frameToPresent->linesize[1];
-    nextFrame.vPitch = frameToPresent->linesize[2];
-    nextFrame.fullRange = frameToPresent->color_range == AVCOL_RANGE_JPEG;
-    nextFrame.interlaced = (frameToPresent->flags & AV_FRAME_FLAG_INTERLACED) != 0;
-    switch (frameToPresent->colorspace) {
-      case AVCOL_SPC_BT709:
-        nextFrame.matrix = VideoColorMatrix::bt709;
-        break;
-      case AVCOL_SPC_UNSPECIFIED:
-      case AVCOL_SPC_BT470BG:
-      case AVCOL_SPC_SMPTE170M:
-        nextFrame.matrix = VideoColorMatrix::bt601;
-        break;
-      default:
-        nextFrame.matrix = VideoColorMatrix::unsupported;
-        break;
-    }
-
-    const int chromaHeight = (frameToPresent->height + 1) / 2;
-    const std::size_t yPlaneSize = static_cast<std::size_t>(frameToPresent->linesize[0]) * static_cast<std::size_t>(frameToPresent->height);
-    const std::size_t uPlaneSize = static_cast<std::size_t>(frameToPresent->linesize[1]) * static_cast<std::size_t>(chromaHeight);
-    const std::size_t vPlaneSize = static_cast<std::size_t>(frameToPresent->linesize[2]) * static_cast<std::size_t>(chromaHeight);
-
-    nextFrame.yPlane.resize(yPlaneSize);
-    nextFrame.uPlane.resize(uPlaneSize);
-    nextFrame.vPlane.resize(vPlaneSize);
-    std::memcpy(nextFrame.yPlane.data(), frameToPresent->data[0], nextFrame.yPlane.size());
-    std::memcpy(nextFrame.uPlane.data(), frameToPresent->data[1], nextFrame.uPlane.size());
-    std::memcpy(nextFrame.vPlane.data(), frameToPresent->data[2], nextFrame.vPlane.size());
-
     {
       std::scoped_lock lock(video_.frame_mutex());
-      std::swap(video_.latestFrame, video_.decodeFrame);
+      video_.latestFrame.swap(video_.decodeFrame);
       ++video_.latestFrameVersion;
       video_.publishedFrameVersion.store(video_.latestFrameVersion);
     }
+    video_.decodeFrame.clear();
 
     video_.lastDecodedFrameUs.store(PltGetMicroseconds());
     video_.hasFrame.store(true);
@@ -1183,7 +1126,8 @@ namespace streaming {
 
     const int framebufferWidth = screenWidth > 0 ? std::min(screenWidth, videoMode.width) : videoMode.width;
     const int framebufferHeight = screenHeight > 0 ? std::min(screenHeight, videoMode.height) : videoMode.height;
-    const SDL_Rect destination = build_letterboxed_destination(framebufferWidth, framebufferHeight, video_.renderFrame.width, video_.renderFrame.height);
+    const auto &frame = video_.renderFrame.view();
+    const SDL_Rect destination = build_letterboxed_destination(framebufferWidth, framebufferHeight, frame.width, frame.height);
     if (destination.w <= 0 || destination.h <= 0) {
       return false;
     }
@@ -1197,8 +1141,8 @@ namespace streaming {
 
     video_.presentScaleContext = sws_getCachedContext(
       video_.presentScaleContext,
-      video_.renderFrame.width,
-      video_.renderFrame.height,
+      frame.width,
+      frame.height,
       AV_PIX_FMT_YUV420P,
       destination.w,
       destination.h,
@@ -1214,15 +1158,15 @@ namespace streaming {
     }
 
     const std::array<const std::uint8_t *, 4> sourceData {
-      video_.renderFrame.yPlane.data(),
-      video_.renderFrame.uPlane.data(),
-      video_.renderFrame.vPlane.data(),
+      frame.planes[0],
+      frame.planes[1],
+      frame.planes[2],
       nullptr,
     };
     const std::array<int, 4> sourceLinesize {
-      video_.renderFrame.yPitch,
-      video_.renderFrame.uPitch,
-      video_.renderFrame.vPitch,
+      frame.pitches[0],
+      frame.pitches[1],
+      frame.pitches[2],
       0,
     };
     std::array<std::uint8_t *, 4> destinationData {
@@ -1238,7 +1182,7 @@ namespace streaming {
       0,
     };
 
-    if (const int scaledRows = sws_scale(video_.presentScaleContext, sourceData.data(), sourceLinesize.data(), 0, video_.renderFrame.height, destinationData.data(), destinationLinesize.data()); scaledRows <= 0) {
+    if (const int scaledRows = sws_scale(video_.presentScaleContext, sourceData.data(), sourceLinesize.data(), 0, frame.height, destinationData.data(), destinationLinesize.data()); scaledRows <= 0) {
       logging::warn("stream", "sws_scale failed for direct framebuffer presentation");
       return false;
     }
@@ -1264,7 +1208,7 @@ namespace streaming {
         return receiveResult;
       }
 
-      const AVFrame *frameToPresent = video_.decodedFrame;
+      AVFrame *frameToPresent = video_.decodedFrame;
       if (video_.decodedFrame->format != AV_PIX_FMT_YUV420P) {
         video_.scaleContext = sws_getCachedContext(
           video_.scaleContext,
@@ -1285,14 +1229,6 @@ namespace streaming {
           return AVERROR(EINVAL);
         }
 
-        const int bufferSize = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, video_.decodedFrame->width, video_.decodedFrame->height, 32);
-        if (bufferSize <= 0) {
-          logging::warn("stream", "av_image_get_buffer_size failed for converted video frame");
-          av_frame_unref(video_.decodedFrame);
-          return AVERROR(EINVAL);
-        }
-
-        video_.convertedBuffer.resize(static_cast<std::size_t>(bufferSize));
         av_frame_unref(video_.convertedFrame);
         video_.convertedFrame->format = AV_PIX_FMT_YUV420P;
         video_.convertedFrame->width = video_.decodedFrame->width;
@@ -1300,30 +1236,29 @@ namespace streaming {
         video_.convertedFrame->color_range = video_.decodedFrame->color_range;
         video_.convertedFrame->colorspace = video_.decodedFrame->colorspace;
         video_.convertedFrame->flags = video_.decodedFrame->flags;
-        if (const int fillResult = av_image_fill_arrays(video_.convertedFrame->data, video_.convertedFrame->linesize, video_.convertedBuffer.data(), AV_PIX_FMT_YUV420P, video_.decodedFrame->width, video_.decodedFrame->height, 32); fillResult < 0) {
-          logging::warn("stream", std::string("av_image_fill_arrays failed for converted frame: ") + describe_ffmpeg_error(fillResult));
+        if (const int allocation = av_frame_get_buffer(video_.convertedFrame, 32); allocation < 0) {
+          logging::warn("stream", "av_frame_get_buffer failed for converted video frame");
           av_frame_unref(video_.decodedFrame);
-          return fillResult;
+          return allocation;
         }
 
-        sws_scale(
-          video_.scaleContext,
-          video_.decodedFrame->data,
-          video_.decodedFrame->linesize,
-          0,
-          video_.decodedFrame->height,
-          video_.convertedFrame->data,
-          video_.convertedFrame->linesize
-        );
+        if (const int scaled = sws_scale(video_.scaleContext, video_.decodedFrame->data, video_.decodedFrame->linesize, 0, video_.decodedFrame->height, video_.convertedFrame->data, video_.convertedFrame->linesize); scaled != video_.convertedFrame->height) {
+          logging::warn("stream", "sws_scale failed to convert the full video frame");
+          av_frame_unref(video_.decodedFrame);
+          av_frame_unref(video_.convertedFrame);
+          return scaled < 0 ? scaled : AVERROR(EINVAL);
+        }
         frameToPresent = video_.convertedFrame;
       }
 
-      if (!publish_video_frame(frameToPresent)) {
+      const bool published = publish_video_frame(*frameToPresent);
+      if (frameToPresent != video_.decodedFrame) {
         av_frame_unref(video_.decodedFrame);
+      }
+      if (!published) {
+        av_frame_unref(frameToPresent);
         return AVERROR(EINVAL);
       }
-
-      av_frame_unref(video_.decodedFrame);
     }
   }
 

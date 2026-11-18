@@ -76,8 +76,6 @@ namespace {
   constexpr Uint32 STREAM_END_STATS_POLL_MILLISECONDS = 50U;
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_MILLISECONDS = 1500U;
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_COOLDOWN_MILLISECONDS = 2000U;
-  constexpr int DEFAULT_STREAM_FPS = 30;
-  constexpr int DEFAULT_STREAM_BITRATE_KBPS = 1000;
   constexpr int MIN_STREAM_FPS = 15;
   constexpr int MAX_STREAM_FPS = 60;
   constexpr int MIN_STREAM_BITRATE_KBPS = 250;
@@ -195,8 +193,8 @@ namespace {
 
   struct ResolvedStreamParameters {
     VIDEO_MODE videoMode {};
-    int fps = DEFAULT_STREAM_FPS;
-    int bitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;
+    int fps = app::DEFAULT_STREAM_FRAMERATE;
+    int bitrateKbps = app::DEFAULT_STREAM_BITRATE_KBPS;
     int packetSize = DEFAULT_PACKET_SIZE;
     int streamingRemotely = STREAM_CFG_AUTO;
   };
@@ -1507,7 +1505,7 @@ namespace streaming {
     const VIDEO_MODE &activeStreamVideoMode = scopedStreamVideoMode.active_video_mode();
 
     StreamUiResources resources {};
-    resources.statisticsEnabled = settings.showPerformanceStats;
+    resources.statisticsEnabled = settings.presentation.showPerformanceStats;
     if (std::string initializationError; !initialize_stream_ui_resources(window, activeStreamVideoMode, preferredController, &resources, &initializationError)) {
       assign_status_message(statusMessage, initializationError);
       logging::error("stream", initializationError);
@@ -1569,6 +1567,7 @@ namespace streaming {
       std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps" + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
     );
     resources.mediaBackend.set_audio_playback_enabled(settings.playAudioOnXbox);
+    resources.mediaBackend.set_gpu_presentation_enabled(settings.presentation.gpuPresentation);
     logging::info("stream", std::string("Xbox audio playback ") + (settings.playAudioOnXbox ? "enabled" : "disabled for lower decode latency"));
     logging::debug(
       "stream",

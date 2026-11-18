@@ -95,7 +95,21 @@ TEST(VideoAccelerationTest, RetainsFirstFallbackAfterAccelerationRecovers) {
 }
 
 /**
- * @brief Published plane buffers retain alignment and zero padding after reuse and moves.
+ * @brief Explicit software rendering is distinct from a failed GPU attempt in the summary.
+ */
+TEST(VideoAccelerationTest, ReportsSelectedSoftwareWithoutAFallback) {
+  streaming::VideoAccelerationReport report;
+  report.gpuPresentationRequested = false;
+  report.softwareFrames = 3;
+  const auto lines = report.summary_lines();
+  ASSERT_GE(lines.size(), 2U);
+  EXPECT_EQ(lines[0], "Software presentation selected");
+  EXPECT_EQ(lines[1], "GPU overlay: 0 frames | Software: 3 frames");
+  EXPECT_TRUE(report.fallbackReason.empty());
+}
+
+/**
+ * @brief Media scratch buffers retain alignment and zero padding after reuse and moves.
  */
 TEST(VideoAccelerationTest, KeepsMediaBuffersAlignedAndPadded) {
   streaming::AlignedMediaBuffer buffer;

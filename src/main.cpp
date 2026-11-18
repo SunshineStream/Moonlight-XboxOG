@@ -46,8 +46,9 @@ namespace {
     state.settings.preferredVideoModeSet = settings.preferredVideoModeSet;
     state.settings.streamFramerate = settings.streamFramerate;
     state.settings.streamBitrateKbps = settings.streamBitrateKbps;
+    state.settings.presentation.gpuPresentation = settings.gpuPresentation;
     state.settings.playAudioOnPc = settings.playAudioOnPc;
-    state.settings.showPerformanceStats = settings.showPerformanceStats;
+    state.settings.presentation.showPerformanceStats = settings.showPerformanceStats;
     state.settings.playAudioOnXbox = settings.playAudioOnXbox;
     state.settings.controls.screenshotDirectory = settings.screenshotDirectory;
     state.settings.controls.keyboardDockTop = settings.keyboardDockTop;

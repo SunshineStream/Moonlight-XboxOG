@@ -77,6 +77,7 @@ namespace streaming {
     std::string fallbackReason;  ///< First fallback reason, retained after later successes.
     std::string cpuFeatures;  ///< CPU optimizations enabled in the linked FFmpeg build.
     bool threaded = false;  ///< FFmpeg has internal synchronization, independently of the decoder worker count.
+    bool gpuPresentationRequested = false;  ///< True when the stream was configured to try NV2A presentation.
 
     /**
      * @brief Retain the first reason for using software presentation.

@@ -32,8 +32,6 @@ namespace {
   constexpr const char *SETTINGS_CATEGORY_PREFIX = "settings-category:";
   constexpr std::array<char, 10> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr std::array<char, 10> ADD_HOST_PORT_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
-  constexpr int DEFAULT_STREAM_FRAMERATE = 30;
-  constexpr int DEFAULT_STREAM_BITRATE_KBPS = 1000;
   constexpr std::array<int, 6> STREAM_FRAMERATE_OPTIONS {15, 20, 24, 25, 30, 60};
   constexpr std::array<int, 24> STREAM_BITRATE_OPTIONS {500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000, 19000, 20000};
 
@@ -230,7 +228,7 @@ namespace {
   void cycle_stream_framerate(app::ClientState &state) {
     const auto current = std::find(STREAM_FRAMERATE_OPTIONS.begin(), STREAM_FRAMERATE_OPTIONS.end(), state.settings.streamFramerate);
     if (current == STREAM_FRAMERATE_OPTIONS.end()) {
-      state.settings.streamFramerate = DEFAULT_STREAM_FRAMERATE;
+      state.settings.streamFramerate = app::DEFAULT_STREAM_FRAMERATE;
     } else {
       const std::size_t nextIndex = (static_cast<std::size_t>(std::distance(STREAM_FRAMERATE_OPTIONS.begin(), current)) + 1U) % STREAM_FRAMERATE_OPTIONS.size();
       state.settings.streamFramerate = STREAM_FRAMERATE_OPTIONS[nextIndex];
@@ -599,6 +597,12 @@ namespace {
             true,
           },
           {
+            "toggle-gpu-presentation",
+            std::string("Video Presentation: ") + (state.settings.presentation.gpuPresentation ? "GPU" : "Software"),
+            "Choose how new streams display decoded video. GPU uses NV2A with automatic software fallback. Software can be faster in xemu.",
+            true,
+          },
+          {
             "toggle-play-audio-on-pc",
             std::string("Play Audio on PC: ") + (state.settings.playAudioOnPc ? "On" : "Off"),
             "Toggle whether the host PC should continue local audio playback while also streaming audio to this Xbox client.",
@@ -612,7 +616,7 @@ namespace {
           },
           {
             "toggle-show-performance-stats",
-            std::string("Performance Stats: ") + (state.settings.showPerformanceStats ? "On" : "Off"),
+            std::string("Performance Stats: ") + (state.settings.presentation.showPerformanceStats ? "On" : "Off"),
             "Show performance statistics during playback and after the stream ends.",
             true,
           },
@@ -1892,10 +1896,7 @@ namespace app {
     state.settings.logViewerPlacement = LogViewerPlacement::full;
     state.settings.loggingLevel = logging::LogLevel::none;
     state.settings.xemuConsoleLoggingLevel = logging::LogLevel::none;
-    state.settings.streamFramerate = DEFAULT_STREAM_FRAMERATE;
-    state.settings.streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;
     state.settings.playAudioOnPc = false;
-    state.settings.showPerformanceStats = false;
     state.settings.playAudioOnXbox = true;
     state.settings.controls.screenshotDirectory.clear();
     state.settings.controls.keyboardDockTop = false;
@@ -2448,6 +2449,32 @@ namespace app {
   }
 
   /**
+   * @brief Toggle a presentation preference and refresh its selected menu row.
+   *
+   * @param state Client state containing the presentation preferences.
+   * @param itemId Activated menu row.
+   * @param update Update receiving the request to persist the change.
+   * @return True when the activated row changed a presentation preference.
+   */
+  bool handle_presentation_setting_activation(ClientState &state, const std::string &itemId, AppUpdate &update) {
+    auto &presentation = state.settings.presentation;
+    if (itemId == "toggle-gpu-presentation") {
+      presentation.gpuPresentation = !presentation.gpuPresentation;
+      state.shell.statusMessage = std::string("Video presentation set to ") + (presentation.gpuPresentation ? "GPU" : "Software");
+    } else if (itemId == "toggle-show-performance-stats") {
+      presentation.showPerformanceStats = !presentation.showPerformanceStats;
+      state.shell.statusMessage = std::string("Performance stats ") + (presentation.showPerformanceStats ? "enabled" : "disabled");
+    } else {
+      return false;
+    }
+
+    state.settings.dirty = true;
+    update.persistence.settingsChanged = true;
+    rebuild_menu(state, itemId);
+    return true;
+  }
+
+  /**
    * @brief Update settings inline or open the screenshot folder picker, emitting only required side effects.
    *
    * @param state Client state containing the settings menus.
@@ -2504,6 +2531,9 @@ namespace app {
       rebuild_menu(state, "cycle-stream-bitrate");
       return;
     }
+    if (handle_presentation_setting_activation(state, detailUpdate.activatedItemId, *update)) {
+      return;
+    }
     if (detailUpdate.activatedItemId == "toggle-play-audio-on-pc") {
       state.settings.playAudioOnPc = !state.settings.playAudioOnPc;
       state.settings.dirty = true;
@@ -2518,14 +2548,6 @@ namespace app {
       update->persistence.settingsChanged = true;
       state.shell.statusMessage = std::string("Play audio on Xbox ") + (state.settings.playAudioOnXbox ? "enabled" : "disabled");
       rebuild_menu(state, "toggle-play-audio-on-xbox");
-      return;
-    }
-    if (detailUpdate.activatedItemId == "toggle-show-performance-stats") {
-      state.settings.showPerformanceStats = !state.settings.showPerformanceStats;
-      state.settings.dirty = true;
-      update->persistence.settingsChanged = true;
-      state.shell.statusMessage = std::string("Performance stats ") + (state.settings.showPerformanceStats ? "enabled" : "disabled");
-      rebuild_menu(state, "toggle-show-performance-stats");
       return;
     }
     if (detailUpdate.activatedItemId == "screenshot-directory") {

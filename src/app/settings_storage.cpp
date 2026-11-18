@@ -31,6 +31,7 @@ extern "C" FILE *_wfopen(const wchar_t *path, const wchar_t *mode);
 #include <toml++/toml.hpp>
 
 // local includes
+#include "src/app/stream_bitrate.h"
 #include "src/platform/error_utils.h"
 #include "src/platform/filesystem_utils.h"
 #include "src/startup/storage_paths.h"
@@ -348,6 +349,7 @@ namespace {
     content += "# Preferred streaming parameters.\n";
     content += std::string("fps = ") + std::to_string(settings.streamFramerate) + "\n";
     content += std::string("bitrate_kbps = ") + std::to_string(settings.streamBitrateKbps) + "\n";
+    content += std::string("gpu_presentation = ") + (settings.gpuPresentation ? "true" : "false") + "\n";
     content += std::string("play_audio_on_pc = ") + (settings.playAudioOnPc ? "true" : "false") + "\n";
     content += std::string("play_audio_on_xbox = ") + (settings.playAudioOnXbox ? "true" : "false") + "\n";
     content += "# Show stream telemetry after streaming ends.\n";
@@ -399,7 +401,7 @@ namespace {
   void inspect_streaming_keys(const toml::table &streamingTable, const std::string &filePath, app::LoadAppSettingsResult *result) {
     for (const auto &[rawKey, node] : streamingTable) {
       const std::string key(rawKey.str());
-      if (key == "video_width" || key == "video_height" || key == "video_bpp" || key == "video_refresh" || key == "video_mode_selected" || key == "fps" || key == "bitrate_kbps" || key == "play_audio_on_pc" || key == "play_audio_on_xbox" || key == "show_performance_stats" || key == "screenshot_directory" || key == "keyboard_dock_top") {
+      if (key == "video_width" || key == "video_height" || key == "video_bpp" || key == "video_refresh" || key == "video_mode_selected" || key == "fps" || key == "bitrate_kbps" || key == "gpu_presentation" || key == "play_audio_on_pc" || key == "play_audio_on_xbox" || key == "show_performance_stats" || key == "screenshot_directory" || key == "keyboard_dock_top") {
         continue;
       }
 
@@ -496,8 +498,12 @@ namespace app {
     load_integer_setting(settingsTable["streaming"]["video_refresh"], filePath, "streaming.video_refresh", &result.settings.preferredVideoMode.refresh, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["video_mode_selected"], filePath, "streaming.video_mode_selected", &result.settings.preferredVideoModeSet, &result.warnings);
     load_integer_setting(settingsTable["streaming"]["fps"], filePath, "streaming.fps", &result.settings.streamFramerate, &result.warnings);
+    const auto &preferredMode = result.settings.preferredVideoMode;
+    const VIDEO_MODE bitrateMode = result.settings.preferredVideoModeSet && preferredMode.width > 0 && preferredMode.height > 0 ? preferredMode : VIDEO_MODE {640, 480, 32, 60};
+    result.settings.streamBitrateKbps = default_stream_bitrate_kbps(bitrateMode.width, bitrateMode.height, result.settings.streamFramerate);
     load_integer_setting(settingsTable["streaming"]["bitrate_kbps"], filePath, "streaming.bitrate_kbps", &result.settings.streamBitrateKbps, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_pc"], filePath, "streaming.play_audio_on_pc", &result.settings.playAudioOnPc, &result.warnings);
+    load_boolean_setting(settingsTable["streaming"]["gpu_presentation"], filePath, "streaming.gpu_presentation", &result.settings.gpuPresentation, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_xbox"], filePath, "streaming.play_audio_on_xbox", &result.settings.playAudioOnXbox, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["show_performance_stats"], filePath, "streaming.show_performance_stats", &result.settings.showPerformanceStats, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["keyboard_dock_top"], filePath, "streaming.keyboard_dock_top", &result.settings.keyboardDockTop, &result.warnings);

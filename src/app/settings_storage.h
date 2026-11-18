@@ -22,13 +22,14 @@ namespace app {
     app::LogViewerPlacement logViewerPlacement = app::LogViewerPlacement::full;  ///< Preferred placement for the in-app log viewer.
     VIDEO_MODE preferredVideoMode {};  ///< Preferred stream resolution requested from the host.
     bool preferredVideoModeSet = false;  ///< True when preferredVideoMode contains a saved user preference.
-    int streamFramerate = 30;  ///< Preferred stream frame rate in frames per second.
-    int streamBitrateKbps = 1000;  ///< Preferred stream bitrate in kilobits per second.
+    int streamFramerate = DEFAULT_STREAM_FRAMERATE;  ///< Preferred stream frame rate in frames per second.
+    int streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;  ///< Preferred stream bitrate in kilobits per second.
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
     std::string screenshotDirectory;  ///< Screenshot folder; empty selects the title-scoped screenshots directory.
     bool keyboardDockTop = false;  ///< Dock the stream keyboard to the top instead of the bottom.
+    bool gpuPresentation = false;  ///< Opt in to NV2A presentation with software fallback.
   };
 
   /**
@@ -57,7 +58,7 @@ namespace app {
   std::string default_settings_path();
 
   /**
-   * @brief Load the persisted Moonlight settings file.
+   * @brief Load saved preferences and derive a bitrate from the stream profile when no bitrate is saved.
    *
    * @param filePath Settings file to read.
    * @return Loaded settings plus any non-fatal warnings.

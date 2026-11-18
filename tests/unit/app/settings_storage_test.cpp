@@ -107,6 +107,36 @@ namespace {
     EXPECT_FALSE(loadResult.settings.playAudioOnXbox);
   }
 
+  /** @brief Persist explicit GPU selection and default to software with old or invalid settings. */
+  TEST_F(SettingsStorageTest, SavesAndLoadsPresentationPreference) {
+    write_text_file(settingsPath, "[streaming]\nfps = 30\n");
+    const auto partial = app::load_app_settings(settingsPath);
+    EXPECT_FALSE(partial.settings.gpuPresentation);
+    EXPECT_EQ(partial.settings.streamFramerate, 30);
+    EXPECT_EQ(partial.settings.streamBitrateKbps, 1000);
+
+    app::AppSettings settings;
+    settings.gpuPresentation = true;
+    ASSERT_TRUE(app::save_app_settings(settings, settingsPath).success);
+    const auto gpu = app::load_app_settings(settingsPath);
+    EXPECT_TRUE(gpu.settings.gpuPresentation);
+    EXPECT_TRUE(gpu.warnings.empty());
+    EXPECT_FALSE(gpu.cleanupRequired);
+
+    write_text_file(settingsPath, "[streaming]\ngpu_presentation = 'software'\n");
+    const auto invalid = app::load_app_settings(settingsPath);
+    EXPECT_FALSE(invalid.settings.gpuPresentation);
+    ASSERT_EQ(invalid.warnings.size(), 1U);
+    EXPECT_NE(invalid.warnings.front().find("streaming.gpu_presentation"), std::string::npos);
+  }
+
+  /** @brief A partial settings file derives bitrate from the saved resolution and active frame rate. */
+  TEST_F(SettingsStorageTest, DerivesMissingBitrateFromSavedStreamMode) {
+    write_text_file(settingsPath, "[streaming]\nvideo_width = 1280\nvideo_height = 720\nvideo_mode_selected = true\n");
+    EXPECT_EQ(app::load_app_settings(settingsPath).settings.streamBitrateKbps, 10000);
+  }
+
+  /** @brief Missing settings leave the default stream profile and produce no warnings. */
   TEST_F(SettingsStorageTest, MissingFilesReturnDefaultsWithoutWarnings) {
     const app::LoadAppSettingsResult loadResult = app::load_app_settings(settingsPath);
 
@@ -117,13 +147,15 @@ namespace {
     EXPECT_EQ(loadResult.settings.xemuConsoleLoggingLevel, logging::LogLevel::none);
     EXPECT_EQ(loadResult.settings.logViewerPlacement, app::LogViewerPlacement::full);
     EXPECT_FALSE(loadResult.settings.preferredVideoModeSet);
-    EXPECT_EQ(loadResult.settings.streamFramerate, 30);
-    EXPECT_EQ(loadResult.settings.streamBitrateKbps, 1000);
+    EXPECT_EQ(loadResult.settings.streamFramerate, 60);
+    EXPECT_EQ(loadResult.settings.streamBitrateKbps, 3000);
+    EXPECT_FALSE(loadResult.settings.gpuPresentation);
     EXPECT_FALSE(loadResult.settings.playAudioOnPc);
     EXPECT_FALSE(loadResult.settings.showPerformanceStats);
     EXPECT_TRUE(loadResult.settings.playAudioOnXbox);
   }
 
+  /** @brief Invalid saved preferences produce warnings and fall back to the current defaults. */
   TEST_F(SettingsStorageTest, InvalidValuesFallBackToDefaultsWithWarnings) {
     write_text_file(
       settingsPath,
@@ -149,7 +181,7 @@ namespace {
     EXPECT_EQ(loadResult.settings.xemuConsoleLoggingLevel, logging::LogLevel::none);
     EXPECT_EQ(loadResult.settings.logViewerPlacement, app::LogViewerPlacement::full);
     EXPECT_FALSE(loadResult.settings.preferredVideoModeSet);
-    EXPECT_EQ(loadResult.settings.streamFramerate, 30);
+    EXPECT_EQ(loadResult.settings.streamFramerate, 60);
     EXPECT_FALSE(loadResult.settings.playAudioOnPc);
     EXPECT_TRUE(loadResult.settings.playAudioOnXbox);
   }

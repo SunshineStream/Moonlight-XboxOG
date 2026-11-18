@@ -172,6 +172,7 @@ namespace {
     ASSERT_EQ(state.settings.focusArea, app::SettingsFocusArea::options);
   }
 
+  /** @brief Start on the host toolbar with the default stream profile. */
   TEST(ClientStateTest, StartsOnTheHostsScreenWithTheToolbarSelected) {
     const app::ClientState state = app::create_initial_state();
 
@@ -182,7 +183,9 @@ namespace {
     EXPECT_FALSE(state.shell.shouldExit);
     EXPECT_FALSE(state.hosts.dirty);
     EXPECT_EQ(state.settings.loggingLevel, logging::LogLevel::none);
-    EXPECT_EQ(state.settings.streamFramerate, 30);
+    EXPECT_EQ(state.settings.streamFramerate, 60);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 3000);
+    EXPECT_FALSE(state.settings.presentation.gpuPresentation);
   }
 
   TEST(ClientStateTest, ReplacesHostsFromPersistenceWithoutMarkingThemDirty) {
@@ -1326,6 +1329,7 @@ namespace {
    */
   TEST(ClientStateTest, DisplaySettingsCanCycleXboxVideoModeStreamChoices) {
     app::ClientState state = app::create_initial_state();
+    state.settings.streamFramerate = 30;
     state.settings.availableVideoModes = {
       VIDEO_MODE {640, 480, 32, 60},
       VIDEO_MODE {720, 480, 32, 60},
@@ -1362,6 +1366,7 @@ namespace {
    */
   TEST(ClientStateTest, DisplaySettingsPreserveCustomBitrateWithoutAResolutionChange) {
     app::ClientState state = app::create_initial_state();
+    state.settings.streamFramerate = 30;
     state.settings.availableVideoModes = {VIDEO_MODE {1280, 720, 32, 60}};
     state.settings.preferredVideoMode = state.settings.availableVideoModes.front();
     state.settings.preferredVideoModeSet = true;
@@ -1387,6 +1392,7 @@ namespace {
    */
   TEST(ClientStateTest, DisplaySettingsCanCycleStreamFramerateThroughSixtyFps) {
     app::ClientState state = app::create_initial_state();
+    state.settings.streamFramerate = 30;
     state.settings.preferredVideoMode = VIDEO_MODE {1280, 720, 32, 50};
     state.settings.preferredVideoModeSet = true;
     state.settings.streamBitrateKbps = 750;
@@ -1413,9 +1419,9 @@ namespace {
     state.settings.streamFramerate = 999;
     update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(update.navigation.activatedItemId, "cycle-stream-framerate");
-    EXPECT_EQ(state.settings.streamFramerate, 30);
-    EXPECT_EQ(state.settings.streamBitrateKbps, 5000);
-    EXPECT_EQ(state.shell.statusMessage, "Stream frame rate set to 30 FPS");
+    EXPECT_EQ(state.settings.streamFramerate, 60);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 10000);
+    EXPECT_EQ(state.shell.statusMessage, "Stream frame rate set to 60 FPS");
   }
 
   /**
@@ -1423,6 +1429,7 @@ namespace {
    */
   TEST(ClientStateTest, DisplaySettingsUseDefaultResolutionForFramerateChangesBeforeDetection) {
     app::ClientState state = app::create_initial_state();
+    state.settings.streamFramerate = 30;
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-stream-framerate"));
 
@@ -1478,10 +1485,36 @@ namespace {
     }
   }
 
+  /** @brief Switch from the software default to GPU and back while preserving bitrate and statistics. */
+  TEST(ClientStateTest, DisplaySettingsCanSelectGpuPresentation) {
+    auto state = app::create_initial_state();
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-presentation"));
+    ASSERT_FALSE(state.settings.presentation.gpuPresentation);
+    state.settings.streamBitrateKbps = 4500;
+    state.settings.presentation.showPerformanceStats = true;
+
+    EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
+    EXPECT_TRUE(state.settings.presentation.gpuPresentation);
+    EXPECT_TRUE(state.settings.dirty);
+    ASSERT_NE(state.detailMenu.selected_item(), nullptr);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: GPU");
+    EXPECT_EQ(state.settings.streamBitrateKbps, 4500);
+    EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
+
+    EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
+    EXPECT_FALSE(state.settings.presentation.gpuPresentation);
+    EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
+    ASSERT_NE(state.detailMenu.selected_item(), nullptr);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: Software");
+  }
+
+  /** @brief Toggle audio and statistics independently while retaining the selected presentation path. */
   TEST(ClientStateTest, DisplaySettingsCanToggleXboxAudioAndPerformanceStats) {
     app::ClientState state = app::create_initial_state();
     ASSERT_TRUE(state.settings.playAudioOnXbox);
-    ASSERT_FALSE(state.settings.showPerformanceStats);
+    ASSERT_FALSE(state.settings.presentation.showPerformanceStats);
+    state.settings.presentation.gpuPresentation = true;
 
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
 
@@ -1498,7 +1531,8 @@ namespace {
     update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(update.navigation.activatedItemId, "toggle-show-performance-stats");
     EXPECT_TRUE(update.persistence.settingsChanged);
-    EXPECT_TRUE(state.settings.showPerformanceStats);
+    EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
+    EXPECT_TRUE(state.settings.presentation.gpuPresentation);
     EXPECT_EQ(state.shell.statusMessage, "Performance stats enabled");
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Performance Stats: On");

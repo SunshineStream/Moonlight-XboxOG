@@ -2507,10 +2507,11 @@ namespace {
       state.settings.streamFramerate,
       state.settings.streamBitrateKbps,
       state.settings.playAudioOnPc,
-      state.settings.showPerformanceStats,
+      state.settings.presentation.showPerformanceStats,
       state.settings.playAudioOnXbox,
       state.settings.controls.screenshotDirectory,
       state.settings.controls.keyboardDockTop,
+      state.settings.presentation.gpuPresentation,
     };
   }
 
