@@ -27,8 +27,8 @@ Launch an ISO with the repository's configured xemu installation, for example:
 ```
 
 From a Windows command prompt, use `scripts\run-xemu.cmd --iso` with the same ISO path.
-The probes use GPU presentation directly; `MOONLIGHT_ENABLE_GPU_PRESENTATION` controls the
-streaming client independently.
+The probes use GPU presentation directly. The streaming client selects its path in
+**Settings → Display → Video Presentation**.
 
 ## Presentation probe
 

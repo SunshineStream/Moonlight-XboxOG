@@ -20,6 +20,7 @@
 // local includes
 #include "src/app/screenshot_library.h"
 #include "src/streaming/aligned_media_buffer.h"
+#include "src/streaming/ffmpeg_video_frame.h"
 #include "src/streaming/pvideo_presenter.h"
 #include "src/streaming/stats_overlay.h"
 
@@ -72,6 +73,12 @@ namespace streaming {
      * @param enabled True to decode and play Opus audio on the Xbox.
      */
     void set_audio_playback_enabled(bool enabled);
+
+    /**
+     * @brief Select the preferred presentation path before starting the session.
+     * @param enabled True to try NV2A with automatic software fallback.
+     */
+    void set_gpu_presentation_enabled(bool enabled);
 
     /**
      * @brief Drain any pending screenshot and release FFmpeg, SDL, and cached frame resources.
@@ -365,12 +372,12 @@ namespace streaming {
     int receive_available_video_frames();
 
     /**
-     * @brief Publish one decoded or converted frame for SDL presentation.
+     * @brief Publish one decoded or converted frame for presentation.
      *
-     * @param frameToPresent FFmpeg frame in IYUV-compatible layout.
-     * @return True when the frame was copied into the presentation buffer.
+     * @param frameToPresent FFmpeg frame in I420 layout, emptied on success.
+     * @return True when the frame reference was transferred to the presenter queue.
      */
-    bool publish_video_frame(const AVFrame *frameToPresent);
+    bool publish_video_frame(AVFrame &frameToPresent);
 
     /**
      * @brief Present the latest decoded frame through a platform-specific direct framebuffer path.
@@ -382,30 +389,13 @@ namespace streaming {
     bool render_latest_video_frame_to_framebuffer(int screenWidth, int screenHeight);
 
     /**
-     * @brief Hold the latest IYUV video frame ready for SDL upload.
-     */
-    struct LatestVideoFrame {
-      int width = 0;
-      int height = 0;
-      int yPitch = 0;
-      int uPitch = 0;
-      int vPitch = 0;
-      AlignedMediaBuffer yPlane;  ///< Aligned, padded luma data.
-      AlignedMediaBuffer uPlane;  ///< Aligned, padded blue chroma data.
-      AlignedMediaBuffer vPlane;  ///< Aligned, padded red chroma data.
-      VideoColorMatrix matrix = VideoColorMatrix::bt601;  ///< Color matrix preserved across frame publication.
-      bool fullRange = false;  ///< Source uses full-range YUV.
-      bool interlaced = false;  ///< Source contains interlaced fields.
-    };
-
-    /**
      * @brief Own one bounded screenshot job independently of live rendering and decoding.
      */
     struct ScreenshotTask {
       SDL_Thread *thread = nullptr;  ///< Owned worker, joined after completion or at shutdown.
       std::atomic<bool> complete = false;  ///< Publishes the completed result before the UI can read it.
       std::atomic<int> progress = 0;  ///< Conversion, BMP write and index progress; completion is published separately.
-      LatestVideoFrame frame;  ///< Independently owned snapshot of the uncomposited YUV frame.
+      FfmpegVideoFrame frame;  ///< Separate reference to the uncomposited YUV frame.
       app::ScreenshotSource source;  ///< Original host and app identity.
       std::string directory;  ///< Destination at request time.
       std::int64_t capturedAt = 0;  ///< UTC capture time.
@@ -423,7 +413,7 @@ namespace streaming {
      * @param frame Stable screenshot snapshot.
      * @return Owned BGR surface, or nullptr when conversion fails.
      */
-    static SDL_Surface *convert_screenshot_frame(const LatestVideoFrame &frame);
+    static SDL_Surface *convert_screenshot_frame(const Yuv420FrameView &frame);
 
     /**
      * @brief Hold FFmpeg and SDL state used by the video path.
@@ -442,7 +432,6 @@ namespace streaming {
       int textureHeight = 0;
       std::uint64_t latestFrameVersion = 0;
       std::uint64_t renderedFrameVersion = 0;
-      AlignedMediaBuffer convertedBuffer;  ///< Aligned planar conversion storage.
       std::vector<std::uint8_t> packetBuffer;
 
       /**
@@ -459,9 +448,9 @@ namespace streaming {
 
     public:
       SDL_Rect directFramebufferDestination {0, 0, 0, 0};
-      LatestVideoFrame latestFrame;
-      LatestVideoFrame decodeFrame;
-      LatestVideoFrame renderFrame;
+      FfmpegVideoFrame latestFrame;  ///< Mailbox slot exchanged under frameMutex_.
+      FfmpegVideoFrame decodeFrame;  ///< Decoder-owned slot reused to publish each new reference.
+      FfmpegVideoFrame renderFrame;  ///< Render-thread reference retained for presentation and UI redraws.
       bool directFramebufferCleared = false;
       std::atomic<bool> decoderStopRequested = false;
       std::atomic<bool> hasFrame = false;
@@ -504,6 +493,7 @@ namespace streaming {
     bool statisticsTextureChanged_ = false;  ///< SDL texture requires the current bitmap.
     VideoRectangle statisticsTextureDamage_ {};  ///< Pending SDL texture upload, accumulated until software presentation.
     VideoAccelerationReport acceleration_;  ///< Session diagnostics survive decoder cleanup.
+    bool gpuPresentationEnabled_ = false;  ///< Session opt-in applied before decoder setup.
     bool overlayFailed_ = false;  ///< Avoid repeating a known failing hardware path this session.
     std::atomic<bool> audioPlaybackEnabled_ = false;
   };

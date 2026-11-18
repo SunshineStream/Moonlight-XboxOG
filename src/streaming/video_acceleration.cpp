@@ -54,15 +54,23 @@ namespace streaming {
   }
 
   std::vector<std::string> VideoAccelerationReport::summary_lines() const {
+    const char *presentation = "GPU presentation: no software fallback";
+    if (!fallbackReason.empty()) {
+      presentation = "SOFTWARE FALLBACK USED";
+    } else if (gpuFrames == 0 && softwareFrames == 0) {
+      presentation = "No video frames were presented";
+    } else if (!gpuPresentationRequested) {
+      presentation = "Software presentation selected";
+    }
     std::vector<std::string> lines {
-      fallbackReason.empty() ? (gpuFrames == 0 && softwareFrames == 0 ? "No video frames were presented" : "GPU presentation: no software fallback") : "SOFTWARE FALLBACK USED",
+      presentation,
       "GPU overlay: " + std::to_string(gpuFrames) + " frames | Software: " + std::to_string(softwareFrames) + " frames",
     };
     if (!fallbackReason.empty()) {
       lines.push_back("Reason: " + fallbackReason);
     }
     lines.push_back("FFmpeg: " + cpuFeatures + (threaded ? " | Threading enabled" : " | THREADING DISABLED"));
-    lines.emplace_back("Video decoding: CPU (GPU accelerates presentation)");
+    lines.emplace_back("Video decoding: CPU");
     return lines;
   }
 }  // namespace streaming

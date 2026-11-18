@@ -32,8 +32,6 @@ namespace {
   constexpr const char *SETTINGS_CATEGORY_PREFIX = "settings-category:";
   constexpr std::array<char, 10> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr std::array<char, 10> ADD_HOST_PORT_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
-  constexpr int DEFAULT_STREAM_FRAMERATE = 30;
-  constexpr int DEFAULT_STREAM_BITRATE_KBPS = 1000;
   constexpr std::array<int, 6> STREAM_FRAMERATE_OPTIONS {15, 20, 24, 25, 30, 60};
   constexpr std::array<int, 24> STREAM_BITRATE_OPTIONS {500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000, 19000, 20000};
 
@@ -230,7 +228,7 @@ namespace {
   void cycle_stream_framerate(app::ClientState &state) {
     const auto current = std::find(STREAM_FRAMERATE_OPTIONS.begin(), STREAM_FRAMERATE_OPTIONS.end(), state.settings.streamFramerate);
     if (current == STREAM_FRAMERATE_OPTIONS.end()) {
-      state.settings.streamFramerate = DEFAULT_STREAM_FRAMERATE;
+      state.settings.streamFramerate = app::DEFAULT_STREAM_FRAMERATE;
     } else {
       const std::size_t nextIndex = (static_cast<std::size_t>(std::distance(STREAM_FRAMERATE_OPTIONS.begin(), current)) + 1U) % STREAM_FRAMERATE_OPTIONS.size();
       state.settings.streamFramerate = STREAM_FRAMERATE_OPTIONS[nextIndex];
@@ -596,6 +594,12 @@ namespace {
             "cycle-stream-bitrate",
             std::string("Stream Bitrate: ") + app::format_stream_bitrate_mbps(state.settings.streamBitrateKbps),
             "Cycle through the preferred video bitrate. Lower bitrates reduce bandwidth use. Changing resolution or frame rate resets this value to a recommended default.",
+            true,
+          },
+          {
+            "toggle-gpu-presentation",
+            std::string("Video Presentation: ") + (state.settings.gpuPresentation ? "GPU" : "Software"),
+            "Choose how new streams display decoded video. GPU uses NV2A with automatic software fallback. Software can be faster in xemu.",
             true,
           },
           {
@@ -1892,8 +1896,6 @@ namespace app {
     state.settings.logViewerPlacement = LogViewerPlacement::full;
     state.settings.loggingLevel = logging::LogLevel::none;
     state.settings.xemuConsoleLoggingLevel = logging::LogLevel::none;
-    state.settings.streamFramerate = DEFAULT_STREAM_FRAMERATE;
-    state.settings.streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;
     state.settings.playAudioOnPc = false;
     state.settings.showPerformanceStats = false;
     state.settings.playAudioOnXbox = true;
@@ -2502,6 +2504,14 @@ namespace app {
       update->persistence.settingsChanged = true;
       state.shell.statusMessage = std::string("Stream bitrate set to ") + app::format_stream_bitrate_mbps(state.settings.streamBitrateKbps);
       rebuild_menu(state, "cycle-stream-bitrate");
+      return;
+    }
+    if (detailUpdate.activatedItemId == "toggle-gpu-presentation") {
+      state.settings.gpuPresentation = !state.settings.gpuPresentation;
+      state.settings.dirty = true;
+      update->persistence.settingsChanged = true;
+      state.shell.statusMessage = std::string("Video presentation set to ") + (state.settings.gpuPresentation ? "GPU" : "Software");
+      rebuild_menu(state, "toggle-gpu-presentation");
       return;
     }
     if (detailUpdate.activatedItemId == "toggle-play-audio-on-pc") {

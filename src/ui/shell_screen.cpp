@@ -2511,6 +2511,7 @@ namespace {
       state.settings.playAudioOnXbox,
       state.settings.controls.screenshotDirectory,
       state.settings.controls.keyboardDockTop,
+      state.settings.gpuPresentation,
     };
   }
 

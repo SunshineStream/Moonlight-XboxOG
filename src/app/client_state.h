@@ -75,6 +75,9 @@ namespace app {
     right,  ///< Dock the log viewer on the right side of the split layout.
   };
 
+  inline constexpr int DEFAULT_STREAM_FRAMERATE = 60;  ///< Stream frame rate at the default 640x480 resolution.
+  inline constexpr int DEFAULT_STREAM_BITRATE_KBPS = 3000;  ///< Bitrate for the default 640x480, 60 FPS profile.
+
   /**
    * @brief Focus areas used by the two-pane settings screen.
    */
@@ -393,8 +396,9 @@ namespace app {
     std::vector<VIDEO_MODE> availableVideoModes;  ///< Detected Xbox video modes exposed as stream-resolution choices.
     VIDEO_MODE preferredVideoMode {};  ///< Preferred stream resolution requested from the host.
     bool preferredVideoModeSet = false;  ///< True when preferredVideoMode contains a user-selected or default mode.
-    int streamFramerate = 30;  ///< Preferred stream frame rate in frames per second.
-    int streamBitrateKbps = 1000;  ///< Preferred stream bitrate in kilobits per second.
+    int streamFramerate = DEFAULT_STREAM_FRAMERATE;  ///< Preferred stream frame rate in frames per second.
+    int streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;  ///< Preferred stream bitrate in kilobits per second.
+    bool gpuPresentation = false;  ///< Opt in to NV2A presentation with software fallback on new streams.
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
@@ -508,7 +512,7 @@ namespace app {
   };
 
   /**
-   * @brief Create the initial app state shown after startup.
+   * @brief Create the initial app state with the default stream preferences.
    *
    * @return The initial client state.
    */
