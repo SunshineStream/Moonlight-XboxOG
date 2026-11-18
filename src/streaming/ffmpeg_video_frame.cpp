@@ -58,8 +58,7 @@ namespace {
         return {};
       }
       const auto offset = reinterpret_cast<std::uintptr_t>(frame.data[i]) - reinterpret_cast<std::uintptr_t>(buffer->data);
-      const auto required = static_cast<std::uint64_t>(height - 1) * frame.linesize[i] + width;
-      if (offset > buffer->size || required > buffer->size - offset) {
+      if (const auto required = static_cast<std::uint64_t>(height - 1) * frame.linesize[i] + width; offset > buffer->size || required > buffer->size - offset) {
         return {};
       }
       view.planes[i] = frame.data[i];
@@ -75,12 +74,19 @@ namespace streaming {
     av_frame_free(&frame_);
   }
 
+  bool FfmpegVideoFrame::ensure_frame_allocated() {
+    if (frame_ == nullptr) {
+      frame_ = av_frame_alloc();
+    }
+    return frame_ != nullptr;
+  }
+
   bool FfmpegVideoFrame::take(AVFrame &source) {
     const auto view = make_view(source);
     if (view.width == 0) {
       return false;
     }
-    if (frame_ == nullptr && (frame_ = av_frame_alloc()) == nullptr) {
+    if (!ensure_frame_allocated()) {
       return false;
     }
     av_frame_unref(frame_);
@@ -93,7 +99,10 @@ namespace streaming {
     if (this == &source) {
       return view_.width > 0;
     }
-    if (source.view_.width == 0 || (frame_ == nullptr && (frame_ = av_frame_alloc()) == nullptr)) {
+    if (source.view_.width == 0) {
+      return false;
+    }
+    if (!ensure_frame_allocated()) {
       return false;
     }
     clear();

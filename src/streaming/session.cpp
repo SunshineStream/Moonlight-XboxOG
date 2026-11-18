@@ -1505,7 +1505,7 @@ namespace streaming {
     const VIDEO_MODE &activeStreamVideoMode = scopedStreamVideoMode.active_video_mode();
 
     StreamUiResources resources {};
-    resources.statisticsEnabled = settings.showPerformanceStats;
+    resources.statisticsEnabled = settings.presentation.showPerformanceStats;
     if (std::string initializationError; !initialize_stream_ui_resources(window, activeStreamVideoMode, preferredController, &resources, &initializationError)) {
       assign_status_message(statusMessage, initializationError);
       logging::error("stream", initializationError);
@@ -1567,7 +1567,7 @@ namespace streaming {
       std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps" + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
     );
     resources.mediaBackend.set_audio_playback_enabled(settings.playAudioOnXbox);
-    resources.mediaBackend.set_gpu_presentation_enabled(settings.gpuPresentation);
+    resources.mediaBackend.set_gpu_presentation_enabled(settings.presentation.gpuPresentation);
     logging::info("stream", std::string("Xbox audio playback ") + (settings.playAudioOnXbox ? "enabled" : "disabled for lower decode latency"));
     logging::debug(
       "stream",

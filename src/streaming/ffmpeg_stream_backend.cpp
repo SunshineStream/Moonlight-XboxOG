@@ -1242,16 +1242,7 @@ namespace streaming {
           return allocation;
         }
 
-        const int scaled = sws_scale(
-          video_.scaleContext,
-          video_.decodedFrame->data,
-          video_.decodedFrame->linesize,
-          0,
-          video_.decodedFrame->height,
-          video_.convertedFrame->data,
-          video_.convertedFrame->linesize
-        );
-        if (scaled != video_.convertedFrame->height) {
+        if (const int scaled = sws_scale(video_.scaleContext, video_.decodedFrame->data, video_.decodedFrame->linesize, 0, video_.decodedFrame->height, video_.convertedFrame->data, video_.convertedFrame->linesize); scaled != video_.convertedFrame->height) {
           logging::warn("stream", "sws_scale failed to convert the full video frame");
           av_frame_unref(video_.decodedFrame);
           av_frame_unref(video_.convertedFrame);

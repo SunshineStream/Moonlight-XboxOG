@@ -55,6 +55,12 @@ namespace streaming {
     [[nodiscard]] const Yuv420FrameView &view() const noexcept;
 
   private:
+    /**
+     * @brief Lazily allocate the reusable frame structure.
+     * @return True when the slot has a frame structure.
+     */
+    bool ensure_frame_allocated();
+
     AVFrame *frame_ = nullptr;  ///< Lazily allocated frame structure reused on each handoff.
     Yuv420FrameView view_ {};  ///< Bounds and metadata for the buffers owned by frame_.
   };

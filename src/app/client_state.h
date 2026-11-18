@@ -382,6 +382,14 @@ namespace app {
   };
 
   /**
+   * @brief Preferences for presenting decoded video and its on-screen statistics.
+   */
+  struct VideoPresentationPreferences {
+    bool gpuPresentation = false;  ///< Opt in to NV2A presentation with software fallback on new streams.
+    bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
+  };
+
+  /**
    * @brief State owned by the settings, log viewer, and saved-file workflows.
    */
   struct SettingsState {
@@ -398,9 +406,8 @@ namespace app {
     bool preferredVideoModeSet = false;  ///< True when preferredVideoMode contains a user-selected or default mode.
     int streamFramerate = DEFAULT_STREAM_FRAMERATE;  ///< Preferred stream frame rate in frames per second.
     int streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;  ///< Preferred stream bitrate in kilobits per second.
-    bool gpuPresentation = false;  ///< Opt in to NV2A presentation with software fallback on new streams.
+    VideoPresentationPreferences presentation;  ///< Presentation path and statistics overlay preferences.
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
-    bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
     LocalStreamPreferences controls;  ///< Screenshot storage and keyboard placement preferences.
     bool dirty = false;  ///< True when persisted TOML-backed settings changed and should be saved.
