@@ -7,9 +7,9 @@
 
 // standard includes
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <new>
 #include <utility>
 
 namespace {
@@ -35,9 +35,12 @@ namespace {
    * @return Straight ARGB color.
    */
   std::uint32_t straight_argb(const std::uint8_t *pixel, bool opaqueBackground) {
-    const unsigned opacity = opaqueBackground ? 255 : pixel[3];
-    const unsigned color = pixel[0] | (static_cast<unsigned>(pixel[1]) << 8) | (static_cast<unsigned>(pixel[2]) << 16);
-    if (opacity == 255 || color == 0) {
+    const auto *bytes = reinterpret_cast<const std::byte *>(pixel);
+    const unsigned blue = std::to_integer<unsigned>(bytes[0]);
+    const unsigned green = std::to_integer<unsigned>(bytes[1]);
+    const unsigned red = std::to_integer<unsigned>(bytes[2]);
+    const unsigned opacity = opaqueBackground ? 255 : std::to_integer<unsigned>(bytes[3]);
+    if (const unsigned color = blue | (green << 8) | (red << 16); opacity == 255 || color == 0) {
       return (opacity << 24) | color;
     }
     if (opacity == 0) {
@@ -46,7 +49,7 @@ namespace {
     const auto channel = [opacity](unsigned value) {
       return std::min(255U, (value * 255 + opacity / 2) / opacity);
     };
-    return (opacity << 24) | (channel(pixel[2]) << 16) | (channel(pixel[1]) << 8) | channel(pixel[0]);
+    return (opacity << 24) | (channel(red) << 16) | (channel(green) << 8) | channel(blue);
   }
 
   /**
@@ -486,10 +489,10 @@ namespace streaming {
       // Local menus must return their converted buffers to the 64 MiB console
       // budget when dismissed, rather than retaining full-screen capacities.
       std::vector<std::uint8_t>().swap(rgb_);
-      yuy2_.reset();
-      yuy2Capacity_ = 0;
+      yuy2_.bytes.reset();
+      yuy2_.capacity = 0;
     }
-    frameWidth_ = 0;
+    yuy2_.frameWidth = 0;
   }
 
   int VideoOverlay::width() const {
@@ -603,46 +606,48 @@ namespace streaming {
   }
 
   bool VideoOverlay::prepare_yuy2(int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix, bool &rebuild) {
-    rebuild = frameWidth_ != frameWidth || frameHeight_ != frameHeight || outputWidth_ != destination.width || outputHeight_ != destination.height || matrix_ != matrix;
+    rebuild = yuy2_.frameWidth != frameWidth || yuy2_.frameHeight != frameHeight || yuy2_.outputWidth != destination.width || yuy2_.outputHeight != destination.height || yuy2_.matrix != matrix;
     if (rebuild) {
-      matrix_ = matrix;
-      frameWidth_ = frameWidth;
-      frameHeight_ = frameHeight;
-      outputWidth_ = destination.width;
-      outputHeight_ = destination.height;
+      yuy2_.matrix = matrix;
+      yuy2_.frameWidth = frameWidth;
+      yuy2_.frameHeight = frameHeight;
+      yuy2_.outputWidth = destination.width;
+      yuy2_.outputHeight = destination.height;
       const auto bounds = rectangle({0, 0, destination.width, destination.height});
+      auto &source = yuy2_.source;
       if (bounds.width == 0 || bounds.height == 0) {
-        source_ = {};
+        source = {};
         return true;
       }
-      source_.x = (static_cast<int>(static_cast<std::int64_t>(bounds.x) * frameWidth / destination.width) + 1) & ~1;
-      source_.y = static_cast<int>(static_cast<std::int64_t>(bounds.y) * frameHeight / destination.height);
+      source.x = (static_cast<int>(static_cast<std::int64_t>(bounds.x) * frameWidth / destination.width) + 1) & ~1;
+      source.y = static_cast<int>(static_cast<std::int64_t>(bounds.y) * frameHeight / destination.height);
       const int visibleWidth = bounds.width;
       const int visibleHeight = bounds.height;
-      source_.width = std::min(frameWidth - source_.x, ((visibleWidth * frameWidth + destination.width - 1) / destination.width + 1) & ~1);
-      source_.height = std::min(frameHeight - source_.y, (visibleHeight * frameHeight + destination.height - 1) / destination.height);
-      if (source_.width <= 0 || source_.height <= 0) {
+      source.width = std::min(frameWidth - source.x, ((visibleWidth * frameWidth + destination.width - 1) / destination.width + 1) & ~1);
+      source.height = std::min(frameHeight - source.y, (visibleHeight * frameHeight + destination.height - 1) / destination.height);
+      if (source.width <= 0 || source.height <= 0) {
         return true;
       }
-      bitmapBounds_ = bitmap_rectangle(bounds);
-      repeatCacheRows_ = scale_ == 2 && source_.width == bitmapBounds_.width * 2 && source_.height == bitmapBounds_.height * 2;
-      cacheHeight_ = repeatCacheRows_ ? bitmapBounds_.height : source_.height;
+      const auto bitmap = bitmap_rectangle(bounds);
+      yuy2_.bitmapBounds = bitmap;
+      yuy2_.repeatRows = scale_ == 2 && source.width == bitmap.width * 2 && source.height == bitmap.height * 2;
+      yuy2_.height = yuy2_.repeatRows ? bitmap.height : source.height;
       // At 1x and exact 2x scaling the packed pairs can reuse the raster's alpha.
       // At 2x both luma pixels and both output rows share one raster sample.
-      sharedCoverage_ = sharedArgb_ && (repeatCacheRows_ || (bitmapBounds_.width == source_.width && bitmapBounds_.height == source_.height));
-      const auto pixels = static_cast<std::size_t>(source_.width) * cacheHeight_;
-      if (const auto required = pixels * (opaque_ || sharedCoverage_ ? 2 : 3); required > yuy2Capacity_) {
+      yuy2_.sharedCoverage = sharedArgb_ && (yuy2_.repeatRows || (bitmap.width == source.width && bitmap.height == source.height));
+      const auto pixels = static_cast<std::size_t>(source.width) * yuy2_.height;
+      if (const auto required = pixels * (opaque_ || yuy2_.sharedCoverage ? 2 : 3); required > yuy2_.capacity) {
         // On the Xbox, growing a vector can dereference a failed allocation.
         // Free the old cache before requesting its replacement. The presenter
         // can release its GPU buffers and draw the same panel in software.
-        yuy2_.reset();
-        yuy2Capacity_ = 0;
-        yuy2_.reset(new (std::nothrow) std::uint8_t[required]);
-        if (!yuy2_) {
-          frameWidth_ = 0;
+        yuy2_.bytes.reset();
+        yuy2_.capacity = 0;
+        yuy2_.bytes.reset(static_cast<std::uint8_t *>(moonlight_ffmpeg_aligned_malloc(required, alignof(void *))));
+        if (!yuy2_.bytes) {
+          yuy2_.frameWidth = 0;
           return false;
         }
-        yuy2Capacity_ = required;
+        yuy2_.capacity = required;
       }
     }
     return true;
@@ -667,91 +672,87 @@ namespace streaming {
     return (first * firstAlpha + second * secondAlpha + coverage / 2) / coverage;
   }
 
-  void VideoOverlay::convert_yuy2_pair(int row, int column, int bitmapRow, int firstBitmapColumn, int secondBitmapColumn, VideoColorMatrix matrix) {
+  void VideoOverlay::convert_yuy2_pair(int bitmapRow, int firstBitmapColumn, int secondBitmapColumn, VideoColorMatrix matrix, std::uint8_t *packed, std::uint8_t *coverage) const {
     const auto firstColor = color_at(static_cast<std::size_t>(bitmapRow) * width_ + firstBitmapColumn);
     const auto secondColor = firstBitmapColumn == secondBitmapColumn ? firstColor : color_at(static_cast<std::size_t>(bitmapRow) * width_ + secondBitmapColumn);
     const auto first = rgb_to_yuv(firstColor, matrix);
     const auto second = firstColor == secondColor ? first : rgb_to_yuv(secondColor, matrix);
     const unsigned firstAlpha = firstColor >> 24;
     const unsigned secondAlpha = secondColor >> 24;
-    const auto offset = (static_cast<std::size_t>(row) * source_.width + column) * 2;
-    yuy2_[offset] = first[0];
-    yuy2_[offset + 2] = second[0];
+    packed[0] = first[0];
+    packed[2] = second[0];
     // Weight shared chroma by coverage so a transparent colored pixel
     // cannot tint its opaque neighbor or desaturate the host underneath.
     // Most wheel/key pixels are gray. Equal chroma needs no coverage
     // division, including antialiased text and partially dimmed video.
-    yuy2_[offset + 1] = covered_chroma(first[1], second[1], firstAlpha, secondAlpha);
-    yuy2_[offset + 3] = covered_chroma(first[2], second[2], firstAlpha, secondAlpha);
-    if (!opaque_ && !sharedCoverage_) {
-      const auto packedBytes = static_cast<std::size_t>(source_.width) * cacheHeight_ * 2;
-      yuy2_[packedBytes + offset / 2] = firstAlpha;
-      yuy2_[packedBytes + offset / 2 + 1] = secondAlpha;
+    packed[1] = covered_chroma(first[1], second[1], firstAlpha, secondAlpha);
+    packed[3] = covered_chroma(first[2], second[2], firstAlpha, secondAlpha);
+    if (coverage != nullptr) {
+      coverage[0] = firstAlpha;
+      coverage[1] = secondAlpha;
     }
   }
 
   void VideoOverlay::update_yuy2(VideoColorMatrix matrix, bool rebuild) {
-    const int visibleWidth = bitmapBounds_.width;
-    const int visibleHeight = bitmapBounds_.height;
-    if (visibleWidth == 0 || visibleHeight == 0) {
-      return;
-    }
-    const int firstRow = rebuild ? 0 : std::min(cacheHeight_, damage_.y * cacheHeight_ / visibleHeight);
-    const int lastRow = rebuild ? cacheHeight_ : std::min(cacheHeight_, ((damage_.y + damage_.height) * cacheHeight_ + visibleHeight - 1) / visibleHeight);
-    const int firstColumn = rebuild ? 0 : std::min(source_.width, (damage_.x * source_.width / visibleWidth) & ~1);
-    const int lastColumn = rebuild ? source_.width : std::min(source_.width, ((((damage_.x + damage_.width) * source_.width + visibleWidth - 1) / visibleWidth) + 1) & ~1);
-    const bool nativeWidth = visibleWidth == source_.width;
+    const int visibleWidth = yuy2_.bitmapBounds.width;
+    const int visibleHeight = yuy2_.bitmapBounds.height;
+    const int cacheWidth = yuy2_.source.width;
+    const int cacheHeight = yuy2_.height;
+    const int firstRow = rebuild ? 0 : std::min(cacheHeight, damage_.y * cacheHeight / visibleHeight);
+    const int lastRow = rebuild ? cacheHeight : std::min(cacheHeight, ((damage_.y + damage_.height) * cacheHeight + visibleHeight - 1) / visibleHeight);
+    const int firstColumn = rebuild ? 0 : std::min(cacheWidth, (damage_.x * cacheWidth / visibleWidth) & ~1);
+    const int lastColumn = rebuild ? cacheWidth : std::min(cacheWidth, ((((damage_.x + damage_.width) * cacheWidth + visibleWidth - 1) / visibleWidth) + 1) & ~1);
+    const bool nativeWidth = visibleWidth == cacheWidth;
+    auto *const packed = yuy2_.bytes.get();
+    auto *const coverage = opaque_ || yuy2_.sharedCoverage ? nullptr : packed + static_cast<std::size_t>(cacheWidth) * cacheHeight * 2;
     for (int row = firstRow; row < lastRow; ++row) {
-      const int bitmapRow = std::min(visibleHeight - 1, row * visibleHeight / cacheHeight_);
+      const int bitmapRow = std::min(visibleHeight - 1, row * visibleHeight / cacheHeight);
+      const auto rowOffset = static_cast<std::size_t>(row) * cacheWidth;
       for (int column = firstColumn; column < lastColumn; column += 2) {
-        const int firstBitmapColumn = nativeWidth ? column : std::min(visibleWidth - 1, column * visibleWidth / source_.width);
-        const int secondBitmapColumn = nativeWidth ? column + 1 : std::min(visibleWidth - 1, (column + 1) * visibleWidth / source_.width);
-        convert_yuy2_pair(row, column, bitmapRow, firstBitmapColumn, secondBitmapColumn, matrix);
+        const int firstBitmapColumn = nativeWidth ? column : std::min(visibleWidth - 1, column * visibleWidth / cacheWidth);
+        const int secondBitmapColumn = nativeWidth ? column + 1 : std::min(visibleWidth - 1, (column + 1) * visibleWidth / cacheWidth);
+        const auto offset = rowOffset + column;
+        convert_yuy2_pair(bitmapRow, firstBitmapColumn, secondBitmapColumn, matrix, packed + offset * 2, coverage != nullptr ? coverage + offset : nullptr);
       }
     }
+    damage_ = {};
   }
 
-  void VideoOverlay::blend_yuy2(std::uint8_t *pixels, int pitch) {
-    damage_ = {};
-
-    if (source_.width <= 0 || source_.height <= 0) {
-      return;
-    }
-    const auto *cacheCoverage = yuy2_.get() + static_cast<std::size_t>(source_.width) * cacheHeight_ * 2;
-    const int coverageStride = sharedCoverage_ ? 4 : 1;
-    for (int row = 0; row < source_.height; ++row) {
-      auto *destinationRow = pixels + static_cast<std::size_t>(source_.y + row) * pitch + source_.x * 2;
-      const int cacheRow = repeatCacheRows_ ? row / 2 : row;
-      const auto rowOffset = static_cast<std::size_t>(cacheRow) * source_.width;
-      const auto *foreground = yuy2_.get() + rowOffset * 2;
+  void VideoOverlay::blend_yuy2(std::uint8_t *pixels, int pitch) const {
+    const auto &source = yuy2_.source;
+    const auto *cacheCoverage = yuy2_.bytes.get() + static_cast<std::size_t>(source.width) * yuy2_.height * 2;
+    const int coverageStride = yuy2_.sharedCoverage ? 4 : 1;
+    for (int row = 0; row < source.height; ++row) {
+      auto *destinationRow = pixels + static_cast<std::size_t>(source.y + row) * pitch + source.x * 2;
+      const int cacheRow = yuy2_.repeatRows ? row / 2 : row;
+      const auto rowOffset = static_cast<std::size_t>(cacheRow) * source.width;
+      const auto *foreground = yuy2_.bytes.get() + rowOffset * 2;
       if (opaque_) {
-        std::memcpy(destinationRow, foreground, source_.width * 2);
+        std::memcpy(destinationRow, foreground, source.width * 2);
         continue;
       }
-      const auto *coverage = sharedCoverage_ ? sharedArgb_.get() + static_cast<std::size_t>(cacheRow) * width_ * 4 + 3 : cacheCoverage + rowOffset;
-      {
-        for (int column = 0; column < source_.width; column += 2) {
-          const unsigned left = coverage[(repeatCacheRows_ ? column / 2 : column) * coverageStride];
-          const unsigned right = repeatCacheRows_ ? left : coverage[(column + 1) * coverageStride];
-          if (left == 0 && right == 0) {
-            continue;
-          }
-          auto *pair = destinationRow + column * 2;
-          if (left == 255 && right == 255) {
-            pair[0] = foreground[column * 2];
-            pair[1] = foreground[column * 2 + 1];
-            pair[2] = foreground[column * 2 + 2];
-            pair[3] = foreground[column * 2 + 3];
-            continue;
-          }
-          pair[0] = blend_byte(pair[0], foreground[column * 2], left);
-          pair[2] = blend_byte(pair[2], foreground[column * 2 + 2], right);
-          // A YUY2 pair shares chroma: average its two luma coverages rather
-          // than destroying the host color beside a transparent UI pixel.
-          const unsigned chroma = (left + right + 1) / 2;
-          pair[1] = blend_byte(pair[1], foreground[column * 2 + 1], chroma);
-          pair[3] = blend_byte(pair[3], foreground[column * 2 + 3], chroma);
+      const auto *coverage = yuy2_.sharedCoverage ? sharedArgb_.get() + static_cast<std::size_t>(cacheRow) * width_ * 4 + 3 : cacheCoverage + rowOffset;
+      for (int column = 0; column < source.width; column += 2) {
+        const unsigned left = coverage[(yuy2_.repeatRows ? column / 2 : column) * coverageStride];
+        const unsigned right = yuy2_.repeatRows ? left : coverage[(column + 1) * coverageStride];
+        if (left == 0 && right == 0) {
+          continue;
         }
+        auto *pair = destinationRow + column * 2;
+        if (left == 255 && right == 255) {
+          pair[0] = foreground[column * 2];
+          pair[1] = foreground[column * 2 + 1];
+          pair[2] = foreground[column * 2 + 2];
+          pair[3] = foreground[column * 2 + 3];
+          continue;
+        }
+        pair[0] = blend_byte(pair[0], foreground[column * 2], left);
+        pair[2] = blend_byte(pair[2], foreground[column * 2 + 2], right);
+        // A YUY2 pair shares chroma: average its two luma coverages rather
+        // than destroying the host color beside a transparent UI pixel.
+        const unsigned chroma = (left + right + 1) / 2;
+        pair[1] = blend_byte(pair[1], foreground[column * 2 + 1], chroma);
+        pair[3] = blend_byte(pair[3], foreground[column * 2 + 3], chroma);
       }
     }
   }
@@ -767,7 +768,7 @@ namespace streaming {
     if (!prepare_yuy2(frameWidth, frameHeight, destination, matrix, rebuild)) {
       return false;
     }
-    if (source_.width <= 0 || source_.height <= 0) {
+    if (yuy2_.source.width <= 0 || yuy2_.source.height <= 0) {
       return true;
     }
     if (rebuild || (damage_.width > 0 && damage_.height > 0)) {

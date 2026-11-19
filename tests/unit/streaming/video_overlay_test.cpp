@@ -742,10 +742,11 @@ TEST(VideoOverlayTest, DoublesSharedRasterForGpuAndSoftwareScanout) {
         ASSERT_TRUE(compact.update_shared_argb_surface({5, 7, 1, 1}));
       }
       std::vector<std::uint8_t> expanded(outputWidth * height * 2 * 4);
-      for (int y = 0; y < height * 2; ++y) {
-        for (int x = 0; x < outputWidth; ++x) {
-          std::memcpy(expanded.data() + (y * outputWidth + x) * 4, raster->data() + (y / 2 * width + x / 2) * 4, 4);
-        }
+      for (int index = 0; index < outputWidth * height * 2; ++index) {
+        const int x = index % outputWidth;
+        const int y = index / outputWidth;
+        const int sourceIndex = y / 2 * width + x / 2;
+        std::memcpy(expanded.data() + index * 4, raster->data() + sourceIndex * 4, 4);
       }
       streaming::VideoOverlay reference;
       ASSERT_TRUE(reference.set_argb_surface(outputWidth, height * 2, expanded.data(), expanded.size(), outputWidth * 4, placement, opaque));

@@ -8,6 +8,7 @@
 #include <memory>
 
 // local includes
+#include "src/_nxdk_compat/ffmpeg_memory.h"
 #include "src/streaming/video_acceleration.h"
 
 namespace streaming {
@@ -246,15 +247,15 @@ namespace streaming {
      */
     bool prepare_yuy2(int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix, bool &rebuild);
     /**
-     * @brief Convert one YUY2 pixel pair into the retained cache.
-     * @param row Cache row.
-     * @param column Cache pair column.
+     * @brief Convert two raster pixels into a packed YUY2 pair and optional coverage bytes.
      * @param bitmapRow Mapped source row.
      * @param firstBitmapColumn First mapped source column.
      * @param secondBitmapColumn Second mapped source column.
      * @param matrix Host color matrix.
+     * @param packed Four writable YUY2 bytes.
+     * @param coverage Two writable coverage bytes, or null when coverage is stored elsewhere.
      */
-    void convert_yuy2_pair(int row, int column, int bitmapRow, int firstBitmapColumn, int secondBitmapColumn, VideoColorMatrix matrix);
+    void convert_yuy2_pair(int bitmapRow, int firstBitmapColumn, int secondBitmapColumn, VideoColorMatrix matrix, std::uint8_t *packed, std::uint8_t *coverage) const;
     /**
      * @brief Refresh only damaged YUY2 cache rows and columns.
      * @param matrix Host color matrix.
@@ -266,7 +267,7 @@ namespace streaming {
      * @param pixels Framebuffer storage.
      * @param pitch Framebuffer row stride.
      */
-    void blend_yuy2(std::uint8_t *pixels, int pitch);
+    void blend_yuy2(std::uint8_t *pixels, int pitch) const;
 
     /**
      * @brief Resolve either source format to one straight ARGB pixel.
@@ -295,6 +296,25 @@ namespace streaming {
      * @param bpp RGB pixel depth.
      */
     void prepare_rgb(int bpp);
+
+    /**
+     * @brief Retain converted GPU colors, coverage and the geometry they describe.
+     */
+    struct Yuy2Cache {
+      std::unique_ptr<std::uint8_t, decltype(&moonlight_ffmpeg_aligned_free)> bytes {nullptr, moonlight_ffmpeg_aligned_free};  ///< Packed colors followed by optional coverage.
+      std::size_t capacity = 0;  ///< Bytes available for colors and coverage.
+      bool sharedCoverage = false;  ///< Read coverage directly from the retained raster.
+      bool repeatRows = false;  ///< Each cached row serves two output rows at 2x.
+      int height = 0;  ///< Number of physically stored rows.
+      VideoRectangle bitmapBounds {};  ///< Visible source raster used to prepare the cache.
+      VideoRectangle source {};  ///< Panel bounds in source luma pixels.
+      int frameWidth = 0;  ///< Source frame width, or zero when the cache is invalid.
+      int frameHeight = 0;  ///< Source frame height.
+      int outputWidth = 0;  ///< Video output rectangle width.
+      int outputHeight = 0;  ///< Video output rectangle height.
+      VideoColorMatrix matrix = VideoColorMatrix::bt601;  ///< Host matrix used to encode the cache.
+    };
+
     int width_ = 0;  ///< Packed panel width.
     int height_ = 0;  ///< Packed panel height.
     int scale_ = 1;  ///< Output pixels per raster pixel.
@@ -307,17 +327,6 @@ namespace streaming {
     bool opaque_ = true;  ///< Fully opaque panels use row-copy presentation paths.
     std::vector<std::uint8_t> rgb_;  ///< Cached RGB panel.
     int rgbBpp_ = 0;  ///< Pixel format of the RGB cache.
-    std::unique_ptr<std::uint8_t[]> yuy2_;  ///< Packed GPU panel followed by its optional coverage plane.
-    std::size_t yuy2Capacity_ = 0;  ///< Allocated bytes shared by the packed colors and coverage.
-    bool sharedCoverage_ = false;  ///< Read coverage directly from the retained raster.
-    bool repeatCacheRows_ = false;  ///< At 2x presentation, each cached row serves two output rows.
-    int cacheHeight_ = 0;  ///< Number of rows physically stored in the YUY2 cache.
-    VideoRectangle bitmapBounds_ {};  ///< Visible source raster used by the YUY2 cache.
-    VideoRectangle source_ {};  ///< Panel bounds in source luma pixels.
-    int frameWidth_ = 0;  ///< Source width used by the YUY2 cache.
-    int frameHeight_ = 0;  ///< Source height used by the YUY2 cache.
-    int outputWidth_ = 0;  ///< Output width used by the YUY2 cache.
-    int outputHeight_ = 0;  ///< Output height used by the YUY2 cache.
-    VideoColorMatrix matrix_ = VideoColorMatrix::bt601;  ///< Host matrix used to encode cached UI colors.
+    Yuy2Cache yuy2_;  ///< GPU overlay cache and its associated geometry.
   };
 }  // namespace streaming
