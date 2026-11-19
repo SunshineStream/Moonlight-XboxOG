@@ -1804,8 +1804,7 @@ namespace {
     }
 
     if (state.modal.id == app::ModalId::stream_summary) {
-      const auto confirm = state.shell.inputDevice == input::UiInputDevice::keyboard ? input::UiCommand::confirm : input::UiCommand::activate;
-      if (command == confirm) {
+      if (const auto confirm = state.shell.inputDevice == input::UiInputDevice::keyboard ? input::UiCommand::confirm : input::UiCommand::activate; command == confirm) {
         close_modal_and_mark_closed(state, update);
         if (update != nullptr) {
           update->navigation.activatedItemId = "confirm-stream-summary";

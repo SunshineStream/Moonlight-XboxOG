@@ -961,7 +961,7 @@ namespace {
       return false;
     }
 
-    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface(TTF_RenderUTF8_Blended_Wrapped(font, text.c_str(), color, static_cast<Uint32>(bounds.w)), SDL_FreeSurface);
+    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface(TTF_RenderUTF8_Blended_Wrapped(font, text.c_str(), color, static_cast<Uint32>(bounds.w)), &SDL_FreeSurface);
     return surface && render_text_surface(renderer, surface.get(), bounds);
   }
 
@@ -1171,8 +1171,12 @@ namespace {
     const int titleHeight = TTF_FontLineSkip(resources.titleFont);
     const int bodyTop = 28 + titleHeight + 12;
     constexpr int progressHeight = 8;
-    int footerWidth = 0;
-    const int footerTextHeight = footer.empty() ? 0 : TTF_FontLineSkip(resources.bodyFont) * ((TTF_SizeUTF8(resources.bodyFont, footer.c_str(), &footerWidth, nullptr) == 0 && footerWidth > innerWidth) ? 2 : 1);
+    int footerTextHeight = 0;
+    if (!footer.empty()) {
+      int footerWidth = 0;
+      const bool wraps = TTF_SizeUTF8(resources.bodyFont, footer.c_str(), &footerWidth, nullptr) == 0 && footerWidth > innerWidth;
+      footerTextHeight = TTF_FontLineSkip(resources.bodyFont) * (wraps ? 2 : 1);
+    }
     const int footerHeight = progressHeight + 12 + footerTextHeight;
     const int maxBodyHeight = screenHeight - screenHeight / 10 - bodyTop - footerHeight - 2 * padding;
     if (innerWidth <= 0 || maxBodyHeight <= 0) {

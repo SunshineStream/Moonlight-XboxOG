@@ -3727,10 +3727,9 @@ namespace {
 
       std::vector<unsigned char> assetBytes;
       if (!network::query_app_asset(task->address, task->port, &clientIdentity, appRecord.id, &assetBytes, nullptr, &task->cancelRequested)) {
-        if (task->cancelRequested.load()) {
-          break;
+        if (!task->cancelRequested.load()) {
+          ++task->failureCount;
         }
-        ++task->failureCount;
         continue;
       }
 
@@ -5355,8 +5354,7 @@ namespace {
     }
 
     const Uint32 preparationStarted = SDL_GetTicks();
-    const auto launchDialog = ui::build_stream_launch_dialog(*streamHost, *streamApp);
-    if (!draw_current_shell_frame(activeVideoMode, state, resources, runtime, &launchDialog)) {
+    if (const auto launchDialog = ui::build_stream_launch_dialog(*streamHost, *streamApp); !draw_current_shell_frame(activeVideoMode, state, resources, runtime, &launchDialog)) {
       return false;
     }
     runtime->keypadRedrawRequested = true;

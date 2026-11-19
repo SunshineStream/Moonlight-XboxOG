@@ -65,9 +65,8 @@ namespace ui {
     for (int segment = 0; segment < count; ++segment) {
       const int left = segment * trackWidth / count;
       const int right = (segment + 1) * trackWidth / count;
-      const SDL_Color color = segment < step  ? SDL_Color {0x82, 0xB4, 0xFF, 255} :
-                              segment == step ? SDL_Color {0x4D, 0x77, 0xB3, 255} :
-                                                SDL_Color {0x30, 0x3D, 0x52, 255};
+      const SDL_Color activeOrPending = segment == step ? SDL_Color {0x4D, 0x77, 0xB3, 255} : SDL_Color {0x30, 0x3D, 0x52, 255};
+      const SDL_Color color = segment < step ? SDL_Color {0x82, 0xB4, 0xFF, 255} : activeOrPending;
       draw_dialog_round_rect(renderer, {rect.x + left + gap * segment, rect.y, right - left, rect.h}, color, 2);
     }
   }

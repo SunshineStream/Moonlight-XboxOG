@@ -1249,7 +1249,7 @@ namespace {
    * @brief Artwork yields to stream startup without starting or retrying a request after cancellation.
    */
   TEST(HostPairingTest, QueryAppAssetStopsTryingPathsWhenCancelled) {
-    std::atomic<bool> cancelled {false};
+    std::atomic cancelled {false};
     std::size_t callCount = 0U;
     ScopedHostPairingHttpTestHandler guard([&](const HostPairingHttpTestRequest &, HostPairingHttpTestResponse *response, std::string *, const std::atomic<bool> *cancelRequested) {
       EXPECT_EQ(cancelRequested, &cancelled);
