@@ -42,6 +42,29 @@ namespace startup {
   VIDEO_MODE choose_best_video_mode(const std::vector<VIDEO_MODE> &availableVideoModes);
 
   /**
+   * @brief Choose an Xbox output mode for the requested stream resolution.
+   *
+   * Use a 16-bit framebuffer for 1080i to reserve memory for the decoder,
+   * presentation buffers and controls.
+   *
+   * @param streamVideoMode Requested stream resolution.
+   * @param shellVideoMode Active shell output mode.
+   * @return Output mode to use for the streaming session.
+   */
+  VIDEO_MODE choose_stream_output_mode(VIDEO_MODE streamVideoMode, const VIDEO_MODE &shellVideoMode);
+
+  /**
+   * @brief Choose the output for the stream launch dialog while video is unavailable.
+   *
+   * Keep the shell mode until a decoded frame is ready to present in 1080i.
+   *
+   * @param streamOutputMode Output mode to use for decoded video.
+   * @param shellVideoMode Active shell output mode.
+   * @return Output mode to use during launch and transport setup.
+   */
+  VIDEO_MODE choose_stream_startup_mode(const VIDEO_MODE &streamOutputMode, const VIDEO_MODE &shellVideoMode);
+
+  /**
    * @brief Return canonical Xbox video modes usable as stream-resolution choices.
    *
    * Runtime code should prefer modes detected by `XVideoListModes()`. These

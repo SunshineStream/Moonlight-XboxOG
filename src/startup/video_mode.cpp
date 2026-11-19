@@ -93,6 +93,20 @@ namespace startup {
     return bestVideoMode;
   }
 
+  VIDEO_MODE choose_stream_output_mode(VIDEO_MODE streamVideoMode, const VIDEO_MODE &shellVideoMode) {
+    if (streamVideoMode.width <= 0 || streamVideoMode.height <= 0) {
+      return shellVideoMode;
+    }
+    if (is_1080i_mode(streamVideoMode)) {
+      streamVideoMode.bpp = 16;
+    }
+    return streamVideoMode;
+  }
+
+  VIDEO_MODE choose_stream_startup_mode(const VIDEO_MODE &streamOutputMode, const VIDEO_MODE &shellVideoMode) {
+    return is_1080i_mode(streamOutputMode) ? shellVideoMode : streamOutputMode;
+  }
+
   std::vector<VIDEO_MODE> stream_resolution_presets(int bpp, int refresh) {
     std::vector<VIDEO_MODE> presets;
     presets.reserve(STREAM_RESOLUTION_PRESETS.size());

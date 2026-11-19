@@ -57,6 +57,7 @@ namespace {
     std::uint32_t originalStart = 0;  ///< CPU scanout restored by pb_kill.
     bool videoEnabled = true;  ///< TV encoder output state.
     bool backgroundCleared = false;  ///< GPU background was cleared before overlay submission.
+    bool staticScanout = false;  ///< The caller requested a single GPU background buffer.
     SoftwareDisplay softwareDisplay;  ///< Simulates software presentation timing.
     std::map<void *, std::uint32_t> allocations;  ///< Live DMA allocations and addresses.
     std::uint32_t nextPhysical = 0x100000;  ///< Next fake physical allocation address.
@@ -84,6 +85,7 @@ namespace {
       hardware.pitch = 640 * 4;
       hardware.videoEnabled = true;
       hardware.backgroundCleared = false;
+      hardware.staticScanout = false;
       hardware.softwareDisplay = {};
       hardware.nextPhysical = 0x100000;
       ASSERT_TRUE(hardware.allocations.empty());
@@ -168,6 +170,12 @@ int pb_init() {
   return hardware.initResult;
 }
 
+/** @brief Simulate acquisition of the single-page pbkit configuration. */
+extern "C" int moonlight_pb_init_static_scanout() {
+  hardware.staticScanout = true;
+  return pb_init();
+}
+
 void pb_kill() {
   ++hardware.shutdowns;
   VIDEOREG(0x600800) = hardware.originalStart;
@@ -175,7 +183,7 @@ void pb_kill() {
 }
 
 void pb_set_color_format(unsigned int format, bool swizzled) {
-  EXPECT_EQ(format, NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8);
+  EXPECT_EQ(format, hardware.mode.bpp == 16 ? NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5 : NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8);
   EXPECT_FALSE(swizzled);
 }
 
@@ -184,7 +192,7 @@ void pb_fill(int x, int y, int width, int height, std::uint32_t color) {
   EXPECT_EQ(y, 0);
   EXPECT_EQ(width, hardware.mode.width);
   EXPECT_EQ(height, hardware.mode.height);
-  EXPECT_EQ(color, 0xff000000U);
+  EXPECT_EQ(color, hardware.mode.bpp == 16 ? 0U : 0xff000000U);
   hardware.backgroundCleared = true;
 }
 
@@ -402,6 +410,36 @@ TEST_F(PvideoPresenterTest, CompositesStatisticsIntoSubmittedVideoBuffer) {
   EXPECT_EQ(static_cast<const std::uint8_t *>(next->first)[2], 81);
 }
 
+/** @brief Return to the CPU framebuffer if the GPU compositor cannot draw the panel. */
+TEST_F(PvideoPresenterTest, ReleasesGpuResourcesWhenOverlayCompositionFails) {
+  streaming::PvideoPresenter presenter;
+  streaming::VideoOverlay overlay;
+  overlay.set_bitmap(2, 2, {255, 255, 0, 0});
+  VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
+  std::string error;
+  ASSERT_TRUE(presenter.present(frame, destination, &error, {}, &overlay)) << error;
+
+  const streaming::VideoRectangle tooSmallForPanel {0, 0, 8, 8};
+  EXPECT_FALSE(presenter.present(frame, tooSmallForPanel, &error, {}, &overlay));
+  EXPECT_NE(error.find("Could not compose"), std::string::npos);
+  EXPECT_EQ(VIDEOREG(CRTC_START), CPU_FRAMEBUFFER);
+  EXPECT_EQ(VIDEOREG(0x8700), 0U);
+  EXPECT_TRUE(hardware.allocations.empty());
+  EXPECT_FALSE(presenter.active());
+}
+
+/** @brief The 16-bit 1080i framebuffer still presents full-resolution YUY2 video. */
+TEST_F(PvideoPresenterTest, UsesRgb565For16BitScanout) {
+  hardware.mode = {1920, 1080, 16, 60};
+  hardware.pitch = 1920 * 2;
+  streaming::PvideoPresenter presenter;
+  std::string error;
+  ASSERT_TRUE(presenter.present(frame, {0, 0, 1920, 1080}, &error)) << error;
+  EXPECT_EQ(VIDEOREG(0x8950), 1920U | (1080U << 16U));
+  EXPECT_TRUE(hardware.backgroundCleared);
+  EXPECT_TRUE(hardware.staticScanout);
+}
+
 /**
  * @brief Repeated sessions restore the CPU scanout, legacy registers and enabled video output.
  */
@@ -467,9 +505,9 @@ TEST_F(PvideoPresenterTest, RestoresSoftwareOutputAfterGpuInitializationFailure)
 TEST_F(PvideoPresenterTest, RejectsIncompatibleOutputBeforeSubmittingOverlay) {
   streaming::PvideoPresenter presenter;
   std::string error;
-  hardware.mode.bpp = 16;
+  hardware.mode.bpp = 15;
   EXPECT_FALSE(presenter.present(frame, destination, &error));
-  EXPECT_NE(error.find("32-bit framebuffer"), std::string::npos);
+  EXPECT_NE(error.find("16-bit or 32-bit framebuffer"), std::string::npos);
   EXPECT_EQ(hardware.initializations, 0);
   hardware.mode.bpp = 32;
   hardware.pitch += 64;

@@ -7,6 +7,7 @@
 #include <cstdint>
 
 inline constexpr unsigned int NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8 = 8;  ///< 32-bit scanout format.
+inline constexpr unsigned int NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5 = 3;  ///< 16-bit scanout format.
 
 /**
  * @brief Read simulated vertical blanks.

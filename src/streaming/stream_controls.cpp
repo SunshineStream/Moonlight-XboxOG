@@ -205,6 +205,12 @@ namespace streaming {
     panel_.damage.clear();
   }
 
+  void StreamControls::invalidate_panel(FfmpegStreamBackend &backend) {
+    backend.set_statistics_bitmap(0, 0, {});
+    clear_panel();
+    panel_.dirty = true;
+  }
+
   void StreamControls::label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, const StreamLabelStyle &style) {
     const auto &[leading, background, fitSingleLine, foreground] = style;
     if (background) {
@@ -1027,6 +1033,7 @@ namespace streaming {
       panel_.dirty = false;
       screenshotChanged = true;
     }
+    const int scale = controls_raster_scale(height);
     backend.local_overlay_size(width, height);
     if (!visible() && screenshotChanged) {
       if (screenshotNotification_.visible) {
@@ -1045,8 +1052,14 @@ namespace streaming {
       panel_.width = width;
       panel_.height = height;
     }
-    if (visible() && panel_.dirty) {
-      render_menu(backend, font, width, height, stats);
+    if (visible() && panel_.dirty && !render_menu(backend, font, width, height, stats, scale)) {
+      // An invisible menu must not keep host input captured.
+      menu_.close();
+      navigation_.keyboard.reset();
+      router_.set_captured(!focused_);
+      backend.set_statistics_bitmap(0, 0, {});
+      clear_panel();
+      panel_.dirty = false;
     }
   }
 
@@ -1121,14 +1134,7 @@ namespace streaming {
     if (panelWidth <= 0 || panelHeight <= 0) {
       return;
     }
-    if (!panel_.surface || panel_.surface->w != panelWidth || panel_.surface->h != panelHeight) {
-      clear_panel();
-      panel_.surface.reset(SDL_CreateRGBSurfaceWithFormat(0, panelWidth, panelHeight, 32, SDL_PIXELFORMAT_ARGB8888));
-      if (panel_.surface) {
-        panel_.renderer.reset(SDL_CreateSoftwareRenderer(panel_.surface.get()));
-      }
-    }
-    if (!panel_.renderer) {
+    if (!prepare_panel(backend, panelWidth, panelHeight)) {
       return;
     }
     auto *renderer = panel_.renderer.get();
@@ -1147,7 +1153,7 @@ namespace streaming {
     SDL_SetRenderDrawColor(renderer, screenshotNotification_.saving || screenshotNotification_.saved ? 130 : 255, screenshotNotification_.saving || screenshotNotification_.saved ? 180 : 110, screenshotNotification_.saving || screenshotNotification_.saved ? 255 : 110, 255);
     SDL_RenderFillRect(renderer, &bar);
     SDL_RenderPresent(renderer);
-    backend.set_color_overlay_surface(panelWidth, panelHeight, static_cast<const std::uint8_t *>(panel_.surface->pixels), static_cast<std::size_t>(panel_.surface->pitch) * panelHeight, panel_.surface->pitch, VideoOverlayPlacement::bottom_center);
+    backend.set_color_overlay_surface(panel_.surface, VideoOverlayPlacement::bottom_center);
   }
 
   bool StreamControls::render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip) {
@@ -1495,13 +1501,17 @@ namespace streaming {
     }
   }
 
-  bool StreamControls::prepare_panel(int width, int height) {
+  bool StreamControls::prepare_panel(FfmpegStreamBackend &backend, int width, int height) {
     if (!panel_.surface || panel_.surface->w != width || panel_.surface->h != height) {
+      // Release both owners before allocating another full-size raster.
+      backend.set_statistics_bitmap(0, 0, {});
       clear_panel();
-      panel_.surface.reset(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888));
-      if (panel_.surface) {
-        panel_.renderer.reset(SDL_CreateSoftwareRenderer(panel_.surface.get()));
+      if (auto *surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888); surface != nullptr) {
+        panel_.surface.reset(surface, SDL_FreeSurface);
       }
+    }
+    if (panel_.surface && !panel_.renderer) {
+      panel_.renderer.reset(SDL_CreateSoftwareRenderer(panel_.surface.get()));
     }
     if (!panel_.renderer) {
       return false;
@@ -1513,44 +1523,45 @@ namespace streaming {
     return true;
   }
 
-  void StreamControls::publish_panel(FfmpegStreamBackend &backend, int width, int height, bool keyboard, bool focusOnly) const {
+  void StreamControls::publish_panel(FfmpegStreamBackend &backend, bool keyboard, bool focusOnly, int scale) const {
     SDL_RenderPresent(panel_.renderer.get());
     if (focusOnly) {
       for (const auto &area : panel_.damage) {
-        const auto offset = static_cast<std::size_t>(area.y) * panel_.surface->pitch + area.x * 4;
-        const auto pixels = extract_overlay_bitmap(static_cast<const std::uint8_t *>(panel_.surface->pixels) + offset, static_cast<std::size_t>(panel_.surface->pitch) * height - offset, panel_.surface->pitch, area.width, area.height, keyboard);
-        backend.update_color_overlay(area, pixels);
+        backend.update_color_overlay(area);
       }
     } else {
       VideoOverlayPlacement placement = VideoOverlayPlacement::full_screen;
       if (keyboard) {
         placement = keyboardTop_ ? VideoOverlayPlacement::dock_top : VideoOverlayPlacement::dock_bottom;
       }
-      backend.set_color_overlay_surface(width, height, static_cast<const std::uint8_t *>(panel_.surface->pixels), static_cast<std::size_t>(panel_.surface->pitch) * height, panel_.surface->pitch, placement, keyboard);
+      backend.set_color_overlay_surface(panel_.surface, placement, keyboard, scale);
     }
   }
 
-  void StreamControls::render_menu(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool stats) {
+  bool StreamControls::render_menu(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool stats, int scale) {
     if (font == nullptr) {
-      return;
+      return false;
     }
+    width /= scale;
+    height /= scale;
     const bool keyboard = menu_.page == input::StreamMenuPage::keyboard;
     const int rowHeight = std::max(TTF_FontLineSkip(font) + 8, width * 9 / 200);
     const int safeBottom = std::max(8, height / 40);
     width = keyboard ? width * 9 / 10 : width;
     height = keyboard ? std::min(height - VideoOverlay::MARGIN * 2, rowHeight * input::StreamMenu::KEYBOARD_ROWS + 28 + TTF_FontLineSkip(font) + (TTF_FontLineSkip(font) + 8) + safeBottom) : height;
     if (width <= 0 || height <= 0) {
-      return;
+      return false;
     }
-    if (!prepare_panel(width, height)) {
-      return;
+    if (!prepare_panel(backend, width, height)) {
+      logging::warn("input", "Unable to allocate the " + std::to_string(width) + "x" + std::to_string(height) + " stream controls panel: " + SDL_GetError());
+      return false;
     }
     const auto &renderer = panel_.renderer;
     const PanelContent content {font, navigation_.inputDevice, menu_.page, menu_.keyboardLayout, menu_.modifiers, menu_.caps, menu_.shiftOnce, stats, mouseDevice_, keyboardTop_, panel_.message};
     const bool focusOnly = panel_.content && *panel_.content == content && (keyboard || menu_.page == input::StreamMenuPage::radial);
     if (focusOnly && panel_.selection == (keyboard ? menu_.keyIndex : static_cast<int>(menu_.selected))) {
       panel_.dirty = false;
-      return;
+      return true;
     }
     panel_.damage.clear();
     const Uint8 background = keyboard ? 16 : 0;
@@ -1574,9 +1585,10 @@ namespace streaming {
     if (!focusOnly && !panel_.message.empty() && menu_.page == input::StreamMenuPage::radial) {
       label(renderer.get(), font, panel_.message, {4, line + 4, width - 8, line * 2}, {false, false});
     }
-    publish_panel(backend, width, height, keyboard, focusOnly);
+    publish_panel(backend, keyboard, focusOnly, scale);
     panel_.content = content;
     panel_.selection = keyboard ? menu_.keyIndex : static_cast<int>(menu_.selected);
     panel_.dirty = false;
+    return true;
   }
 }  // namespace streaming

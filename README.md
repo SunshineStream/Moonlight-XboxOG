@@ -78,6 +78,10 @@ No network connection or JavaScript runtime is needed to display the icons on th
 scaling with automatic software fallback. **Software** combines the decoded video and overlay on the
 CPU before displaying each frame. Moonlight keeps your selection in `streaming.gpu_presentation`.
 
+With 1080i enabled in the Xbox video settings, **Stream Resolution → 1920×1080** requests a
+1920×1080 stream and uses native 1080i output. Moonlight uses a 16-bit RGB framebuffer in this mode
+to leave memory for the H.264 decoder.
+
 ## Stream audio
 
 Choose **Settings → Audio → Audio Mode** before starting or resuming a stream. **Stereo** keeps
@@ -405,8 +409,9 @@ scripts\setup-xemu.cmd --skip-support-files
 ```
 
 > [!NOTE]
-> You can set Xemu to use widescreen mode by using https://github.com/Ernegien/XboxEepromEditor
-> but 1080i does not work in Xemu.
+> To expose widescreen and HDTV modes in xemu, use
+> [Xbox EEPROM Editor](https://github.com/Ernegien/XboxEepromEditor). 1080i streaming is demanding
+> on the emulated CPU, especially when using software presentation.
 
 ## 📋 Todo
 

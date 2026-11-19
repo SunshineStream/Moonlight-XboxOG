@@ -7,6 +7,7 @@
 // standard includes
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -121,22 +122,18 @@ namespace streaming {
      */
     void set_color_overlay(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left);
     /**
-     * @brief Replace the shared panel directly from SDL storage, reusing its full-screen color allocation.
-     * @param width Source width.
-     * @param height Source height.
-     * @param pixels Premultiplied B, G, R, A source bytes.
-     * @param capacity Accessible source byte count.
-     * @param pitch Source row stride.
+     * @brief Retain the SDL panel for compositing without duplicating its color storage.
+     * @param surface Premultiplied ARGB8888 surface owned by the controls.
      * @param placement Shared GPU/software panel anchor.
      * @param opaqueBackground Source was rendered onto an opaque panel.
+     * @param scale Output pixels per raster sample.
      */
-    void set_color_overlay_surface(int width, int height, const std::uint8_t *pixels, std::size_t capacity, int pitch, VideoOverlayPlacement placement, bool opaqueBackground = false);
+    void set_color_overlay_surface(const std::shared_ptr<SDL_Surface> &surface, VideoOverlayPlacement placement, bool opaqueBackground = false, int scale = 1);
     /**
      * @brief Submit a small focus repaint while retaining the rest of the panel and its conversion caches.
      * @param region Updated rectangle in panel pixels.
-     * @param pixels Packed straight ARGB bytes for that rectangle.
      */
-    void update_color_overlay(const VideoRectangle &region, const std::vector<std::uint8_t> &pixels);
+    void update_color_overlay(const VideoRectangle &region);
 
     /**
      * @brief Check whether an overlay change requires presenting an otherwise idle frame.

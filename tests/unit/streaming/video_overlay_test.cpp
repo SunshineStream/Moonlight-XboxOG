@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -630,6 +631,156 @@ TEST(VideoOverlayTest, DocksToEdgesWithoutTheLegacyInset) {
   EXPECT_EQ(bounds.y, 20);
   EXPECT_EQ(bounds.width, 100);
   EXPECT_EQ(bounds.height, 80);
+}
+
+/** @brief Shared in-place focus updates use the same colors and full panel bounds as a copied raster. */
+TEST(VideoOverlayTest, SharesTheMenuRasterAcrossFullAndPartialRepaints) {
+  constexpr int width = 16;
+  constexpr int height = 12;
+  const streaming::VideoRectangle destination {0, 0, width, height};
+  const auto placement = streaming::VideoOverlayPlacement::full_screen;
+  auto raster = std::make_shared<std::vector<std::uint8_t>>(width * height * 4, 0);
+  std::weak_ptr<std::vector<std::uint8_t>> retained = raster;
+  for (std::size_t index = 3; index < raster->size(); index += 4) {
+    (*raster)[index] = 150;
+  }
+  streaming::VideoOverlay overlay;
+  EXPECT_FALSE(overlay.update_shared_argb_surface({0, 0, 1, 1}));
+  ASSERT_TRUE(overlay.share_argb_surface(width, height, {raster, raster->data()}, raster->size(), placement, false));
+  EXPECT_FALSE(overlay.share_argb_surface(width, height, {raster, raster->data()}, raster->size() - 1, placement, false));
+  EXPECT_FALSE(overlay.update_shared_argb_surface({width, 0, 1, 1}));
+  for (bool repaint : {false, true}) {
+    if (repaint) {
+      const std::size_t offset = (3 * width + 4) * 4;
+      (*raster)[offset] = 64;
+      (*raster)[offset + 1] = 5;
+      (*raster)[offset + 2] = 32;
+      (*raster)[offset + 3] = 128;
+      ASSERT_TRUE(overlay.update_shared_argb_surface({4, 3, 1, 1}));
+    }
+    streaming::VideoOverlay copied;
+    ASSERT_TRUE(copied.set_argb_surface(width, height, raster->data(), raster->size(), width * 4, placement));
+    EXPECT_EQ(overlay.argb_pixels(), copied.argb_pixels());
+    std::array<std::uint8_t, 16> texture {};
+    texture.fill(0xaa);
+    EXPECT_FALSE(overlay.copy_argb_region({4, 3, 1, 2}, texture.data(), 3));
+    ASSERT_TRUE(overlay.copy_argb_region({4, 3, 1, 2}, texture.data(), 8));
+    const auto &expected = copied.argb_pixels();
+    for (int row = 0; row < 2; ++row) {
+      const auto *pixel = expected.data() + ((3 + row) * width + 4) * 4;
+      EXPECT_TRUE(std::equal(pixel, pixel + 4, texture.data() + row * 8));
+      EXPECT_EQ(texture[row * 8 + 4], 0xaa);
+    }
+
+    std::vector<std::uint8_t> output(width * height * 2, 150);
+    auto reference = output;
+    ASSERT_TRUE(overlay.draw_yuy2(output.data(), output.size(), width * 2, width, height, destination));
+    ASSERT_TRUE(copied.draw_yuy2(reference.data(), reference.size(), width * 2, width, height, destination));
+    EXPECT_EQ(output, reference);
+
+    output.assign(output.size(), 150);
+    reference = output;
+    ASSERT_TRUE(overlay.draw_rgb(output.data(), output.size(), width * 2, width, height, 16, destination));
+    ASSERT_TRUE(copied.draw_rgb(reference.data(), reference.size(), width * 2, width, height, 16, destination));
+    EXPECT_EQ(output, reference);
+  }
+
+  constexpr int scaledWidth = width * 2;
+  streaming::VideoOverlay copied;
+  ASSERT_TRUE(copied.set_argb_surface(width, height, raster->data(), raster->size(), width * 4, placement));
+  std::vector<std::uint8_t> scaled(scaledWidth * height * 2, 150);
+  auto reference = scaled;
+  ASSERT_TRUE(overlay.draw_yuy2(scaled.data(), scaled.size(), scaledWidth * 2, scaledWidth, height, destination));
+  ASSERT_TRUE(copied.draw_yuy2(reference.data(), reference.size(), scaledWidth * 2, scaledWidth, height, destination));
+  EXPECT_EQ(scaled, reference);
+
+  raster.reset();
+  EXPECT_FALSE(retained.expired());
+  EXPECT_EQ(overlay.rectangle(destination).width, width);
+  EXPECT_EQ(overlay.rectangle(destination).height, height);
+  overlay.set_bitmap(0, 0, {});
+  EXPECT_TRUE(retained.expired());
+}
+
+/** @brief The 1080i wheel and keyboard raster scales up without losing color, alpha or focus updates. */
+TEST(VideoOverlayTest, DoublesSharedRasterForGpuAndSoftwareScanout) {
+  constexpr int width = 16;
+  constexpr int height = 12;
+  constexpr int outputWidth = width * 2;
+  constexpr int outputHeight = 48;
+  const streaming::VideoRectangle destination {0, 0, outputWidth, outputHeight};
+  EXPECT_EQ(streaming::controls_raster_scale(720), 1);
+  ASSERT_EQ(streaming::controls_raster_scale(1080), 2);
+
+  for (const auto placement : {streaming::VideoOverlayPlacement::full_screen, streaming::VideoOverlayPlacement::dock_top, streaming::VideoOverlayPlacement::dock_bottom}) {
+    const bool opaque = placement != streaming::VideoOverlayPlacement::full_screen;
+    auto raster = std::make_shared<std::vector<std::uint8_t>>(width * height * 4, 0);
+    for (int i = 0; i < width * height; ++i) {
+      const int opacity = opaque ? 255 : i % 3 * 100;
+      (*raster)[i * 4] = (i % 256) * opacity / 255;
+      (*raster)[i * 4 + 1] = 70 * opacity / 255;
+      (*raster)[i * 4 + 2] = 150 * opacity / 255;
+      (*raster)[i * 4 + 3] = opacity;
+    }
+
+    streaming::VideoOverlay compact;
+    ASSERT_FALSE(compact.share_argb_surface(width, height, {raster, raster->data()}, raster->size(), placement, opaque, 0));
+    ASSERT_TRUE(compact.share_argb_surface(width, height, {raster, raster->data()}, raster->size(), placement, opaque, 2));
+    const auto bounds = compact.rectangle(destination);
+    EXPECT_EQ(bounds.y, placement == streaming::VideoOverlayPlacement::dock_bottom ? outputHeight - height * 2 : 0);
+    EXPECT_EQ(bounds.width, outputWidth);
+    EXPECT_EQ(bounds.height, height * 2);
+    const auto bitmap = compact.bitmap_rectangle(bounds);
+    EXPECT_EQ(bitmap.width, width);
+    EXPECT_EQ(bitmap.height, height);
+
+    for (bool repaint : {false, true}) {
+      if (repaint) {
+        const int offset = (width * 7 + 5) * 4;
+        (*raster)[offset] = 255;
+        (*raster)[offset + 3] = 255;
+        ASSERT_TRUE(compact.update_shared_argb_surface({5, 7, 1, 1}));
+      }
+      std::vector<std::uint8_t> expanded(outputWidth * height * 2 * 4);
+      for (int index = 0; index < outputWidth * height * 2; ++index) {
+        const int x = index % outputWidth;
+        const int y = index / outputWidth;
+        const int sourceIndex = y / 2 * width + x / 2;
+        std::memcpy(expanded.data() + index * 4, raster->data() + sourceIndex * 4, 4);
+      }
+      streaming::VideoOverlay reference;
+      ASSERT_TRUE(reference.set_argb_surface(outputWidth, height * 2, expanded.data(), expanded.size(), outputWidth * 4, placement, opaque));
+      std::vector<std::uint8_t> actual(outputWidth * outputHeight * 2, 120);
+      auto expected = actual;
+      ASSERT_TRUE(compact.draw_yuy2(actual.data(), actual.size(), outputWidth * 2, outputWidth, outputHeight, destination));
+      ASSERT_TRUE(reference.draw_yuy2(expected.data(), expected.size(), outputWidth * 2, outputWidth, outputHeight, destination));
+      EXPECT_EQ(actual, expected);
+
+      actual.assign(actual.size(), 120);
+      expected = actual;
+      ASSERT_TRUE(compact.draw_rgb(actual.data(), actual.size(), outputWidth * 2, outputWidth, outputHeight, 16, destination));
+      ASSERT_TRUE(reference.draw_rgb(expected.data(), expected.size(), outputWidth * 2, outputWidth, outputHeight, 16, destination));
+      EXPECT_EQ(actual, expected);
+    }
+  }
+}
+
+/** @brief Alpha rounding on the SDL keyboard surface keeps the docked panel opaque. */
+TEST(VideoOverlayTest, SharesSolidKeyboardColorsAndDocking) {
+  constexpr int width = 12;
+  constexpr int height = 12;
+  auto raster = std::make_shared<std::vector<std::uint8_t>>(width * height * 4, 0xfe);
+  streaming::VideoOverlay overlay;
+  ASSERT_TRUE(overlay.share_argb_surface(width, height, {raster, raster->data()}, raster->size(), streaming::VideoOverlayPlacement::dock_top, true));
+  const auto bounds = overlay.rectangle({0, 0, 32, 24});
+  EXPECT_EQ(bounds.x, 10);
+  EXPECT_EQ(bounds.y, 0);
+  EXPECT_EQ(bounds.width, width);
+  EXPECT_EQ(bounds.height, height);
+  std::array<std::uint8_t, 4> texture {};
+  ASSERT_TRUE(overlay.copy_argb_region({0, 0, 1, 1}, texture.data(), 4));
+  const std::array<std::uint8_t, 4> expected {254, 254, 254, 255};
+  EXPECT_EQ(texture, expected);
 }
 
 /**
