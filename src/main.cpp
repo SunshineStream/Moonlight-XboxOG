@@ -38,6 +38,11 @@ namespace {
     network::RuntimeNetworkStatus runtimeNetworkStatus;
   };
 
+  /**
+   * @brief Restore saved preferences, including the requested audio mode, into the shell.
+   * @param state Shell state to update.
+   * @param settings Saved settings snapshot.
+   */
   void apply_persisted_settings(app::ClientState &state, const app::AppSettings &settings) {
     state.settings.loggingLevel = settings.loggingLevel;
     state.settings.xemuConsoleLoggingLevel = settings.xemuConsoleLoggingLevel;
@@ -47,9 +52,10 @@ namespace {
     state.settings.streamFramerate = settings.streamFramerate;
     state.settings.streamBitrateKbps = settings.streamBitrateKbps;
     state.settings.presentation.gpuPresentation = settings.gpuPresentation;
-    state.settings.playAudioOnPc = settings.playAudioOnPc;
+    state.settings.audio.playOnPc = settings.playAudioOnPc;
     state.settings.presentation.showPerformanceStats = settings.showPerformanceStats;
-    state.settings.playAudioOnXbox = settings.playAudioOnXbox;
+    state.settings.audio.playOnXbox = settings.playAudioOnXbox;
+    state.settings.audio.mode = settings.audioMode;
     state.settings.controls.screenshotDirectory = settings.screenshotDirectory;
     state.settings.controls.keyboardDockTop = settings.keyboardDockTop;
     state.settings.dirty = false;

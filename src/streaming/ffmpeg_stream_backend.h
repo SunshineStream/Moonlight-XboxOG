@@ -20,6 +20,7 @@
 // local includes
 #include "src/app/screenshot_library.h"
 #include "src/streaming/aligned_media_buffer.h"
+#include "src/streaming/audio_player.h"
 #include "src/streaming/ffmpeg_video_frame.h"
 #include "src/streaming/pvideo_presenter.h"
 #include "src/streaming/stats_overlay.h"
@@ -27,7 +28,6 @@
 struct AVCodecContext;
 struct AVFrame;
 struct AVPacket;
-struct SwrContext;
 struct SwsContext;
 
 namespace streaming {
@@ -41,8 +41,8 @@ namespace streaming {
    * @brief Owns the FFmpeg decode and SDL presentation state for one stream.
    *
    * The backend exposes Moonlight-compatible callback tables for video and audio,
-   * decodes negotiated video and Opus stereo audio with FFmpeg, presents the most
-   * recent decoded frame through SDL, and queues decoded PCM samples to SDL audio.
+   * presents the latest decoded video frame and delegates Opus decode and playback
+   * to the audio player.
    */
   class FfmpegStreamBackend {
   public:
@@ -68,11 +68,10 @@ namespace streaming {
     void initialize_callbacks(DECODER_RENDERER_CALLBACKS *videoCallbacks, AUDIO_RENDERER_CALLBACKS *audioCallbacks) const;
 
     /**
-     * @brief Configure whether streamed audio should be decoded and played locally.
-     *
-     * @param enabled True to decode and play Opus audio on the Xbox.
+     * @brief Get the stream's Opus decoder and playback device.
+     * @return Audio player owned by this backend.
      */
-    void set_audio_playback_enabled(bool enabled);
+    AudioPlayer &audio_player();
 
     /**
      * @brief Select the preferred presentation path before starting the session.
@@ -257,46 +256,6 @@ namespace streaming {
      */
     void cleanup_video_decoder();
 
-    /**
-     * @brief Initialize the FFmpeg Opus decoder and SDL playback device.
-     *
-     * @param audioConfiguration Negotiated Moonlight audio configuration.
-     * @param opusConfig Negotiated Opus multistream parameters.
-     * @param arFlags Moonlight audio renderer flags.
-     * @return Zero on success.
-     */
-    int initialize_audio_decoder(int audioConfiguration, const OPUS_MULTISTREAM_CONFIGURATION *opusConfig, int arFlags);
-
-    /**
-     * @brief Start SDL audio playback.
-     */
-    void start_audio_playback();
-
-    /**
-     * @brief Stop SDL audio playback.
-     */
-    void stop_audio_playback();
-
-    /**
-     * @brief Clean up all FFmpeg audio decode resources.
-     */
-    void cleanup_audio_decoder();
-
-    /**
-     * @brief Ensure the audio resampler matches the current decoded frame.
-     *
-     * @return True when the resampler is ready for audio conversion.
-     */
-    bool ensure_audio_resampler();
-
-    /**
-     * @brief Decode and queue one Moonlight Opus audio payload.
-     *
-     * @param sampleData Encoded Opus payload.
-     * @param sampleLength Encoded payload size in bytes.
-     */
-    void decode_and_play_audio_sample(const char *sampleData, int sampleLength);
-
   private:
     /**
      * @brief Present a frame while the public wrapper records submission time.
@@ -464,26 +423,8 @@ namespace streaming {
       std::atomic<int> lastDecodeFrameNumber = 0;
     };
 
-    /**
-     * @brief Hold FFmpeg and SDL state used by the audio path.
-     */
-    struct AudioState {
-      AVCodecContext *codecContext = nullptr;
-      SwrContext *resampleContext = nullptr;
-      AVFrame *decodedFrame = nullptr;
-      AVPacket *packet = nullptr;
-      SDL_AudioDeviceID deviceId = 0;
-      SDL_AudioSpec obtainedSpec {};
-      AlignedMediaBuffer outputBuffer;  ///< Aligned resampler output.
-      int resampleInputSampleRate = 0;
-      int resampleInputSampleFormat = -1;
-      int resampleInputChannelCount = 0;
-      std::atomic<bool> deviceStarted = false;
-      std::atomic<std::uint64_t> queuedAudioBytes = 0;
-    };
-
     VideoState video_ {};
-    AudioState audio_ {};
+    AudioPlayer audio_;  ///< Session Opus decoder and SDL playback device.
     ScreenshotTask screenshot_ {};  ///< Single capture slot, bounded to one additional YUV frame.
     PvideoPresenter presenter_;  ///< Main-thread GPU presentation resources.
     VideoOverlay statisticsOverlay_;  ///< Shared cached panel for all presentation paths.
@@ -495,7 +436,6 @@ namespace streaming {
     VideoAccelerationReport acceleration_;  ///< Session diagnostics survive decoder cleanup.
     bool gpuPresentationEnabled_ = false;  ///< Session opt-in applied before decoder setup.
     bool overlayFailed_ = false;  ///< Avoid repeating a known failing hardware path this session.
-    std::atomic<bool> audioPlaybackEnabled_ = false;
   };
 
 }  // namespace streaming

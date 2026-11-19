@@ -147,6 +147,37 @@ add_custom_target(xbe_iso ALL
 )
 add_dependencies(xbe_iso cxbe_convert)
 
+if(MOONLIGHT_BUILD_AUDIO_EXPERIMENTS)
+    add_executable(audio_playback_probe
+            "${CMAKE_SOURCE_DIR}/experiments/audio_playback_probe.cpp"
+            "${CMAKE_SOURCE_DIR}/src/logging/logger.cpp"
+            "${CMAKE_SOURCE_DIR}/src/streaming/audio_configuration.cpp"
+            "${CMAKE_SOURCE_DIR}/src/streaming/audio_player.cpp"
+            "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/fenv_compat.cpp")
+    target_include_directories(audio_playback_probe PRIVATE
+            "${CMAKE_SOURCE_DIR}"
+            "${MOONLIGHT_FFMPEG_INCLUDE_DIR}")
+    target_compile_definitions(audio_playback_probe PRIVATE NXDK XBOX)
+    target_compile_options(audio_playback_probe PRIVATE -std=gnu++17)
+    target_link_options(audio_playback_probe PRIVATE /safeseh:no)
+    target_link_libraries(audio_playback_probe PRIVATE
+            ${MOONLIGHT_FFMPEG_LIBRARIES}
+            NXDK::NXDK NXDK::NXDK_CXX NXDK::SDL2 moonlight_nxdk_compat)
+    set(_audio_playback_probe_xbe_dir "${CMAKE_CURRENT_BINARY_DIR}/audio-playback-probe")
+    file(MAKE_DIRECTORY "${_audio_playback_probe_xbe_dir}")
+    add_custom_target(audio_playback_probe_iso ALL
+            COMMAND "${NXDK_DIR}/tools/cxbe/cxbe"
+                "-OUT:${_audio_playback_probe_xbe_dir}/default.xbe"
+                "-TITLE:Opus audio playback probe"
+                "$<TARGET_FILE:audio_playback_probe>"
+            COMMAND "${NXDK_DIR}/tools/extract-xiso/build/extract-xiso"
+                -c "${_audio_playback_probe_xbe_dir}" "AudioPlaybackProbe.iso"
+            DEPENDS audio_playback_probe
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+            COMMENT "Package the standalone Opus playback probe"
+            VERBATIM)
+endif()
+
 if(MOONLIGHT_BUILD_VIDEO_EXPERIMENTS)
     add_executable(pvideo_presentation_probe
             "${CMAKE_SOURCE_DIR}/experiments/pvideo_presentation_probe.cpp"

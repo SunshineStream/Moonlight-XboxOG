@@ -24,6 +24,7 @@
 #include "src/input/ui_input.h"
 #include "src/logging/logger.h"
 #include "src/startup/saved_files.h"
+#include "src/streaming/audio_configuration.h"
 #include "src/ui/menu_model.h"
 
 namespace app {
@@ -91,7 +92,8 @@ namespace app {
    */
   enum class SettingsCategory {
     logging,  ///< Logging and diagnostics options.
-    display,  ///< Display, stream video, audio and telemetry options.
+    display,  ///< Display, stream video and telemetry options.
+    audio,  ///< Playback destinations and audio mode.
     input,  ///< Input and controller options.
     storage,  ///< Screenshot destinations and other saved-file location options.
     reset,  ///< Reset and cleanup actions.
@@ -389,6 +391,13 @@ namespace app {
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
   };
 
+  /** @brief Preferences for host and Xbox audio playback during streaming. */
+  struct AudioPlaybackPreferences {
+    bool playOnPc = false;  ///< Keep audio playing on the host PC.
+    bool playOnXbox = true;  ///< Decode and play streaming audio on the Xbox.
+    streaming::AudioMode mode = streaming::AudioMode::stereo;  ///< Mix used for Xbox playback.
+  };
+
   /**
    * @brief State owned by the settings, log viewer, and saved-file workflows.
    */
@@ -407,8 +416,7 @@ namespace app {
     int streamFramerate = DEFAULT_STREAM_FRAMERATE;  ///< Preferred stream frame rate in frames per second.
     int streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;  ///< Preferred stream bitrate in kilobits per second.
     VideoPresentationPreferences presentation;  ///< Presentation path and statistics overlay preferences.
-    bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
-    bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
+    AudioPlaybackPreferences audio;  ///< Host and Xbox playback preferences.
     LocalStreamPreferences controls;  ///< Screenshot storage and keyboard placement preferences.
     bool dirty = false;  ///< True when persisted TOML-backed settings changed and should be saved.
     std::vector<startup::SavedFileEntry> savedFiles;  ///< Saved-file catalog shown on the reset settings page.

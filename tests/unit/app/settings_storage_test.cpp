@@ -136,6 +136,42 @@ namespace {
     EXPECT_EQ(app::load_app_settings(settingsPath).settings.streamBitrateKbps, 10000);
   }
 
+  /** @brief Apply audio defaults to older files and preserve explicit mode and playback choices. */
+  TEST_F(SettingsStorageTest, SavesAndLoadsAudioModes) {
+    using streaming::AudioMode;
+    write_text_file(settingsPath, "[streaming]\nfps = 30\n");
+    const auto oldSettings = app::load_app_settings(settingsPath);
+    EXPECT_EQ(oldSettings.settings.audioMode, AudioMode::stereo);
+    EXPECT_FALSE(oldSettings.settings.playAudioOnPc);
+    EXPECT_TRUE(oldSettings.settings.playAudioOnXbox);
+    EXPECT_TRUE(oldSettings.warnings.empty());
+
+    for (const auto mode : {AudioMode::stereo, AudioMode::mono}) {
+      app::AppSettings settings;
+      settings.audioMode = mode;
+      settings.playAudioOnPc = true;
+      settings.playAudioOnXbox = false;
+      ASSERT_TRUE(app::save_app_settings(settings, settingsPath).success);
+      const auto reloaded = app::load_app_settings(settingsPath);
+      EXPECT_EQ(reloaded.settings.audioMode, mode);
+      EXPECT_TRUE(reloaded.settings.playAudioOnPc);
+      EXPECT_FALSE(reloaded.settings.playAudioOnXbox);
+      EXPECT_TRUE(reloaded.warnings.empty());
+      EXPECT_FALSE(reloaded.cleanupRequired);
+    }
+  }
+
+  /** @brief Warn about unknown or mistyped audio modes and use the stereo default. */
+  TEST_F(SettingsStorageTest, InvalidAudioModesFallBackToStereo) {
+    for (const auto *value : {"'5.1'", "6"}) {
+      write_text_file(settingsPath, std::string("[streaming]\naudio_mode = ") + value + "\n");
+      const auto invalid = app::load_app_settings(settingsPath);
+      EXPECT_EQ(invalid.settings.audioMode, streaming::AudioMode::stereo);
+      ASSERT_EQ(invalid.warnings.size(), 1U);
+      EXPECT_NE(invalid.warnings.front().find("streaming.audio_mode"), std::string::npos);
+    }
+  }
+
   /** @brief Missing settings leave the default stream profile and produce no warnings. */
   TEST_F(SettingsStorageTest, MissingFilesReturnDefaultsWithoutWarnings) {
     const app::LoadAppSettingsResult loadResult = app::load_app_settings(settingsPath);

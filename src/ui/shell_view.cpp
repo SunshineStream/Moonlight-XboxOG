@@ -7,6 +7,8 @@
 
 // standard includes
 #include <algorithm>
+#include <array>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -206,7 +208,7 @@ namespace {
   }
 
   /**
-   * @brief Name the selected settings section without conflating Display and Storage.
+   * @brief Name the selected settings section.
    * @param category Active settings category.
    * @return User-facing category name.
    */
@@ -216,6 +218,8 @@ namespace {
         return "Logging";
       case app::SettingsCategory::display:
         return "Display";
+      case app::SettingsCategory::audio:
+        return "Audio";
       case app::SettingsCategory::input:
         return "Input";
       case app::SettingsCategory::storage:
@@ -384,7 +388,12 @@ namespace {
       return lines;
     }
     if (state.settings.selectedCategory == app::SettingsCategory::display) {
-      lines.emplace_back("Choose stream video, audio and performance statistics options.");
+      lines.emplace_back("Choose stream video and performance statistics options.");
+      return lines;
+    }
+
+    if (state.settings.selectedCategory == app::SettingsCategory::audio) {
+      lines.emplace_back("Choose where stream audio plays and select stereo or mono for the Xbox.");
       return lines;
     }
 
@@ -422,35 +431,24 @@ namespace {
    * @return Packaged Lucide SVG path, or an empty path for undecorated actions.
    */
   std::string menu_icon(const std::string &id) {
-    if (id == "settings-category:logging") {
-      return "icons\\scroll-text.svg";
-    }
-    if (id == "settings-category:display") {
-      return "icons\\monitor.svg";
-    }
-    if (id == "settings-category:input") {
-      return "icons\\gamepad-2.svg";
-    }
-    if (id == "settings-category:storage") {
-      return "icons\\save.svg";
-    }
-    if (id == "settings-category:reset") {
-      return "icons\\rotate-ccw.svg";
-    }
-    if (id == "edit-address") {
-      return "icons\\network.svg";
-    }
-    if (id == "edit-port") {
-      return "icons\\hash.svg";
-    }
-    if (id == "test-connection") {
-      return "icons\\activity.svg";
-    }
-    if (id == "start-pairing") {
-      return "icons\\key-round.svg";
-    }
-    if (id == "save-host") {
-      return "icons\\save.svg";
+    using IconEntry = std::pair<std::string_view, const char *>;
+    static constexpr std::array icons {
+      IconEntry {"settings-category:logging", "icons\\scroll-text.svg"},
+      IconEntry {"settings-category:display", "icons\\monitor.svg"},
+      IconEntry {"settings-category:audio", "icons\\volume-2.svg"},
+      IconEntry {"settings-category:input", "icons\\gamepad-2.svg"},
+      IconEntry {"settings-category:storage", "icons\\save.svg"},
+      IconEntry {"settings-category:reset", "icons\\rotate-ccw.svg"},
+      IconEntry {"edit-address", "icons\\network.svg"},
+      IconEntry {"edit-port", "icons\\hash.svg"},
+      IconEntry {"test-connection", "icons\\activity.svg"},
+      IconEntry {"start-pairing", "icons\\key-round.svg"},
+      IconEntry {"save-host", "icons\\save.svg"},
+    };
+    for (const auto &[action, path] : icons) {
+      if (id == action) {
+        return path;
+      }
     }
     return {};
   }

@@ -16,6 +16,7 @@ list(REMOVE_ITEM MOONLIGHT_SOURCES
 set(MOONLIGHT_TEST_EXCLUDED_SOURCES
         "${MOONLIGHT_SOURCE_ROOT}/src/input/shell_controller.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/main.cpp"
+        "${MOONLIGHT_SOURCE_ROOT}/src/streaming/audio_player.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/splash/splash_screen.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/ffmpeg_stream_backend.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/ffmpeg_video_frame.cpp"

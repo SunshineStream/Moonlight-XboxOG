@@ -326,6 +326,11 @@ namespace {
     append_invalid_value_warning(warnings, filePath, keyPath, "<non-boolean>");
   }
 
+  /**
+   * @brief Serialize the saved settings, including the selected audio mode.
+   * @param settings Settings snapshot to serialize.
+   * @return TOML text for the settings file.
+   */
   std::string format_settings_toml(const app::AppSettings &settings) {
     std::string content;
     content += "# Moonlight Xbox OG user settings\n";
@@ -352,6 +357,7 @@ namespace {
     content += std::string("gpu_presentation = ") + (settings.gpuPresentation ? "true" : "false") + "\n";
     content += std::string("play_audio_on_pc = ") + (settings.playAudioOnPc ? "true" : "false") + "\n";
     content += std::string("play_audio_on_xbox = ") + (settings.playAudioOnXbox ? "true" : "false") + "\n";
+    content += std::string("audio_mode = \"") + streaming::audio_mode_key(settings.audioMode) + "\"\n";
     content += "# Show stream telemetry after streaming ends.\n";
     std::ostringstream screenshotValue;
     screenshotValue << toml::value<std::string>(settings.screenshotDirectory);
@@ -392,7 +398,7 @@ namespace {
   }
 
   /**
-   * @brief Mark unknown streaming keys for cleanup on the next settings save.
+   * @brief Mark unknown streaming keys for cleanup, preserving recognized settings such as audio mode.
    *
    * @param streamingTable Parsed streaming settings table.
    * @param filePath Settings file path used in warnings.
@@ -401,7 +407,7 @@ namespace {
   void inspect_streaming_keys(const toml::table &streamingTable, const std::string &filePath, app::LoadAppSettingsResult *result) {
     for (const auto &[rawKey, node] : streamingTable) {
       const std::string key(rawKey.str());
-      if (key == "video_width" || key == "video_height" || key == "video_bpp" || key == "video_refresh" || key == "video_mode_selected" || key == "fps" || key == "bitrate_kbps" || key == "gpu_presentation" || key == "play_audio_on_pc" || key == "play_audio_on_xbox" || key == "show_performance_stats" || key == "screenshot_directory" || key == "keyboard_dock_top") {
+      if (key == "video_width" || key == "video_height" || key == "video_bpp" || key == "video_refresh" || key == "video_mode_selected" || key == "fps" || key == "bitrate_kbps" || key == "gpu_presentation" || key == "play_audio_on_pc" || key == "play_audio_on_xbox" || key == "audio_mode" || key == "show_performance_stats" || key == "screenshot_directory" || key == "keyboard_dock_top") {
         continue;
       }
 
@@ -505,6 +511,14 @@ namespace app {
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_pc"], filePath, "streaming.play_audio_on_pc", &result.settings.playAudioOnPc, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["gpu_presentation"], filePath, "streaming.gpu_presentation", &result.settings.gpuPresentation, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_xbox"], filePath, "streaming.play_audio_on_xbox", &result.settings.playAudioOnXbox, &result.warnings);
+    if (const auto audioModeNode = settingsTable["streaming"]["audio_mode"]; audioModeNode) {
+      const auto key = audioModeNode.value<std::string_view>();
+      if (const auto mode = key ? streaming::parse_audio_mode(*key) : std::nullopt; mode) {
+        result.settings.audioMode = *mode;
+      } else {
+        append_invalid_value_warning(&result.warnings, filePath, "streaming.audio_mode", key.value_or("<non-string>"));
+      }
+    }
     load_boolean_setting(settingsTable["streaming"]["show_performance_stats"], filePath, "streaming.show_performance_stats", &result.settings.showPerformanceStats, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["keyboard_dock_top"], filePath, "streaming.keyboard_dock_top", &result.settings.keyboardDockTop, &result.warnings);
     if (const auto node = settingsTable["streaming"]["screenshot_directory"]; node) {

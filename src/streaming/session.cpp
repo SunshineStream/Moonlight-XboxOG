@@ -1535,7 +1535,7 @@ namespace streaming {
     launchConfiguration.height = select_stream_height(streamParameters.videoMode);
     launchConfiguration.fps = streamParameters.fps;
     launchConfiguration.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
-    launchConfiguration.playAudioOnPc = settings.playAudioOnPc;
+    launchConfiguration.playAudioOnPc = settings.audio.playOnPc;
     launchConfiguration.clientRefreshRateX100 = select_client_refresh_rate_x100(activeStreamVideoMode);
     launchConfiguration.remoteInputAesKeyHex = hex_encode(remoteInputKey.data(), remoteInputKey.size());
     launchConfiguration.remoteInputAesIvHex = hex_encode(remoteInputIv.data(), remoteInputIv.size());
@@ -1566,9 +1566,9 @@ namespace streaming {
       "stream",
       std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps" + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
     );
-    resources.mediaBackend.set_audio_playback_enabled(settings.playAudioOnXbox);
+    resources.mediaBackend.audio_player().configure(settings.audio.mode, settings.audio.playOnXbox);
     resources.mediaBackend.set_gpu_presentation_enabled(settings.presentation.gpuPresentation);
-    logging::info("stream", std::string("Xbox audio playback ") + (settings.playAudioOnXbox ? "enabled" : "disabled for lower decode latency"));
+    logging::info("stream", std::string("Xbox audio mode: ") + (settings.audio.playOnXbox ? audio_mode_label(settings.audio.mode) : "Disabled"));
     logging::debug(
       "stream",
       std::string("Stream connection metadata | active=") + printable_log_value(startContext.serverInformation.address == nullptr ? std::string_view {} : std::string_view {startContext.serverInformation.address}) +

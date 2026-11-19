@@ -151,7 +151,7 @@ namespace {
   }
 
   /**
-   * @brief All five settings categories, including separate Display and Storage sections, have packaged icons.
+   * @brief The Audio entry and the other settings categories have packaged icons.
    */
   TEST(ShellViewTest, DecoratesSettingsCategoriesWithIcons) {
     app::ClientState state = app::create_initial_state();
@@ -159,13 +159,33 @@ namespace {
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
     const auto view = ui::build_shell_view_model(state, {});
-    ASSERT_EQ(view.content.menuRows.size(), 5U);
+    ASSERT_EQ(view.content.menuRows.size(), 6U);
     EXPECT_EQ(view.content.menuRows[0].iconAssetPath, "icons\\scroll-text.svg");
     EXPECT_EQ(view.content.menuRows[1].iconAssetPath, "icons\\monitor.svg");
-    EXPECT_EQ(view.content.menuRows[2].iconAssetPath, "icons\\gamepad-2.svg");
-    EXPECT_EQ(view.content.menuRows[3].label, "Storage");
-    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\save.svg");
-    EXPECT_EQ(view.content.menuRows[4].iconAssetPath, "icons\\rotate-ccw.svg");
+    EXPECT_EQ(view.content.menuRows[2].label, "Audio");
+    EXPECT_EQ(view.content.menuRows[2].iconAssetPath, "icons\\volume-2.svg");
+    EXPECT_EQ(view.content.menuRows[3].iconAssetPath, "icons\\gamepad-2.svg");
+    EXPECT_EQ(view.content.menuRows[4].label, "Storage");
+    EXPECT_EQ(view.content.menuRows[4].iconAssetPath, "icons\\save.svg");
+    EXPECT_EQ(view.content.menuRows[5].iconAssetPath, "icons\\rotate-ccw.svg");
+  }
+
+  /** @brief Show playback help and the three Audio controls when the category is selected. */
+  TEST(ShellViewTest, ShowsAudioDetailsOnTheSettingsScreen) {
+    auto state = app::create_initial_state();
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::activate);
+    app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_down);
+
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_FALSE(view.content.bodyLines.empty());
+    EXPECT_EQ(view.content.bodyLines.front(), "Category: Audio");
+    ASSERT_EQ(view.content.detailMenuRows.size(), 3U);
+    EXPECT_EQ(view.content.detailMenuRows[0].label, "Play Audio on PC: Off");
+    EXPECT_EQ(view.content.detailMenuRows[1].label, "Play Audio on Xbox: On");
+    EXPECT_EQ(view.content.detailMenuRows[2].label, "Audio Mode: Stereo");
   }
 
   /**

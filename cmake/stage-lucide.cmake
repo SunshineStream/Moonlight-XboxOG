@@ -30,6 +30,7 @@ foreach(icon IN ITEMS
         scroll-text
         settings
         share-2
+        volume-2
 )
     set(_icon_source "${LUCIDE_SOURCE_DIR}/icons/${icon}.svg")
     if(NOT EXISTS "${_icon_source}")

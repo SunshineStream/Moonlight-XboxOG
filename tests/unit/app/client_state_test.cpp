@@ -833,6 +833,7 @@ namespace {
     EXPECT_TRUE(state.hosts.active.appListStatusMessage.empty());
   }
 
+  /** @brief Select a saved file in Reset and confirm the deletion request. */
   TEST(ClientStateTest, SettingsCanRequestDeletionOfSavedFilesFromTheResetCategory) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::move_left);
@@ -843,10 +844,7 @@ namespace {
     app::replace_saved_files(state, {
                                       {R"(E:\UDATA\12345678\moonlight.log)", "moonlight.log", 128U},
                                     });
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_up);
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::reset);
     ASSERT_EQ(state.settings.focusArea, app::SettingsFocusArea::options);
@@ -863,6 +861,7 @@ namespace {
     EXPECT_EQ(update.persistence.savedFileDeletePath, "E:\\UDATA\\12345678\\moonlight.log");
   }
 
+  /** @brief Confirm a factory reset through the Reset category. */
   TEST(ClientStateTest, SettingsFactoryResetUsesAConfirmationDialog) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::move_left);
@@ -870,10 +869,7 @@ namespace {
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.shell.activeScreen, app::ScreenId::settings);
 
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_up);
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::reset);
     ASSERT_EQ(state.settings.focusArea, app::SettingsFocusArea::options);
@@ -1471,18 +1467,20 @@ namespace {
   }
 
   /**
-   * @brief Other display controls leave a manually selected bitrate unchanged.
+   * @brief Display keeps the statistics toggle and the manually selected bitrate.
    */
   TEST(ClientStateTest, DisplaySettingsPreserveManualBitrateWhenOtherOptionsChange) {
     app::ClientState state = app::create_initial_state();
     state.settings.streamBitrateKbps = 1500;
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
-    constexpr std::array<const char *, 3> controls {"toggle-play-audio-on-pc", "toggle-play-audio-on-xbox", "toggle-show-performance-stats"};
-    for (const char *control : controls) {
-      ASSERT_TRUE(state.detailMenu.select_item_by_id(control));
-      app::handle_command(state, input::UiCommand::activate);
-      EXPECT_EQ(state.settings.streamBitrateKbps, 1500);
-    }
+    EXPECT_FALSE(state.detailMenu.select_item_by_id("toggle-play-audio-on-pc"));
+    EXPECT_FALSE(state.detailMenu.select_item_by_id("toggle-play-audio-on-xbox"));
+    EXPECT_FALSE(state.detailMenu.select_item_by_id("cycle-audio-mode"));
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-show-performance-stats"));
+    EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
+    EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 1500);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Performance Stats: On");
   }
 
   /** @brief Switch from the software default to GPU and back while preserving bitrate and statistics. */
@@ -1509,44 +1507,80 @@ namespace {
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: Software");
   }
 
-  /** @brief Toggle audio and statistics independently while retaining the selected presentation path. */
-  TEST(ClientStateTest, DisplaySettingsCanToggleXboxAudioAndPerformanceStats) {
-    app::ClientState state = app::create_initial_state();
-    ASSERT_TRUE(state.settings.playAudioOnXbox);
-    ASSERT_FALSE(state.settings.presentation.showPerformanceStats);
-    state.settings.presentation.gpuPresentation = true;
+  /**
+   * @brief Navigate to Audio next to Display and focus its options.
+   * @param state Client state starting on the hosts screen.
+   */
+  void open_audio_settings_options(app::ClientState &state) {
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::move_left);
+    app::handle_command(state, input::UiCommand::activate);
+    ASSERT_EQ(state.shell.activeScreen, app::ScreenId::settings);
 
-    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+    app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_down);
+    EXPECT_EQ(app::handle_command(state, input::UiCommand::activate).navigation.activatedItemId, "settings-category:audio");
+    ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::audio);
+    ASSERT_EQ(state.settings.focusArea, app::SettingsFocusArea::options);
+  }
+
+  /** @brief Cycle every audio mode and persist the selection without leaving the row. */
+  TEST(ClientStateTest, AudioSettingsCycleModesAndRetainFocus) {
+    using streaming::AudioMode;
+    auto state = app::create_initial_state();
+    ASSERT_NO_FATAL_FAILURE(open_audio_settings_options(state));
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-audio-mode"));
+    ASSERT_EQ(state.detailMenu.selected_item()->label, "Audio Mode: Stereo");
+
+    constexpr std::array modes {AudioMode::mono, AudioMode::stereo};
+    constexpr std::array labels {"Audio Mode: Mono", "Audio Mode: Stereo"};
+    for (std::size_t i = 0; i < modes.size(); ++i) {
+      state.settings.dirty = false;
+      EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
+      EXPECT_TRUE(state.settings.dirty);
+      EXPECT_TRUE(state.settings.audio.playOnXbox);
+      EXPECT_EQ(state.settings.audio.mode, modes[i]);
+      ASSERT_NE(state.detailMenu.selected_item(), nullptr);
+      EXPECT_EQ(state.detailMenu.selected_item()->id, "cycle-audio-mode");
+      EXPECT_EQ(state.detailMenu.selected_item()->label, labels[i]);
+    }
+  }
+
+  /** @brief Show and independently toggle the default PC and Xbox playback choices. */
+  TEST(ClientStateTest, AudioSettingsDefaultPcOffAndXboxOn) {
+    app::ClientState state = app::create_initial_state();
+    state.settings.streamBitrateKbps = 1500;
+    ASSERT_NO_FATAL_FAILURE(open_audio_settings_options(state));
+    ASSERT_EQ(state.detailMenu.items().size(), 3U);
+
+    ASSERT_NE(state.detailMenu.selected_item(), nullptr);
+    EXPECT_EQ(state.detailMenu.selected_item()->id, "toggle-play-audio-on-pc");
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Play Audio on PC: Off");
+    EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
+    EXPECT_TRUE(state.settings.audio.playOnPc);
+    EXPECT_TRUE(state.settings.audio.playOnXbox);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Play Audio on PC: On");
 
     ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-play-audio-on-xbox"));
-    app::AppUpdate update = app::handle_command(state, input::UiCommand::activate);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Play Audio on Xbox: On");
+    const auto update = app::handle_command(state, input::UiCommand::activate);
     EXPECT_EQ(update.navigation.activatedItemId, "toggle-play-audio-on-xbox");
     EXPECT_TRUE(update.persistence.settingsChanged);
-    EXPECT_FALSE(state.settings.playAudioOnXbox);
+    EXPECT_TRUE(state.settings.audio.playOnPc);
+    EXPECT_FALSE(state.settings.audio.playOnXbox);
+    EXPECT_EQ(state.settings.streamBitrateKbps, 1500);
     EXPECT_EQ(state.shell.statusMessage, "Play audio on Xbox disabled");
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Play Audio on Xbox: Off");
-
-    ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-show-performance-stats"));
-    update = app::handle_command(state, input::UiCommand::activate);
-    EXPECT_EQ(update.navigation.activatedItemId, "toggle-show-performance-stats");
-    EXPECT_TRUE(update.persistence.settingsChanged);
-    EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
-    EXPECT_TRUE(state.settings.presentation.gpuPresentation);
-    EXPECT_EQ(state.shell.statusMessage, "Performance stats enabled");
-    ASSERT_NE(state.detailMenu.selected_item(), nullptr);
-    EXPECT_EQ(state.detailMenu.selected_item()->label, "Performance Stats: On");
   }
 
+  /** @brief Cancel the Reset confirmation without requesting any persistent changes. */
   TEST(ClientStateTest, ConfirmationModalCanBeCancelledWithoutRequestingPersistenceChanges) {
     app::ClientState state = app::create_initial_state();
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::move_left);
     app::handle_command(state, input::UiCommand::activate);
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
-    app::handle_command(state, input::UiCommand::move_down);
+    app::handle_command(state, input::UiCommand::move_up);
     app::handle_command(state, input::UiCommand::activate);
     ASSERT_EQ(state.settings.selectedCategory, app::SettingsCategory::reset);
 
