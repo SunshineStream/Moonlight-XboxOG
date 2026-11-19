@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 
 // local includes
@@ -53,7 +54,7 @@ namespace streaming {
   private:
     std::array<std::uint8_t *, 2> pages_ {};  ///< nxdk's primary framebuffer and the additional drawing buffer.
     std::array<VideoRectangle, 2> destinations_ {};  ///< Video area last drawn on each page.
-    std::unique_ptr<std::uint8_t[]> staging_;  ///< CPU allocation for the second buffer when it stays outside scanout.
+    std::unique_ptr<std::byte, decltype(&std::free)> staging_ {nullptr, &std::free};  ///< Owns HD staging storage before alignment.
     std::size_t stagingSize_ = 0;  ///< Bytes to copy from the staged frame to scanout.
     std::size_t front_ = 0;  ///< Page most recently submitted to scanout.
     bool synchronized_ = true;  ///< A completed vblank has retired the previous page.

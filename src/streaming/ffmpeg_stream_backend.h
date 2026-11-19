@@ -266,6 +266,21 @@ namespace streaming {
      */
     bool render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight);
     /**
+     * @brief Present the current video and UI through the GPU overlay when available.
+     * @param destination Output video rectangle.
+     * @param newFrame True when a new decoded frame was acquired.
+     * @return True when GPU presentation is active and the output is up to date.
+     */
+    bool render_gpu_video_frame(const SDL_Rect &destination, bool newFrame);
+    /**
+     * @brief Upload and present the current video and UI through SDL.
+     * @param renderer SDL video renderer.
+     * @param destination Output video rectangle.
+     * @param textureNeedsUpload True when a new decoded frame was acquired.
+     * @return True after successful SDL presentation.
+     */
+    bool render_sdl_video_frame(SDL_Renderer *renderer, const SDL_Rect &destination, bool textureNeedsUpload);
+    /**
      * @brief Draw the cached panel when the SDL presentation fallback is used.
      * @param renderer SDL video renderer.
      * @param destination Output video rectangle.

@@ -27,6 +27,17 @@ namespace {
   constexpr std::uint32_t CPU_FRAMEBUFFER = 0x40000;  ///< Fake physical address of the nxdk page.
 
   /**
+   * @brief Track the surface latched by the fake software display at vblank.
+   */
+  struct SoftwareDisplay {
+    bool pollVblank = false;  ///< Simulate software polling of the vblank status.
+    bool signalVblank = true;  ///< Signal vblank when simulated time advances.
+    std::uint32_t flushedScanout = 0;  ///< Scanout base when framebuffer writes were flushed.
+    std::uint32_t displayedScanout = CPU_FRAMEBUFFER;  ///< Page latched by the display at the last vblank.
+    std::uint8_t primaryPixelAtVblank = 0;  ///< First byte of the primary framebuffer when retrace starts.
+  };
+
+  /**
    * @brief Mutable fake hardware, reset independently for each lifecycle test.
    */
   struct Hardware {
@@ -46,11 +57,7 @@ namespace {
     std::uint32_t originalStart = 0;  ///< CPU scanout restored by pb_kill.
     bool videoEnabled = true;  ///< TV encoder output state.
     bool backgroundCleared = false;  ///< GPU background was cleared before overlay submission.
-    bool pollVblank = false;  ///< Simulate software polling of the vblank status.
-    bool signalVblank = true;  ///< Signal vblank when simulated time advances.
-    std::uint32_t flushedScanout = 0;  ///< Scanout base when framebuffer writes were flushed.
-    std::uint32_t displayedScanout = 0;  ///< Page latched by the display at the last vblank.
-    std::uint8_t primaryPixelAtVblank = 0;  ///< First byte of the primary framebuffer when retrace starts.
+    SoftwareDisplay softwareDisplay;  ///< Simulates software presentation timing.
     std::map<void *, std::uint32_t> allocations;  ///< Live DMA allocations and addresses.
     std::uint32_t nextPhysical = 0x100000;  ///< Next fake physical allocation address.
   };
@@ -77,11 +84,7 @@ namespace {
       hardware.pitch = 640 * 4;
       hardware.videoEnabled = true;
       hardware.backgroundCleared = false;
-      hardware.pollVblank = false;
-      hardware.signalVblank = true;
-      hardware.flushedScanout = 0;
-      hardware.displayedScanout = CPU_FRAMEBUFFER;
-      hardware.primaryPixelAtVblank = 0;
+      hardware.softwareDisplay = {};
       hardware.nextPhysical = 0x100000;
       ASSERT_TRUE(hardware.allocations.empty());
     }
@@ -117,7 +120,7 @@ unsigned char *XVideoGetFB() {
 }
 
 void XVideoFlushFB() {
-  hardware.flushedScanout = VIDEOREG(CRTC_START);
+  hardware.softwareDisplay.flushedScanout = VIDEOREG(CRTC_START);
 }
 
 void XVideoSetVideoEnable(int enable) {
@@ -125,7 +128,7 @@ void XVideoSetVideoEnable(int enable) {
 }
 
 DWORD GetTickCount() {
-  if (hardware.pollVblank) {
+  if (hardware.softwareDisplay.pollVblank) {
     // The software wait acknowledges stale status before reading the clock.
     VIDEOREG(CRTC_INTERRUPT) = 0;
   }
@@ -135,9 +138,9 @@ DWORD GetTickCount() {
 void Sleep(DWORD milliseconds) {
   hardware.ticks += milliseconds;
   ++hardware.vblanks;
-  if (hardware.pollVblank && hardware.signalVblank) {
-    hardware.displayedScanout = VIDEOREG(CRTC_START);
-    hardware.primaryPixelAtVblank = hardware.framebuffer[0];
+  if (hardware.softwareDisplay.pollVblank && hardware.softwareDisplay.signalVblank) {
+    hardware.softwareDisplay.displayedScanout = VIDEOREG(CRTC_START);
+    hardware.softwareDisplay.primaryPixelAtVblank = hardware.framebuffer[0];
     VIDEOREG(CRTC_INTERRUPT) = 1;
   }
 }
@@ -224,7 +227,7 @@ std::uintptr_t MmGetPhysicalAddress(void *buffer) {
  * @brief Keep each composed software page intact until the display has latched its replacement.
  */
 TEST_F(PvideoPresenterTest, RetiresSoftwarePagesAfterTheAddressLatches) {
-  hardware.pollVblank = true;
+  hardware.softwareDisplay.pollVblank = true;
   VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
   streaming::SoftwareScanout scanout;
   EXPECT_FALSE(scanout.present());
@@ -245,8 +248,8 @@ TEST_F(PvideoPresenterTest, RetiresSoftwarePagesAfterTheAddressLatches) {
   EXPECT_EQ(primary[overlayOffset], 0);
   EXPECT_EQ(VIDEOREG(CRTC_START), CPU_FRAMEBUFFER);
   ASSERT_TRUE(scanout.present());
-  EXPECT_EQ(hardware.flushedScanout, CPU_FRAMEBUFFER);
-  EXPECT_EQ(hardware.displayedScanout, MmGetPhysicalAddress(first));
+  EXPECT_EQ(hardware.softwareDisplay.flushedScanout, CPU_FRAMEBUFFER);
+  EXPECT_EQ(hardware.softwareDisplay.displayedScanout, MmGetPhysicalAddress(first));
   EXPECT_EQ(XVideoGetFB(), primary);
 
   auto *second = scanout.back_buffer(size, destination);
@@ -254,14 +257,14 @@ TEST_F(PvideoPresenterTest, RetiresSoftwarePagesAfterTheAddressLatches) {
   EXPECT_EQ(second[0], 0);
   EXPECT_EQ(VIDEOREG(CRTC_START), MmGetPhysicalAddress(first));
   ASSERT_TRUE(scanout.present());
-  EXPECT_EQ(hardware.displayedScanout, CPU_FRAMEBUFFER);
+  EXPECT_EQ(hardware.softwareDisplay.displayedScanout, CPU_FRAMEBUFFER);
   EXPECT_EQ(scanout.back_buffer(size, destination)[0], 0x24);
   EXPECT_EQ(scanout.back_buffer(size, {0, 0, 640, 480})[0], 0);
   ASSERT_TRUE(scanout.present());
-  EXPECT_EQ(hardware.displayedScanout, MmGetPhysicalAddress(first));
+  EXPECT_EQ(hardware.softwareDisplay.displayedScanout, MmGetPhysicalAddress(first));
 
   EXPECT_TRUE(scanout.reset());
-  EXPECT_EQ(hardware.displayedScanout, CPU_FRAMEBUFFER);
+  EXPECT_EQ(hardware.softwareDisplay.displayedScanout, CPU_FRAMEBUFFER);
   EXPECT_TRUE(hardware.allocations.empty());
 }
 
@@ -280,8 +283,8 @@ TEST_F(PvideoPresenterTest, LeavesPrimaryScanoutActiveWhenSoftwareAllocationFail
  * @brief Missing retrace stops page reuse while the display may still read the previous frame.
  */
 TEST_F(PvideoPresenterTest, BlocksSoftwarePageReuseOnVblankTimeout) {
-  hardware.pollVblank = true;
-  hardware.signalVblank = false;
+  hardware.softwareDisplay.pollVblank = true;
+  hardware.softwareDisplay.signalVblank = false;
   VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
   streaming::SoftwareScanout scanout;
   auto *back = scanout.back_buffer(hardware.framebuffer.size(), destination);
@@ -289,10 +292,10 @@ TEST_F(PvideoPresenterTest, BlocksSoftwarePageReuseOnVblankTimeout) {
   EXPECT_FALSE(scanout.present());
   EXPECT_EQ(hardware.ticks, 50U);
   EXPECT_EQ(VIDEOREG(CRTC_START), MmGetPhysicalAddress(back));
-  EXPECT_EQ(hardware.displayedScanout, CPU_FRAMEBUFFER);
+  EXPECT_EQ(hardware.softwareDisplay.displayedScanout, CPU_FRAMEBUFFER);
   EXPECT_EQ(scanout.back_buffer(hardware.framebuffer.size(), destination), nullptr);
   EXPECT_FALSE(scanout.present());
-  hardware.signalVblank = true;
+  hardware.softwareDisplay.signalVblank = true;
   EXPECT_TRUE(scanout.reset());
 }
 
@@ -301,7 +304,7 @@ TEST_F(PvideoPresenterTest, BlocksSoftwarePageReuseOnVblankTimeout) {
  */
 TEST_F(PvideoPresenterTest, CopiesHighDefinitionFrameWithoutChangingScanoutAddress) {
   hardware.mode = {1280, 720, 32, 60};
-  hardware.pollVblank = true;
+  hardware.softwareDisplay.pollVblank = true;
   VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
   streaming::SoftwareScanout scanout;
   auto *primary = XVideoGetFB();
@@ -316,9 +319,9 @@ TEST_F(PvideoPresenterTest, CopiesHighDefinitionFrameWithoutChangingScanoutAddre
   EXPECT_TRUE(hardware.allocations.empty());
 
   ASSERT_TRUE(scanout.present());
-  EXPECT_EQ(hardware.primaryPixelAtVblank, 0x57);
+  EXPECT_EQ(hardware.softwareDisplay.primaryPixelAtVblank, 0x57);
   EXPECT_EQ(VIDEOREG(CRTC_START), CPU_FRAMEBUFFER);
-  EXPECT_EQ(hardware.displayedScanout, CPU_FRAMEBUFFER);
+  EXPECT_EQ(hardware.softwareDisplay.displayedScanout, CPU_FRAMEBUFFER);
   EXPECT_TRUE(std::equal(staged, staged + frameBytes, primary));
   EXPECT_EQ(primary[frameBytes], 0x57);
   EXPECT_EQ(scanout.back_buffer(frameBytes, {0, 0, 1280, 720}), staged);
@@ -331,8 +334,8 @@ TEST_F(PvideoPresenterTest, CopiesHighDefinitionFrameWithoutChangingScanoutAddre
  */
 TEST_F(PvideoPresenterTest, DoesNotCopyHighDefinitionFrameOnVblankTimeout) {
   hardware.mode = {1280, 720, 32, 60};
-  hardware.pollVblank = true;
-  hardware.signalVblank = false;
+  hardware.softwareDisplay.pollVblank = true;
+  hardware.softwareDisplay.signalVblank = false;
   VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
   streaming::SoftwareScanout scanout;
   XVideoGetFB()[0] = 0x67;

@@ -670,7 +670,7 @@ namespace streaming {
       return false;
     }
 
-    bool textureNeedsUpload = false;
+    bool newFrame = false;
     if (const std::uint64_t publishedFrameVersion = video_.publishedFrameVersion.load(); publishedFrameVersion != video_.renderedFrameVersion) {
       std::scoped_lock lock(video_.frame_mutex());
       if (video_.latestFrameVersion != video_.renderedFrameVersion && video_.latestFrame.view().width > 0) {
@@ -679,7 +679,7 @@ namespace streaming {
         }
         video_.renderFrame.swap(video_.latestFrame);
         video_.renderedFrameVersion = video_.latestFrameVersion;
-        textureNeedsUpload = true;
+        newFrame = true;
       }
     }
 
@@ -688,33 +688,14 @@ namespace streaming {
       return false;
     }
 
+    const SDL_Rect destination = build_letterboxed_destination(screenWidth, screenHeight, frame.width, frame.height);
 #ifdef NXDK
-    if (gpuPresentationEnabled_ && !overlayFailed_) {
-      if (!textureNeedsUpload && !statisticsBitmapChanged_ && presenter_.active()) {
-        return true;
-      }
-      const SDL_Rect destination = build_letterboxed_destination(screenWidth, screenHeight, frame.width, frame.height);
-      if (!presenter_.active()) {
-        const VIDEO_MODE mode = XVideoGetMode();
-        if (auto *framebuffer = XVideoGetFB(); framebuffer != nullptr && mode.width > 0 && mode.height > 0 && (mode.bpp == 16 || mode.bpp == 32)) {
-          std::memset(framebuffer, 0, static_cast<std::size_t>(mode.width) * static_cast<std::size_t>(mode.height) * static_cast<std::size_t>(mode.bpp / 8));
-          XVideoFlushFB();
-        }
-      }
-      std::string reason;
-      if (presenter_.present(frame, {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_)) {
-        if (textureNeedsUpload) {
-          ++acceleration_.gpuFrames;
-        }
-        return true;
-      }
-      overlayFailed_ = true;
-      acceleration_.record_fallback(reason);
-      logging::warn("stream", "GPU presentation fallback: " + reason);
+    if (render_gpu_video_frame(destination, newFrame)) {
+      return true;
     }
     if (!softwareScanoutFailed_) {
       if (render_latest_video_frame_to_framebuffer(screenWidth, screenHeight)) {
-        if (textureNeedsUpload) {
+        if (newFrame) {
           ++acceleration_.softwareFrames;
         }
         return true;
@@ -724,7 +705,40 @@ namespace streaming {
       stop_video_presentation();
     }
 #endif
+    return render_sdl_video_frame(renderer, destination, newFrame);
+  }
 
+#ifdef NXDK
+  bool FfmpegStreamBackend::render_gpu_video_frame(const SDL_Rect &destination, bool newFrame) {
+    if (!gpuPresentationEnabled_ || overlayFailed_) {
+      return false;
+    }
+    if (!newFrame && !statisticsBitmapChanged_ && presenter_.active()) {
+      return true;
+    }
+    if (!presenter_.active()) {
+      const VIDEO_MODE mode = XVideoGetMode();
+      if (auto *framebuffer = XVideoGetFB(); framebuffer != nullptr && mode.width > 0 && mode.height > 0 && (mode.bpp == 16 || mode.bpp == 32)) {
+        std::memset(framebuffer, 0, static_cast<std::size_t>(mode.width) * static_cast<std::size_t>(mode.height) * static_cast<std::size_t>(mode.bpp / 8));
+        XVideoFlushFB();
+      }
+    }
+    std::string reason;
+    if (!presenter_.present(video_.renderFrame.view(), {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_)) {
+      overlayFailed_ = true;
+      acceleration_.record_fallback(reason);
+      logging::warn("stream", "GPU presentation fallback: " + reason);
+      return false;
+    }
+    if (newFrame) {
+      ++acceleration_.gpuFrames;
+    }
+    return true;
+  }
+#endif
+
+  bool FfmpegStreamBackend::render_sdl_video_frame(SDL_Renderer *renderer, const SDL_Rect &destination, bool textureNeedsUpload) {
+    const auto &frame = video_.renderFrame.view();
     if (video_.texture == nullptr || video_.textureWidth != frame.width || video_.textureHeight != frame.height) {
       if (video_.texture != nullptr) {
         SDL_DestroyTexture(video_.texture);
@@ -749,7 +763,6 @@ namespace streaming {
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
-    const SDL_Rect destination = build_letterboxed_destination(screenWidth, screenHeight, frame.width, frame.height);
     const bool presented = SDL_RenderCopy(renderer, video_.texture, nullptr, &destination) == 0;
     if (presented) {
       render_sdl_statistics(renderer, destination);

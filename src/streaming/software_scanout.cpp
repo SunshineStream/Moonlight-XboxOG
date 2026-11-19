@@ -8,18 +8,18 @@
 #ifdef NXDK
   // standard includes
   #include <cstring>
-  #include <new>
 
   // nxdk includes
   #include <hal/video.h>
-  #include <windows.h>
+  #include <synchapi.h>
+  #include <sysinfoapi.h>
   #include <xboxkrnl/xboxkrnl.h>
 
 namespace {
   constexpr std::uint32_t CRTC_START = 0x600800;  ///< Physical address of the primary scanout page.
   constexpr std::uint32_t CRTC_INTERRUPT = 0x600100;  ///< Display interrupt status with write-one-to-clear semantics.
   constexpr std::uint32_t VBLANK = 1;  ///< End of active display.
-  std::uint8_t *retainedPage = nullptr;  ///< Keep a page alive if scanout retirement could not be confirmed.
+  bool scanoutQuarantined = false;  ///< Prevent more allocations after retaining a page with unconfirmed retirement.
 
   /**
    * @brief Wait for a fresh vblank without taking ownership of the display IRQ.
@@ -66,12 +66,14 @@ namespace streaming {
         // A second HD scanout allocation can reuse VRAM from the boot logo.
         // xemu may select the cached GPU texture at that address instead of
         // the CPU framebuffer. Keep the nxdk scanout address for HD modes.
-        staging_.reset(new (std::nothrow) std::uint8_t[size + 64U]);
+        std::size_t available = size + 64U;
+        staging_.reset(static_cast<std::byte *>(std::malloc(available)));
         if (staging_) {
-          pages_[1] = reinterpret_cast<std::uint8_t *>((reinterpret_cast<std::uintptr_t>(staging_.get()) + 31U) & ~std::uintptr_t {31});
+          void *aligned = staging_.get();
+          pages_[1] = static_cast<std::uint8_t *>(std::align(32U, size, aligned, available));
           stagingSize_ = size;
         }
-      } else if (retainedPage == nullptr) {
+      } else if (!scanoutQuarantined) {
         pages_[1] = static_cast<std::uint8_t *>(MmAllocateContiguousMemoryEx(size, 0, 0x03ffffff, 0x1000, PAGE_READWRITE | PAGE_WRITECOMBINE));
       }
       if (pages_[1] == nullptr) {
@@ -79,8 +81,7 @@ namespace streaming {
       }
     }
     const auto back = front_ ^ 1U;
-    auto &previous = destinations_[back];
-    if (previous.x != destination.x || previous.y != destination.y || previous.width != destination.width || previous.height != destination.height) {
+    if (auto &previous = destinations_[back]; previous.x != destination.x || previous.y != destination.y || previous.width != destination.width || previous.height != destination.height) {
       std::memset(pages_[back], 0, size);
       previous = destination;
     }
@@ -132,7 +133,8 @@ namespace streaming {
       if (retired) {
         MmFreeContiguousMemory(pages_[1]);
       } else {
-        retainedPage = pages_[1];
+        // Scanout may still read the extra page. Leave it allocated for the rest of the process.
+        scanoutQuarantined = true;
       }
     }
     pages_ = {};
