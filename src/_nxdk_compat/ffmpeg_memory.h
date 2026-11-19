@@ -1,6 +1,6 @@
 /**
  * @file src/_nxdk_compat/ffmpeg_memory.h
- * @brief Declares the aligned allocation family used privately by FFmpeg.
+ * @brief Declares aligned allocation for FFmpeg and software scanout on Xbox.
  */
 #pragma once
 

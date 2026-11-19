@@ -8,7 +8,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <memory>
 
 // local includes
@@ -52,9 +51,21 @@ namespace streaming {
     bool reset();
 
   private:
+    /**
+     * @brief Release an aligned staging allocation through the Xbox compatibility allocator.
+     */
+    struct StagingBufferDeleter {
+      /**
+       * @brief Release the owned staging allocation.
+       * @param buffer Aligned staging allocation.
+       */
+      void operator()(std::byte *buffer) const noexcept;
+    };
+
+    inline static bool scanoutQuarantined_ = false;  ///< Disable page flips for this process after an unconfirmed retirement.
     std::array<std::uint8_t *, 2> pages_ {};  ///< nxdk's primary framebuffer and the additional drawing buffer.
     std::array<VideoRectangle, 2> destinations_ {};  ///< Video area last drawn on each page.
-    std::unique_ptr<std::byte, decltype(&std::free)> staging_ {nullptr, &std::free};  ///< Owns HD staging storage before alignment.
+    std::unique_ptr<std::byte, StagingBufferDeleter> staging_;  ///< Owns the aligned HD staging buffer.
     std::size_t stagingSize_ = 0;  ///< Bytes to copy from the staged frame to scanout.
     std::size_t front_ = 0;  ///< Page most recently submitted to scanout.
     bool synchronized_ = true;  ///< A completed vblank has retired the previous page.

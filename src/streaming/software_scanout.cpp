@@ -5,6 +5,9 @@
 // class header include
 #include "src/streaming/software_scanout.h"
 
+// local includes
+#include "src/_nxdk_compat/ffmpeg_memory.h"
+
 #ifdef NXDK
   // standard includes
   #include <cstring>
@@ -19,7 +22,6 @@ namespace {
   constexpr std::uint32_t CRTC_START = 0x600800;  ///< Physical address of the primary scanout page.
   constexpr std::uint32_t CRTC_INTERRUPT = 0x600100;  ///< Display interrupt status with write-one-to-clear semantics.
   constexpr std::uint32_t VBLANK = 1;  ///< End of active display.
-  bool scanoutQuarantined = false;  ///< Prevent more allocations after retaining a page with unconfirmed retirement.
 
   /**
    * @brief Wait for a fresh vblank without taking ownership of the display IRQ.
@@ -48,6 +50,10 @@ namespace {
 #endif
 
 namespace streaming {
+  void SoftwareScanout::StagingBufferDeleter::operator()(std::byte *buffer) const noexcept {
+    moonlight_ffmpeg_aligned_free(buffer);
+  }
+
   SoftwareScanout::~SoftwareScanout() {
     reset();
   }
@@ -66,14 +72,13 @@ namespace streaming {
         // A second HD scanout allocation can reuse VRAM from the boot logo.
         // xemu may select the cached GPU texture at that address instead of
         // the CPU framebuffer. Keep the nxdk scanout address for HD modes.
-        std::size_t available = size + 64U;
-        staging_.reset(static_cast<std::byte *>(std::malloc(available)));
-        if (staging_) {
-          void *aligned = staging_.get();
-          pages_[1] = static_cast<std::uint8_t *>(std::align(32U, size, aligned, available));
+        auto *allocation = moonlight_ffmpeg_aligned_malloc(size + 64U, 32U);
+        staging_.reset(static_cast<std::byte *>(allocation));
+        pages_[1] = static_cast<std::uint8_t *>(allocation);
+        if (allocation != nullptr) {
           stagingSize_ = size;
         }
-      } else if (!scanoutQuarantined) {
+      } else if (!scanoutQuarantined_) {
         pages_[1] = static_cast<std::uint8_t *>(MmAllocateContiguousMemoryEx(size, 0, 0x03ffffff, 0x1000, PAGE_READWRITE | PAGE_WRITECOMBINE));
       }
       if (pages_[1] == nullptr) {
@@ -134,7 +139,7 @@ namespace streaming {
         MmFreeContiguousMemory(pages_[1]);
       } else {
         // Scanout may still read the extra page. Leave it allocated for the rest of the process.
-        scanoutQuarantined = true;
+        scanoutQuarantined_ = true;
       }
     }
     pages_ = {};

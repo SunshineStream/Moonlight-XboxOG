@@ -723,8 +723,7 @@ namespace streaming {
         XVideoFlushFB();
       }
     }
-    std::string reason;
-    if (!presenter_.present(video_.renderFrame.view(), {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_)) {
+    if (std::string reason; !presenter_.present(video_.renderFrame.view(), {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_)) {
       overlayFailed_ = true;
       acceleration_.record_fallback(reason);
       logging::warn("stream", "GPU presentation fallback: " + reason);
