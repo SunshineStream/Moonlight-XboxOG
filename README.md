@@ -74,10 +74,9 @@ No network connection or JavaScript runtime is needed to display the icons on th
 
 ## Video presentation
 
-**Settings → Display → Video Presentation** defaults to **Software**, which combines the decoded video
-and overlay before displaying each frame. **GPU** uses NV2A color conversion and scaling with automatic
-software fallback. The setting is saved as `streaming.gpu_presentation` and both paths are available in
-the same build.
+**Settings → Display → Video Presentation** defaults to **GPU**, which uses NV2A color conversion and
+scaling with automatic software fallback. **Software** combines the decoded video and overlay on the
+CPU before displaying each frame. Moonlight keeps your selection in `streaming.gpu_presentation`.
 
 ## Stream audio
 

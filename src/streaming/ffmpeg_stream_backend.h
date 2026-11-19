@@ -447,7 +447,7 @@ namespace streaming {
     bool statisticsTextureChanged_ = false;  ///< SDL texture requires the current bitmap.
     VideoRectangle statisticsTextureDamage_ {};  ///< Pending SDL texture upload, accumulated until software presentation.
     VideoAccelerationReport acceleration_;  ///< Session diagnostics survive decoder cleanup.
-    bool gpuPresentationEnabled_ = false;  ///< Session opt-in applied before decoder setup.
+    bool gpuPresentationEnabled_ = false;  ///< Session preference applied before decoder setup.
     bool overlayFailed_ = false;  ///< Avoid repeating a known failing hardware path this session.
     bool softwareScanoutFailed_ = false;  ///< Use the SDL fallback after software scanout fails.
   };

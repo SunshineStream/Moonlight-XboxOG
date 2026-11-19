@@ -185,7 +185,7 @@ namespace {
     EXPECT_EQ(state.settings.loggingLevel, logging::LogLevel::none);
     EXPECT_EQ(state.settings.streamFramerate, 60);
     EXPECT_EQ(state.settings.streamBitrateKbps, 3000);
-    EXPECT_FALSE(state.settings.presentation.gpuPresentation);
+    EXPECT_TRUE(state.settings.presentation.gpuPresentation);
   }
 
   TEST(ClientStateTest, ReplacesHostsFromPersistenceWithoutMarkingThemDirty) {
@@ -1483,28 +1483,28 @@ namespace {
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Performance Stats: On");
   }
 
-  /** @brief Switch from the software default to GPU and back while preserving bitrate and statistics. */
-  TEST(ClientStateTest, DisplaySettingsCanSelectGpuPresentation) {
+  /** @brief Switch from the GPU default to software and back while preserving bitrate and statistics. */
+  TEST(ClientStateTest, DisplaySettingsCanSelectSoftwarePresentation) {
     auto state = app::create_initial_state();
     ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
     ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-presentation"));
-    ASSERT_FALSE(state.settings.presentation.gpuPresentation);
+    ASSERT_TRUE(state.settings.presentation.gpuPresentation);
     state.settings.streamBitrateKbps = 4500;
     state.settings.presentation.showPerformanceStats = true;
 
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
-    EXPECT_TRUE(state.settings.presentation.gpuPresentation);
+    EXPECT_FALSE(state.settings.presentation.gpuPresentation);
     EXPECT_TRUE(state.settings.dirty);
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
-    EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: GPU");
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: Software");
     EXPECT_EQ(state.settings.streamBitrateKbps, 4500);
     EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
 
     EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
-    EXPECT_FALSE(state.settings.presentation.gpuPresentation);
+    EXPECT_TRUE(state.settings.presentation.gpuPresentation);
     EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
-    EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: Software");
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: GPU");
   }
 
   /**

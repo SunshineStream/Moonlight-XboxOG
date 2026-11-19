@@ -107,25 +107,25 @@ namespace {
     EXPECT_FALSE(loadResult.settings.playAudioOnXbox);
   }
 
-  /** @brief Persist explicit GPU selection and default to software with old or invalid settings. */
+  /** @brief Persist an explicit software selection and default to GPU with old or invalid settings. */
   TEST_F(SettingsStorageTest, SavesAndLoadsPresentationPreference) {
     write_text_file(settingsPath, "[streaming]\nfps = 30\n");
     const auto partial = app::load_app_settings(settingsPath);
-    EXPECT_FALSE(partial.settings.gpuPresentation);
+    EXPECT_TRUE(partial.settings.gpuPresentation);
     EXPECT_EQ(partial.settings.streamFramerate, 30);
     EXPECT_EQ(partial.settings.streamBitrateKbps, 1000);
 
     app::AppSettings settings;
-    settings.gpuPresentation = true;
+    settings.gpuPresentation = false;
     ASSERT_TRUE(app::save_app_settings(settings, settingsPath).success);
-    const auto gpu = app::load_app_settings(settingsPath);
-    EXPECT_TRUE(gpu.settings.gpuPresentation);
-    EXPECT_TRUE(gpu.warnings.empty());
-    EXPECT_FALSE(gpu.cleanupRequired);
+    const auto software = app::load_app_settings(settingsPath);
+    EXPECT_FALSE(software.settings.gpuPresentation);
+    EXPECT_TRUE(software.warnings.empty());
+    EXPECT_FALSE(software.cleanupRequired);
 
     write_text_file(settingsPath, "[streaming]\ngpu_presentation = 'software'\n");
     const auto invalid = app::load_app_settings(settingsPath);
-    EXPECT_FALSE(invalid.settings.gpuPresentation);
+    EXPECT_TRUE(invalid.settings.gpuPresentation);
     ASSERT_EQ(invalid.warnings.size(), 1U);
     EXPECT_NE(invalid.warnings.front().find("streaming.gpu_presentation"), std::string::npos);
   }
@@ -185,7 +185,7 @@ namespace {
     EXPECT_FALSE(loadResult.settings.preferredVideoModeSet);
     EXPECT_EQ(loadResult.settings.streamFramerate, 60);
     EXPECT_EQ(loadResult.settings.streamBitrateKbps, 3000);
-    EXPECT_FALSE(loadResult.settings.gpuPresentation);
+    EXPECT_TRUE(loadResult.settings.gpuPresentation);
     EXPECT_FALSE(loadResult.settings.playAudioOnPc);
     EXPECT_FALSE(loadResult.settings.showPerformanceStats);
     EXPECT_TRUE(loadResult.settings.playAudioOnXbox);

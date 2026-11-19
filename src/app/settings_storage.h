@@ -29,7 +29,7 @@ namespace app {
     bool playAudioOnXbox = true;  ///< True when the Xbox should decode and play streamed audio locally.
     std::string screenshotDirectory;  ///< Screenshot folder; empty selects the title-scoped screenshots directory.
     bool keyboardDockTop = false;  ///< Dock the stream keyboard to the top instead of the bottom.
-    bool gpuPresentation = false;  ///< Opt in to NV2A presentation with software fallback.
+    bool gpuPresentation = DEFAULT_GPU_PRESENTATION;  ///< Use NV2A presentation with software fallback.
     streaming::AudioMode audioMode = streaming::AudioMode::stereo;  ///< Source channels and local playback mix.
   };
 
@@ -59,7 +59,7 @@ namespace app {
   std::string default_settings_path();
 
   /**
-   * @brief Load saved preferences, defaulting to stereo and deriving the bitrate when absent.
+   * @brief Load saved preferences. Missing values use GPU presentation, stereo audio, and a bitrate derived from the stream mode.
    *
    * @param filePath Settings file to read.
    * @return Loaded settings plus any non-fatal warnings.
