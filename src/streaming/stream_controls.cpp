@@ -397,12 +397,6 @@ namespace streaming {
     return chord;
   }
 
-  bool StreamControls::any_button_pressed() const {
-    return std::any_of(devices_.begin(), devices_.end(), [](const Device &d) {
-      return d.sample.buttonFlags != 0 || d.sample.leftTrigger != 0 || d.sample.rightTrigger != 0;
-    });
-  }
-
   SDL_GameController *StreamControls::take_controller_for_shell() {
     poll();
     for (auto &device : devices_) {

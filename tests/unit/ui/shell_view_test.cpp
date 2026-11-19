@@ -492,6 +492,72 @@ namespace {
   }
 
   /**
+   * @brief Keep the app grid behind the summary and show the correct confirmation hint for each device.
+   */
+  TEST(ShellViewTest, StreamSummaryOverlaysAppPickerWithConfirmAction) {
+    auto state = app::create_initial_state();
+    state.shell.activeScreen = app::ScreenId::apps;
+    state.shell.inputDevice = input::UiInputDevice::gamepad;
+    state.hosts.activeLoaded = true;
+    state.hosts.active.pairingState = app::PairingState::paired;
+    state.hosts.active.appListState = app::HostAppListState::ready;
+    state.hosts.active.apps = {{"Desktop", 1}};
+    const std::vector<std::string> lines {"Stopped streaming Desktop", "GPU overlay: 12 frames | Software: 0 frames"};
+    app::show_stream_summary(state, lines);
+
+    auto view = ui::build_shell_view_model(state, {});
+    EXPECT_EQ(view.frame.screen, app::ScreenId::apps);
+    ASSERT_EQ(view.content.appTiles.size(), 1U);
+    EXPECT_EQ(view.content.appTiles.front().name, "Desktop");
+    EXPECT_TRUE(view.content.appTiles.front().selected);
+    EXPECT_TRUE(view.modal.visible);
+    EXPECT_FALSE(view.modal.busy);
+    EXPECT_TRUE(view.modal.compactBody);
+    EXPECT_EQ(view.modal.title, "Stream Summary");
+    EXPECT_EQ(view.modal.lines, lines);
+    ASSERT_EQ(view.modal.footerActions.size(), 1U);
+    EXPECT_TRUE(view.modal.footerActions.front().emphasized);
+    EXPECT_EQ(view.modal.footerActions.front().label, "Confirm");
+    EXPECT_EQ(view.modal.footerActions.front().iconAssetPath, "icons\\button-a.svg");
+
+    state.shell.inputDevice = input::UiInputDevice::keyboard;
+    view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.modal.footerActions.size(), 1U);
+    EXPECT_EQ(view.modal.footerActions.front().keyLabel, "Enter");
+  }
+
+  /**
+   * @brief The startup modal keeps the selected app and advances through real launch milestones.
+   */
+  TEST(ShellViewTest, StreamLaunchDialogShowsTheSelectedAppAndPc) {
+    app::HostRecord host {};
+    host.displayName = "Living Room PC";
+    app::HostAppRecord app {};
+    app.name = "Desktop";
+
+    const std::array expected {
+      "Preparing to connect to Living Room PC...",
+      "Waiting for Living Room PC to start the stream...",
+      "Connecting to Living Room PC...",
+      "Waiting for the first video frame...",
+    };
+    ASSERT_EQ(expected.size(), ui::STREAM_STARTUP_STEP_COUNT);
+    EXPECT_EQ(ui::build_stream_launch_dialog(host, app).streamStartupStep, ui::StreamStartupStep::preparing);
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+      const auto step = static_cast<ui::StreamStartupStep>(index);
+      const auto dialog = ui::build_stream_launch_dialog(host, app, step);
+      EXPECT_TRUE(dialog.visible);
+      EXPECT_TRUE(dialog.busy);
+      EXPECT_EQ(dialog.streamStartupStep, step);
+      EXPECT_EQ(dialog.title, "Starting Desktop");
+      ASSERT_EQ(dialog.lines.size(), 1U);
+      EXPECT_EQ(dialog.lines.front(), expected[index]);
+      EXPECT_TRUE(dialog.actions.empty());
+      EXPECT_TRUE(dialog.footerActions.empty());
+    }
+  }
+
+  /**
    * @brief Show connection progress and result diagnostics with distinct status icons.
    */
   TEST(ShellViewTest, ConnectionTestModalShowsProgressAndResults) {

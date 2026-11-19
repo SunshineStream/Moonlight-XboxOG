@@ -16,6 +16,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -42,6 +43,9 @@
 #include "src/streaming/ffmpeg_stream_backend.h"
 #include "src/streaming/stats_overlay.h"
 #include "src/streaming/stream_controls.h"
+#include "src/ui/dialog_surface.h"
+#include "src/ui/shell_layout.h"
+#include "src/ui/shell_view.h"
 
 #ifdef NXDK
 /**
@@ -68,12 +72,8 @@ namespace {
   constexpr Uint8 TEXT_RED = 0xF2;
   constexpr Uint8 TEXT_GREEN = 0xF5;
   constexpr Uint8 TEXT_BLUE = 0xF8;
-  constexpr Uint8 ACCENT_RED = 0x00;
-  constexpr Uint8 ACCENT_GREEN = 0xF3;
-  constexpr Uint8 ACCENT_BLUE = 0xD4;
   constexpr Uint32 STREAM_FRAME_DELAY_MILLISECONDS = 16U;
   constexpr Uint32 STREAM_PRESENT_POLL_MILLISECONDS = 2U;
-  constexpr Uint32 STREAM_END_STATS_POLL_MILLISECONDS = 50U;
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_MILLISECONDS = 1500U;
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_COOLDOWN_MILLISECONDS = 2000U;
   constexpr int MIN_STREAM_FPS = 15;
@@ -83,6 +83,9 @@ namespace {
   constexpr int DEFAULT_PACKET_SIZE = 1024;
   constexpr std::size_t MAX_CONNECTION_PROTOCOL_MESSAGES = 24U;
 
+  /**
+   * @brief Holds the state owned by the stream's event and render thread.
+   */
   struct StreamUiResources {
     SDL_Renderer *renderer = nullptr;
     TTF_Font *titleFont = nullptr;
@@ -92,6 +95,7 @@ namespace {
     streaming::VideoStatisticsSampler statisticsSampler;  ///< One-second telemetry intervals.
     streaming::StreamControls controller;
     streaming::FfmpegStreamBackend mediaBackend {};
+    std::optional<Uint32> startupTick;  ///< Session entry tick, cleared when the first video frame is presented.
     bool ttfInitialized = false;
   };
 
@@ -165,13 +169,16 @@ namespace {
     std::string rtspSessionUrl;
   };
 
+  /**
+   * @brief References needed to run a transport startup attempt and report a failure.
+   */
   struct StreamStartAttemptContext {
     const app::HostRecord &host;
     const app::HostAppRecord &app;
     StreamStartContext &startContext;
     StreamConnectionState &connectionState;
     StreamUiResources &resources;
-    std::string *statusMessage = nullptr;
+    std::string &statusMessage;  ///< Result text to update if setup fails.
   };
 
   struct ActiveStreamLoopContext {
@@ -183,14 +190,6 @@ namespace {
     StreamUiResources &resources;
   };
 
-  struct TextLineLayout {
-    SDL_Color color {};
-    int x = 0;
-    int y = 0;
-    int maxWidth = 0;
-    int *drawnHeight = nullptr;
-  };
-
   struct ResolvedStreamParameters {
     VIDEO_MODE videoMode {};
     int fps = app::DEFAULT_STREAM_FRAMERATE;
@@ -198,12 +197,6 @@ namespace {
     int packetSize = DEFAULT_PACKET_SIZE;
     int streamingRemotely = STREAM_CFG_AUTO;
   };
-
-  void assign_status_message(std::string *statusMessage, std::string_view message) {
-    if (statusMessage != nullptr) {
-      statusMessage->assign(message.data(), message.size());
-    }
-  }
 
   class ScopedThreadPriority {
   public:
@@ -935,54 +928,48 @@ namespace {
     return 0;
   }
 
-  bool render_text_line(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, const TextLineLayout &layout) {
-    if (renderer == nullptr || font == nullptr || layout.maxWidth <= 0) {
-      if (layout.drawnHeight != nullptr) {
-        *layout.drawnHeight = 0;
-      }
-      return false;
-    }
-
-    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(font, text.c_str(), layout.color, static_cast<Uint32>(layout.maxWidth));
-    if (surface == nullptr) {
-      if (layout.drawnHeight != nullptr) {
-        *layout.drawnHeight = 0;
-      }
-      return false;
-    }
-
+  /**
+   * @brief Render text into a bounded area without changing SDL's renderer clip.
+   * @param renderer Active SDL renderer.
+   * @param surface Rasterized text.
+   * @param bounds Available space for the text.
+   * @return True when the text was copied to the renderer.
+   */
+  bool render_text_surface(SDL_Renderer *renderer, SDL_Surface *surface, const SDL_Rect &bounds) {
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
     if (texture == nullptr) {
-      SDL_FreeSurface(surface);
-      if (layout.drawnHeight != nullptr) {
-        *layout.drawnHeight = 0;
-      }
       return false;
     }
-
-    const SDL_Rect destination {layout.x, layout.y, surface->w, surface->h};
-    const int surfaceHeight = surface->h;
-    SDL_FreeSurface(surface);
-    const bool rendered = SDL_RenderCopy(renderer, texture, nullptr, &destination) == 0;
+    const SDL_Rect source {0, 0, std::min(surface->w, bounds.w), std::min(surface->h, bounds.h)};
+    const SDL_Rect destination {bounds.x, bounds.y, source.w, source.h};
+    const bool rendered = SDL_RenderCopy(renderer, texture, &source, &destination) == 0;
     SDL_DestroyTexture(texture);
-    if (layout.drawnHeight != nullptr) {
-      *layout.drawnHeight = surfaceHeight;
-    }
     return rendered;
   }
 
-  void render_text_lines(SDL_Renderer *renderer, TTF_Font *font, const std::vector<std::string> &lines, int screenWidth, int *cursorY) {
-    if (cursorY == nullptr) {
-      return;
+  /**
+   * @brief Rasterize and draw a wrapped run of text at the requested position.
+   * @param renderer Active SDL renderer.
+   * @param font Font used for the run.
+   * @param text Text to draw.
+   * @param bounds Available space for the text.
+   * @param color Text color.
+   * @return True when the text was rendered.
+   */
+  bool render_text_line(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, const SDL_Rect &bounds, SDL_Color color) {
+    if (renderer == nullptr || font == nullptr || bounds.w <= 0 || bounds.h <= 0) {
+      return false;
     }
 
-    for (const std::string &line : lines) {
-      int drawnHeight = 0;
-      render_text_line(renderer, font, line, {{TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, 28, *cursorY, std::max(1, screenWidth - 56), &drawnHeight});
-      *cursorY += drawnHeight + 6;
-    }
+    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface(TTF_RenderUTF8_Blended_Wrapped(font, text.c_str(), color, static_cast<Uint32>(bounds.w)), &SDL_FreeSurface);
+    return surface && render_text_surface(renderer, surface.get(), bounds);
   }
 
+  /**
+   * @brief Describe the current transport stage or an interruption when more detail is available.
+   * @param connectionState Current transport stage and outcome.
+   * @return Text overriding the startup step label, or an empty string to use that label.
+   */
   std::string build_stage_status_line(const StreamConnectionState &connectionState) {
     if (const int failedStage = connectionState.failedStage.load(); failedStage != STAGE_NONE) {
       return std::string("Connection failed during ") + LiGetStageName(failedStage) + " (error " + std::to_string(connectionState.failedCode.load()) + ")";
@@ -991,32 +978,10 @@ namespace {
       const int terminationError = connectionState.terminationError.load();
       return terminationError == ML_ERROR_GRACEFUL_TERMINATION ? "The host ended the stream gracefully." : "The host ended the stream (error " + std::to_string(terminationError) + ")";
     }
-    if (connectionState.connectionStarted.load()) {
-      return std::string("Streaming transport is active. ") + input::STREAM_EXIT_HINT;
+    if (const int stage = connectionState.currentStage.load(); stage != STAGE_NONE && !connectionState.connectionStarted.load()) {
+      return std::string("Establishing the stream connection (") + LiGetStageName(stage) + ")...";
     }
-    return std::string("Connecting: ") + LiGetStageName(connectionState.currentStage.load());
-  }
-
-  void open_controller_if_needed(StreamUiResources *resources, int deviceIndex) {
-    if (resources == nullptr) {
-      return;
-    }
-
-    resources->controller.open_if_needed(deviceIndex);
-  }
-
-  void close_controller_if_removed(StreamUiResources *resources, int joystickInstanceId) {
-    if (resources == nullptr) {
-      return;
-    }
-
-    resources->controller.close_if_removed(joystickInstanceId);
-  }
-
-  SDL_ControllerDeviceEvent copy_controller_device_event(const SDL_Event &event) {
-    SDL_ControllerDeviceEvent controllerEvent {};
-    std::memcpy(&controllerEvent, &event, sizeof(controllerEvent));
-    return controllerEvent;
+    return {};
   }
 
   /**
@@ -1190,6 +1155,88 @@ namespace {
 #endif
   }
 
+  /**
+   * @brief Paint startup progress with a footer that stays inside television-safe margins.
+   * @param resources Event-thread renderer and fonts.
+   * @param dialog Modal content with an optional startup progress step.
+   * @param screenWidth Output width in pixels.
+   * @param screenHeight Output height in pixels.
+   * @param footer Optional stream-menu hint.
+   * @return True when the dialog was drawn.
+   */
+  bool draw_stream_start_dialog(const StreamUiResources &resources, const ui::ShellModalView &dialog, int screenWidth, int screenHeight, const std::string &footer = {}) {
+    const int padding = std::max(20, screenHeight / 40);
+    const int dialogWidth = std::min(760, screenWidth * 3 / 4);
+    const int innerWidth = dialogWidth - 2 * padding;
+    const int titleHeight = TTF_FontLineSkip(resources.titleFont);
+    const int bodyTop = 28 + titleHeight + 12;
+    constexpr int progressHeight = 8;
+    int footerTextHeight = 0;
+    if (!footer.empty()) {
+      int footerWidth = 0;
+      const bool wraps = TTF_SizeUTF8(resources.bodyFont, footer.c_str(), &footerWidth, nullptr) == 0 && footerWidth > innerWidth;
+      footerTextHeight = TTF_FontLineSkip(resources.bodyFont) * (wraps ? 2 : 1);
+    }
+    const int footerHeight = progressHeight + 12 + footerTextHeight;
+    const int maxBodyHeight = screenHeight - screenHeight / 10 - bodyTop - footerHeight - 2 * padding;
+    if (innerWidth <= 0 || maxBodyHeight <= 0) {
+      return false;
+    }
+
+    std::string bodyText;
+    for (const auto &line : dialog.lines) {
+      if (!bodyText.empty()) {
+        bodyText += '\n';
+      }
+      bodyText += line;
+    }
+    const auto rasterizeBody = [&](TTF_Font *font) {
+      return std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)>(
+        TTF_RenderUTF8_Blended_Wrapped(font, bodyText.c_str(), {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, static_cast<Uint32>(innerWidth)),
+        SDL_FreeSurface
+      );
+    };
+    auto body = rasterizeBody(resources.bodyFont);
+    if (body && body->h > maxBodyHeight && resources.statisticsFont != nullptr) {
+      if (auto compact = rasterizeBody(resources.statisticsFont); compact && compact->h < body->h) {
+        body = std::move(compact);
+      }
+    }
+    if (!body) {
+      return false;
+    }
+
+    const int bodyHeight = std::min(body->h, maxBodyHeight);
+    const auto [x, y, w, h] = ui::calculate_shell_dialog(screenWidth, screenHeight, dialogWidth, bodyTop + bodyHeight + footerHeight + 2 * padding);
+    SDL_SetRenderDrawColor(resources.renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
+    SDL_RenderClear(resources.renderer);
+    ui::draw_dialog_surface(resources.renderer, {x, y, w, h});
+
+    const int left = x + padding;
+    const SDL_Color text {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
+    if (!render_text_line(resources.renderer, resources.titleFont, dialog.title, {left, y + 28, innerWidth, titleHeight}, text) || !render_text_surface(resources.renderer, body.get(), {left, y + bodyTop, innerWidth, bodyHeight})) {
+      return false;
+    }
+    if (dialog.streamStartupStep.has_value()) {
+      ui::draw_dialog_progress(resources.renderer, {left, y + h - padding - footerHeight, innerWidth, progressHeight}, static_cast<int>(*dialog.streamStartupStep), ui::STREAM_STARTUP_STEP_COUNT);
+    }
+    if (!footer.empty()) {
+      const int footerY = y + h - padding - footerTextHeight;
+      return render_text_line(resources.renderer, resources.bodyFont, footer, {left, footerY, innerWidth, footerTextHeight}, {0x82, 0xB4, 0xFF, 0xFF});
+    }
+    return true;
+  }
+
+  /**
+   * @brief Present the latest decoded frame or continue showing startup progress.
+   * @param host Selected PC.
+   * @param app Selected app on the PC.
+   * @param context Stream configuration used for diagnostics.
+   * @param connectionState Current transport stage and outcome.
+   * @param mediaBackend Backend supplying video and local controls.
+   * @param resources Event-thread renderer, fonts and first-frame timing.
+   * @return True when there are resources to render the frame.
+   */
   bool render_stream_frame(
     const app::HostRecord &host,
     const app::HostAppRecord &app,
@@ -1209,29 +1256,22 @@ namespace {
 
     const bool hasDecodedVideo = mediaBackend != nullptr && mediaBackend->has_decoded_video();
     if (hasDecodedVideo && mediaBackend->render_latest_video_frame(resources->renderer, screenWidth, screenHeight)) {
+      if (resources->startupTick.has_value()) {
+        logging::info("stream", "Stream startup: first video frame presented after " + std::to_string(SDL_GetTicks() - *resources->startupTick) + " ms in the session");
+        resources->startupTick.reset();
+      }
       render_stream_input_diagnostics(resources);
       return true;
     }
-    SDL_SetRenderDrawColor(resources->renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
-    SDL_RenderClear(resources->renderer);
-
-    int cursorY = 28;
-    int titleHeight = 0;
-    render_text_line(resources->renderer, resources->titleFont, "Moonlight Streaming", {{ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, 28, cursorY, std::max(1, screenWidth - 56), &titleHeight});
-    cursorY += titleHeight + 8;
-
-    std::vector<std::string> lines = {
-      std::string("Host: ") + host.displayName + " (" + context.address + ")",
-      std::string("App: ") + app.name + (context.rtspSessionUrl.empty() ? std::string {} : std::string(" | Session URL received")),
-      build_stage_status_line(connectionState),
-      mediaBackend != nullptr ? mediaBackend->build_overlay_status_line() : std::string("FFmpeg decode backend unavailable"),
-      input::STREAM_EXIT_HINT,
-    };
-    lines.emplace(lines.begin() + 2, std::string("Mode: ") + std::to_string(context.streamConfiguration.width) + "x" + std::to_string(context.streamConfiguration.height) + " @ " + std::to_string(context.streamConfiguration.fps) + " FPS | " + (mediaBackend != nullptr ? mediaBackend->active_video_decoder_name() : std::string("video")) + " | Stereo");
-    lines.emplace(lines.begin() + 4, std::string("Launch mode: ") + (context.serverInformation.rtspSessionUrl != nullptr ? "Session URL supplied by host" : "Default RTSP discovery"));
-    lines.emplace(lines.begin() + 5, "Waiting for the first decoded video frame and audio output.");
-
-    render_text_lines(resources->renderer, resources->bodyFont, lines, screenWidth, &cursorY);
+    const auto step = connectionState.connectionStarted.load() ? ui::StreamStartupStep::first_frame : ui::StreamStartupStep::connecting;
+    auto dialog = ui::build_stream_launch_dialog(host, app, step);
+    if (auto detail = build_stage_status_line(connectionState); !detail.empty()) {
+      dialog.lines.front() = std::move(detail);
+    }
+    if (resources->statisticsEnabled && mediaBackend != nullptr) {
+      dialog.lines.push_back(mediaBackend->build_overlay_status_line());
+    }
+    draw_stream_start_dialog(*resources, dialog, screenWidth, screenHeight, input::STREAM_EXIT_HINT);
 
     if (resources->controller.has_overlay() && mediaBackend != nullptr) {
       mediaBackend->render_local_overlay(resources->renderer, screenWidth, screenHeight);
@@ -1241,122 +1281,45 @@ namespace {
     return true;
   }
 
-  bool render_stream_end_statistics_frame(
+  /**
+   * @brief Build the summary displayed by the shell after restoring the app picker.
+   * @param host PC that supplied the stream.
+   * @param app Selected host app.
+   * @param context Stream configuration and address.
+   * @param statisticsSnapshot Final acceleration and performance data.
+   * @param finalMessage Human-readable session outcome.
+   * @return Summary rows with optional performance details.
+   */
+  std::vector<std::string> build_stream_summary_lines(
     const app::HostRecord &host,
     const app::HostAppRecord &app,
     const StreamStartContext &context,
     const streaming::StreamStatisticsSnapshot &statisticsSnapshot,
-    const std::string &finalMessage,
-    StreamUiResources *resources
+    const std::string &finalMessage
   ) {
-    if (resources == nullptr || resources->renderer == nullptr || resources->titleFont == nullptr || resources->bodyFont == nullptr) {
-      return false;
-    }
-
-    int screenWidth = 0;
-    SDL_GetRendererOutputSize(resources->renderer, &screenWidth, nullptr);
-
-    SDL_SetRenderDrawColor(resources->renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
-    SDL_RenderClear(resources->renderer);
-
-    int cursorY = 28;
-    int titleHeight = 0;
-    const bool fallbackUsed = !statisticsSnapshot.accelerationSummary.empty() && statisticsSnapshot.accelerationSummary.front() == "SOFTWARE FALLBACK USED";
-    const SDL_Color summaryColor = fallbackUsed ? SDL_Color {0xFF, 0xB4, 0x46, 0xFF} : SDL_Color {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF};
-    render_text_line(resources->renderer, resources->titleFont, fallbackUsed ? "SOFTWARE FALLBACK USED" : "Stream Summary", {summaryColor, 28, cursorY, std::max(1, screenWidth - 56), &titleHeight});
-    cursorY += titleHeight + 8;
-
-    std::vector<std::string> lines = statisticsSnapshot.accelerationSummary;
-    lines.push_back(finalMessage);
-    lines.push_back(std::string("Host: ") + host.displayName + " (" + context.address + ")");
-    lines.push_back(std::string("App: ") + app.name);
+    std::vector<std::string> lines {finalMessage, "Host: " + host.displayName + " (" + context.address + ")", "App: " + app.name};
+    lines.insert(lines.end(), statisticsSnapshot.accelerationSummary.begin(), statisticsSnapshot.accelerationSummary.end());
     if (statisticsSnapshot.showPerformanceMetrics) {
-      for (const std::string &line : streaming::build_stats_overlay_lines(statisticsSnapshot)) {
-        lines.push_back(line);
-      }
+      const auto performance = streaming::build_stats_overlay_lines(statisticsSnapshot);
+      lines.insert(lines.end(), performance.begin(), performance.end());
     }
-    lines.emplace_back("Press any button to return.");
-
-    render_text_lines(resources->renderer, resources->bodyFont, lines, screenWidth, &cursorY);
-
-    SDL_RenderPresent(resources->renderer);
-    return true;
-  }
-
-  bool should_close_stream_end_statistics(const SDL_Event &event, StreamUiResources *resources) {
-    if (event.type == SDL_CONTROLLERDEVICEADDED) {
-      const SDL_ControllerDeviceEvent controllerEvent = copy_controller_device_event(event);
-      open_controller_if_needed(resources, controllerEvent.which);
-      return false;
-    }
-    if (event.type == SDL_CONTROLLERDEVICEREMOVED) {
-      const SDL_ControllerDeviceEvent controllerEvent = copy_controller_device_event(event);
-      close_controller_if_removed(resources, controllerEvent.which);
-      return false;
-    }
-    return event.type == SDL_QUIT || event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN;
-  }
-
-  void show_stream_end_statistics(
-    const app::HostRecord &host,
-    const app::HostAppRecord &app,
-    const StreamStartContext &context,
-    const streaming::StreamStatisticsSnapshot &statisticsSnapshot,
-    const std::string &finalMessage,
-    StreamUiResources *resources
-  ) {
-    if (!render_stream_end_statistics_frame(host, app, context, statisticsSnapshot, finalMessage, resources)) {
-      return;
-    }
-
-    resources->controller.poll();
-    bool controllerReadyForPress = !resources->controller.any_button_pressed();
-
-    for (;;) {
-      SDL_Event event {};
-      while (SDL_PollEvent(&event) != 0) {
-        if (should_close_stream_end_statistics(event, resources)) {
-          return;
-        }
-      }
-      resources->controller.poll();
-      if (!resources->controller.any_button_pressed()) {
-        controllerReadyForPress = true;
-      } else if (controllerReadyForPress) {
-        return;
-      }
-      SDL_Delay(STREAM_END_STATS_POLL_MILLISECONDS);
-    }
+    return lines;
   }
 
   /**
-   * @brief Acknowledge a local quit before waiting for the input sender and transport teardown.
-   *
-   * @param resources Stream renderer and font resources owned by the event thread.
+   * @brief Run transport startup while the event thread handles input and presents progress.
+   * @param attempt Resources and status for one transport startup attempt.
+   * @return True when the worker ran to completion or cancellation.
    */
-  void render_stream_stopping_frame(StreamUiResources *resources) {
-    if (resources == nullptr || resources->renderer == nullptr || resources->titleFont == nullptr) {
-      return;
-    }
-    resources->mediaBackend.stop_video_presentation();
-    int screenWidth = 0;
-    SDL_GetRendererOutputSize(resources->renderer, &screenWidth, nullptr);
-    SDL_SetRenderDrawColor(resources->renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
-    SDL_RenderClear(resources->renderer);
-    render_text_line(resources->renderer, resources->titleFont, "Stopping stream...", {{ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, 28, 28, std::max(1, screenWidth - 56), nullptr});
-    SDL_RenderPresent(resources->renderer);
-  }
-
   bool run_stream_start_attempt(const StreamStartAttemptContext &attempt) {
     if (SDL_Thread *startThread = SDL_CreateThread(run_stream_start_thread, "start-stream", &attempt.startContext); startThread != nullptr) {
       while (!attempt.connectionState.startCompleted.load() && !attempt.connectionState.stopRequested.load()) {
         pump_stream_events(&attempt.resources, &attempt.connectionState);
         if (attempt.connectionState.stopRequested.load()) {
-          render_stream_stopping_frame(&attempt.resources);
           LiInterruptConnection();
-        } else {
-          render_stream_frame(attempt.host, attempt.app, attempt.startContext, attempt.connectionState, &attempt.resources.mediaBackend, &attempt.resources);
+          break;
         }
+        render_stream_frame(attempt.host, attempt.app, attempt.startContext, attempt.connectionState, &attempt.resources.mediaBackend, &attempt.resources);
         SDL_Delay(STREAM_FRAME_DELAY_MILLISECONDS);
       }
 
@@ -1368,7 +1331,7 @@ namespace {
 
     const std::string createThreadError = std::string("Failed to start the streaming transport thread: ") + SDL_GetError();
     close_stream_ui_resources(&attempt.resources);
-    assign_status_message(attempt.statusMessage, createThreadError);
+    attempt.statusMessage = createThreadError;
     logging::error("stream", createThreadError);
     return false;
   }
@@ -1425,7 +1388,6 @@ namespace {
     while (!loopContext.connectionState.connectionTerminated.load() && !loopContext.connectionState.stopRequested.load()) {
       pump_stream_events(&loopContext.resources, &loopContext.connectionState);
       if (loopContext.connectionState.stopRequested.load()) {
-        render_stream_stopping_frame(&loopContext.resources);
         break;
       }
       render_active_stream_frame_if_needed(loopContext, &lastIdleVideoIdrRequestTick);
@@ -1478,21 +1440,20 @@ namespace streaming {
     const app::HostAppRecord &app,
     const network::PairingIdentity &clientIdentity,
     SDL_GameController *preferredController,
-    SDL_GameController **returnController,
-    std::string *statusMessage
+    StreamSessionReport &report
   ) {
-    if (returnController != nullptr) {
-      *returnController = nullptr;
-    }
+    const Uint32 sessionStarted = SDL_GetTicks();
+    report = {};
     const ResolvedStreamParameters streamParameters = resolve_stream_parameters(videoMode, settings);
     const VIDEO_MODE streamPresentationVideoMode = select_stream_presentation_video_mode(videoMode, streamParameters.videoMode);
     ScopedStreamVideoMode scopedStreamVideoMode(window, videoMode, streamPresentationVideoMode);
     const VIDEO_MODE &activeStreamVideoMode = scopedStreamVideoMode.active_video_mode();
 
     StreamUiResources resources {};
+    resources.startupTick = sessionStarted;
     resources.statisticsEnabled = settings.presentation.showPerformanceStats;
     if (std::string initializationError; !initialize_stream_ui_resources(window, activeStreamVideoMode, preferredController, &resources, &initializationError)) {
-      assign_status_message(statusMessage, initializationError);
+      report.message = initializationError;
       logging::error("stream", initializationError);
       return false;
     }
@@ -1505,7 +1466,7 @@ namespace streaming {
     std::array<unsigned char, 16> remoteInputIv {};
     if (std::string randomError; !fill_random_bytes(remoteInputKey.data(), remoteInputKey.size(), &randomError) || !fill_random_bytes(remoteInputIv.data(), remoteInputIv.size(), &randomError)) {
       close_stream_ui_resources(&resources);
-      assign_status_message(statusMessage, randomError);
+      report.message = randomError;
       logging::error("stream", randomError);
       return false;
     }
@@ -1525,9 +1486,19 @@ namespace streaming {
     launchConfiguration.remoteInputAesKeyHex = hex_encode(remoteInputKey.data(), remoteInputKey.size());
     launchConfiguration.remoteInputAesIvHex = hex_encode(remoteInputIv.data(), remoteInputIv.size());
 
-    if (std::string launchError; !network::launch_or_resume_stream(hostAddress, httpPort, clientIdentity, launchConfiguration, &launchResult, &launchError)) {
+    int screenWidth = 0;
+    int screenHeight = 0;
+    SDL_GetRendererOutputSize(resources.renderer, &screenWidth, &screenHeight);
+    draw_stream_start_dialog(resources, ui::build_stream_launch_dialog(host, app, ui::StreamStartupStep::starting_on_host), screenWidth, screenHeight);
+    SDL_RenderPresent(resources.renderer);
+
+    std::string launchError;
+    const Uint32 hostRequestStarted = SDL_GetTicks();
+    const bool accepted = network::launch_or_resume_stream(hostAddress, httpPort, clientIdentity, launchConfiguration, &launchResult, &launchError);
+    logging::info("stream", "Stream startup: host request took " + std::to_string(SDL_GetTicks() - hostRequestStarted) + " ms");
+    if (!accepted) {
       close_stream_ui_resources(&resources);
-      assign_status_message(statusMessage, launchError);
+      report.message = launchError;
       logging::error("stream", launchError);
       return false;
     }
@@ -1572,7 +1543,7 @@ namespace streaming {
     startContext.connectionCallbacks.logMessage = on_log_message;
 
     bool rtspFallbackAttempted = false;
-    if (const StreamStartAttemptContext startAttempt {host, app, startContext, connectionState, resources, statusMessage}; !run_stream_start_with_rtsp_fallback(startAttempt, &rtspFallbackAttempted)) {
+    if (const StreamStartAttemptContext startAttempt {host, app, startContext, connectionState, resources, report.message}; !run_stream_start_with_rtsp_fallback(startAttempt, &rtspFallbackAttempted)) {
       return false;
     }
 
@@ -1583,7 +1554,7 @@ namespace streaming {
       }
       active_connection_state() = nullptr;
       close_stream_ui_resources(&resources);
-      assign_status_message(statusMessage, failureMessage);
+      report.message = failureMessage;
       logging::warn("stream", failureMessage);
       return false;
     }
@@ -1628,12 +1599,10 @@ namespace streaming {
       settings.controls.keyboardDockTop = resources.controller.keyboard_docked_top();
       settings.dirty = true;
     }
-    show_stream_end_statistics(host, app, startContext, finalStatistics, finalMessage, &resources);
-    if (returnController != nullptr) {
-      *returnController = resources.controller.take_controller_for_shell();
-    }
+    report.summaryLines = build_stream_summary_lines(host, app, startContext, finalStatistics, finalMessage);
+    report.controller = resources.controller.take_controller_for_shell();
     close_stream_ui_resources(&resources);
-    assign_status_message(statusMessage, finalMessage);
+    report.message = std::move(finalMessage);
     return true;
   }
 

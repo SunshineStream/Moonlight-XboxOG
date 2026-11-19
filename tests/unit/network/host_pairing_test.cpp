@@ -1245,6 +1245,35 @@ namespace {
     EXPECT_NE(errorMessage.find("network down"), std::string::npos);
   }
 
+  /**
+   * @brief Artwork yields to stream startup without starting or retrying a request after cancellation.
+   */
+  TEST(HostPairingTest, QueryAppAssetStopsTryingPathsWhenCancelled) {
+    std::atomic cancelled {false};
+    std::size_t callCount = 0U;
+    ScopedHostPairingHttpTestHandler guard([&](const HostPairingHttpTestRequest &, HostPairingHttpTestResponse *response, std::string *, const std::atomic<bool> *cancelRequested) {
+      EXPECT_EQ(cancelRequested, &cancelled);
+      ++callCount;
+      cancelled.store(true);
+      response->statusCode = 200;
+      response->body = std::string("\x89PNG", 4);
+      return true;
+    });
+
+    std::vector<unsigned char> assetBytes;
+    std::string errorMessage;
+    const auto &address = test_support::kTestIpv4Addresses[test_support::kIpLivingRoom];
+    EXPECT_FALSE(network::query_app_asset(address, 47990U, nullptr, 77, &assetBytes, &errorMessage, &cancelled));
+    EXPECT_EQ(callCount, 1U);
+    EXPECT_TRUE(assetBytes.empty());
+    EXPECT_EQ(errorMessage, "App artwork download cancelled");
+
+    EXPECT_FALSE(network::query_app_asset(address, 47990U, nullptr, 77, &assetBytes, &errorMessage, &cancelled));
+    EXPECT_EQ(callCount, 1U);
+    EXPECT_TRUE(assetBytes.empty());
+    EXPECT_EQ(errorMessage, "App artwork download cancelled");
+  }
+
   TEST(HostPairingTest, PairHostRejectsInvalidRequestsBeforeStartingTransport) {
     const network::PairingIdentity identity = network::create_pairing_identity();
     ASSERT_TRUE(network::is_valid_pairing_identity(identity));

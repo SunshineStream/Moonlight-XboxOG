@@ -2813,7 +2813,8 @@ namespace network {
     const PairingIdentity *clientIdentity,
     int appId,
     std::vector<unsigned char> *assetBytes,
-    std::string *errorMessage
+    std::string *errorMessage,
+    const std::atomic<bool> *cancelRequested
   ) {
     if (address.empty() || httpsPort == 0 || appId <= 0) {
       return append_error(errorMessage, "The app-asset request requires a valid host address, port, and app ID");
@@ -2822,7 +2823,12 @@ namespace network {
     std::vector<std::string> attemptFailures;
     for (const std::string &path : build_app_asset_paths(resolve_client_unique_id(clientIdentity), appId)) {
       HttpResponse response {};
-      if (std::string attemptError; !http_get(address, httpsPort, path, true, clientIdentity, {}, &response, &attemptError)) {
+      std::string attemptError;
+      const bool downloaded = http_get(address, httpsPort, path, true, clientIdentity, {}, &response, &attemptError, cancelRequested);
+      if (pairing_cancel_requested(cancelRequested)) {
+        return append_error(errorMessage, "App artwork download cancelled");
+      }
+      if (!downloaded) {
         std::string failure = path;
         failure += ": ";
         failure += attemptError;

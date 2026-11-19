@@ -2892,14 +2892,18 @@ namespace {
     std::vector<app::HostAppRecord> apps;
   };
 
+  /**
+   * @brief Owns an artwork download batch that can yield to stream startup.
+   */
   struct AppArtTaskState {
-    SDL_Thread *thread = nullptr;
-    std::atomic<bool> completed = false;
-    std::string address;
-    uint16_t port = 0;
-    std::vector<app::HostAppRecord> apps;
-    std::vector<int> cachedAppIds;
-    std::size_t failureCount = 0;
+    SDL_Thread *thread = nullptr;  ///< Worker retained until its results have been joined.
+    std::atomic<bool> completed = false;  ///< Published once the worker has finished writing results.
+    std::atomic<bool> cancelRequested = false;  ///< Set by the shell before handing off to a stream.
+    std::string address;  ///< Host endpoint for the downloads.
+    uint16_t port = 0;  ///< Host HTTPS port.
+    std::vector<app::HostAppRecord> apps;  ///< Snapshot of the app library.
+    std::vector<int> cachedAppIds;  ///< IDs whose artwork was stored successfully.
+    std::size_t failureCount = 0;  ///< Downloads that failed before cancellation.
   };
 
   struct HostDiscoveryTaskState {
@@ -3060,6 +3064,10 @@ namespace {
     return task.thread != nullptr && !task.completed.load();
   }
 
+  /**
+   * @brief Clear a joined artwork worker and its cancellation request.
+   * @param task Artwork batch to reset.
+   */
   void reset_app_art_task(AppArtTaskState *task) {
     if (task == nullptr) {
       return;
@@ -3067,6 +3075,7 @@ namespace {
 
     task->thread = nullptr;
     task->completed.store(false);
+    task->cancelRequested.store(false);
     task->address.clear();
     task->port = 0;
     task->apps.clear();
@@ -3690,6 +3699,11 @@ namespace {
     }
   }
 
+  /**
+   * @brief Download and store missing cover art until the batch completes or the shell requests a stop.
+   * @param context Artwork task retained by the shell until the worker has joined.
+   * @return Zero after publishing completion, or a negative value for an invalid task.
+   */
   int run_app_art_task(void *context) {  // NOSONAR(cpp:S5008) SDL_CreateThread requires void* callback signature
     auto *task = static_cast<AppArtTaskState *>(context);
     if (task == nullptr) {
@@ -3704,13 +3718,18 @@ namespace {
     }
 
     for (const app::HostAppRecord &appRecord : task->apps) {
+      if (task->cancelRequested.load()) {
+        break;
+      }
       if (appRecord.boxArtCached || appRecord.boxArtCacheKey.empty()) {
         continue;
       }
 
       std::vector<unsigned char> assetBytes;
-      if (std::string errorMessage; !network::query_app_asset(task->address, task->port, &clientIdentity, appRecord.id, &assetBytes, &errorMessage)) {
-        ++task->failureCount;
+      if (!network::query_app_asset(task->address, task->port, &clientIdentity, appRecord.id, &assetBytes, nullptr, &task->cancelRequested)) {
+        if (!task->cancelRequested.load()) {
+          ++task->failureCount;
+        }
         continue;
       }
 
@@ -3726,8 +3745,14 @@ namespace {
     return 0;
   }
 
-  void finish_app_art_task_if_ready(app::ClientState &state, AppArtTaskState *task, CoverArtTextureCache *textureCache) {
-    if (task == nullptr || task->thread == nullptr || !task->completed.load()) {
+  /**
+   * @brief Collect cached artwork from a finished batch or join a batch asked to stop for streaming.
+   * @param state Host library receiving the successfully cached app IDs.
+   * @param task Artwork batch owned by the shell.
+   * @param textureCache Cover-art textures owned by the active renderer.
+   */
+  void collect_app_art_task(app::ClientState &state, AppArtTaskState *task, CoverArtTextureCache *textureCache) {
+    if (task == nullptr || task->thread == nullptr || (!task->completed.load() && !task->cancelRequested.load())) {
       return;
     }
 
@@ -4010,9 +4035,10 @@ namespace {
     const int titleHeight = std::max(TTF_FontLineSkip(titleFont), statusIconSize) + 18;
     const int footerHeight = std::max(40, TTF_FontLineSkip(smallFont) + 18);
     const int rowHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 16);
-    const int textHeight = measure_body_lines_height(smallFont, modal.lines, innerWidth, 8);
+    const int lineGap = modal.compactBody ? 3 : 8;
+    const int textHeight = measure_body_lines_height(smallFont, modal.lines, innerWidth, lineGap);
     const int actionsHeight = static_cast<int>(modal.actions.size()) * (rowHeight + 6);
-    const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, padding * 2 + titleHeight + textHeight + actionsHeight + footerHeight + 20));
+    const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, padding * 2 + titleHeight + textHeight + actionsHeight + footerHeight + (modal.compactBody ? 22 : 20)));
     fill_rect(renderer, {0, 0, width, height}, 0, 0, 0, 0xA0);
     render_dialog_surface(renderer, bounds);
     const int titleInset = statusIconSize == 0 ? 0 : statusIconSize + 12;
@@ -4034,7 +4060,7 @@ namespace {
       if (!render_bounded_text(renderer, smallFont, line, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {bounds.x + padding, cursorY, innerWidth, textBottom - cursorY}, &drawnHeight)) {
         return false;
       }
-      cursorY += drawnHeight + 8;
+      cursorY += drawnHeight + lineGap;
     }
     const SDL_Rect rows {bounds.x + padding, cursorY + 4, innerWidth, footerY - cursorY - 12};
     if (folder != nullptr) {
@@ -4043,6 +4069,11 @@ namespace {
     }
     if (!modal.actions.empty() && !render_action_rows(renderer, bodyFont, modal.actions, rows, rowHeight, {assetCache, true, folder})) {
       return false;
+    }
+    if (modal.streamStartupStep.has_value()) {
+      constexpr int progressHeight = 8;
+      ui::draw_dialog_progress(renderer, {bounds.x + padding, footerY + (footerHeight - progressHeight) / 2, innerWidth, progressHeight}, static_cast<int>(*modal.streamStartupStep), ui::STREAM_STARTUP_STEP_COUNT);
+      return true;
     }
     draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
     const std::vector<ui::ShellFooterAction> defaultActions = modal.actions.empty() ?
@@ -5058,7 +5089,8 @@ namespace {
     (void) threadResult;
   }
 
-  void finalize_shell_tasks(ShellRuntimeState *runtime);
+  void join_shell_session_tasks(ShellRuntimeState &runtime);
+  void finalize_shell_tasks(ShellRuntimeState &runtime);
 
   /**
    * @brief Open the first detected SDL game controller for shell navigation.
@@ -5178,7 +5210,7 @@ namespace {
   }
 
   /**
-   * @brief Initialize shell tasks and the notification lifetime clock for a new session.
+   * @brief Reset shell input, app tasks and the notification clock without resetting retained host workers.
    *
    * @param state Client state whose logging configuration should be applied.
    * @param runtime Runtime state to prepare.
@@ -5192,8 +5224,6 @@ namespace {
     reset_pairing_task(&runtime->pairingTask);
     reset_app_list_task(&runtime->appListTask);
     reset_app_art_task(&runtime->appArtTask);
-    reset_host_discovery_task(&runtime->hostDiscoveryTask);
-    reset_host_probe_task(&runtime->hostProbeTask);
     runtime->notificationTick = SDL_GetTicks();
     logging::set_minimum_level(logging::LogLevel::trace);
     logging::set_file_minimum_level(state.settings.loggingLevel);
@@ -5208,15 +5238,21 @@ namespace {
    * @param state Client state to visualize.
    * @param resources Shell resources supplying the renderer and caches.
    * @param runtime Runtime state receiving redraw and shutdown updates.
+   * @param launchDialog Optional busy dialog for the handoff to a streaming session.
    * @return True when the frame rendered successfully.
    */
-  bool draw_current_shell_frame(const VIDEO_MODE &videoMode, app::ClientState &state, ShellResources *resources, ShellRuntimeState *runtime) {
+  bool draw_current_shell_frame(const VIDEO_MODE &videoMode, app::ClientState &state, ShellResources *resources, ShellRuntimeState *runtime, const ui::ShellModalView *launchDialog = nullptr) {
     if (resources == nullptr || runtime == nullptr) {
       return false;
     }
 
     const std::vector<logging::LogEntry> retainedEntries = logging::snapshot(logging::LogLevel::info);
-    if (const auto viewModel = ui::build_shell_view_model(state, retainedEntries); draw_shell(resources->renderer, videoMode, resources->encoderSettings, resources->titleFont, resources->bodyFont, resources->smallFont, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache)) {
+    auto viewModel = ui::build_shell_view_model(state, retainedEntries);
+    if (launchDialog != nullptr) {
+      viewModel.modal = *launchDialog;
+      viewModel.notification.visible = false;
+    }
+    if (draw_shell(resources->renderer, videoMode, resources->encoderSettings, resources->titleFont, resources->bodyFont, resources->smallFont, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache)) {
       runtime->keypadRedrawRequested = false;
       return true;
     }
@@ -5255,7 +5291,7 @@ namespace {
     finish_connection_test_if_ready(state, &runtime->connectionTestTask);
     finish_app_list_task_if_ready(state, &runtime->appListTask);
     finish_app_quit_task(state, runtime->appQuitTask);
-    finish_app_art_task_if_ready(state, &runtime->appArtTask, &resources->coverArtTextureCache);
+    collect_app_art_task(state, &runtime->appArtTask, &resources->coverArtTextureCache);
     finish_host_discovery_task_if_ready(state, &runtime->hostDiscoveryTask, &runtime->nextHostProbeTick);
     finish_host_probe_task_if_ready(state, &runtime->hostProbeTask);
   }
@@ -5279,7 +5315,7 @@ namespace {
   }
 
   /**
-   * @brief Launch the selected stream and report startup failures not covered by its end summary.
+   * @brief Launch the selected stream and show its report after restoring the app picker.
    *
    * @param window Shared SDL window reused when entering a streaming session.
    * @param activeVideoMode Active output mode used by the shell renderer.
@@ -5310,6 +5346,19 @@ namespace {
       return true;
     }
 
+    if (window == nullptr) {
+      state.shell.statusMessage = "Streaming requires a valid SDL window.";
+      app::show_notification(state, app::NotificationKind::error, "Couldn't start stream", "Restart Moonlight and try again.");
+      logging::error("stream", state.shell.statusMessage);
+      return true;
+    }
+
+    const Uint32 preparationStarted = SDL_GetTicks();
+    if (const auto launchDialog = ui::build_stream_launch_dialog(*streamHost, *streamApp); !draw_current_shell_frame(activeVideoMode, state, resources, runtime, &launchDialog)) {
+      return false;
+    }
+    runtime->keypadRedrawRequested = true;
+
     network::PairingIdentity clientIdentity {};
     if (std::string identityError; !load_saved_pairing_identity_for_streaming(&clientIdentity, &identityError)) {
       state.shell.statusMessage = identityError;
@@ -5318,28 +5367,27 @@ namespace {
       return true;
     }
 
-    if (window == nullptr) {
-      state.shell.statusMessage = "Streaming requires a valid SDL window.";
-      app::show_notification(state, app::NotificationKind::error, "Couldn't start stream", "Restart Moonlight and try again.");
-      logging::error("stream", state.shell.statusMessage);
-      return true;
-    }
-
-    finalize_shell_tasks(runtime);
+    // A library can have many missing covers, each with several candidate URLs.
+    // Stop the batch and keep any artwork it already saved before changing renderers.
+    runtime->appArtTask.cancelRequested.store(true);
+    collect_app_art_task(state, &runtime->appArtTask, &resources->coverArtTextureCache);
+    // Host refresh workers only use their own snapshots. Keep their state alive
+    // across the session and let them finish without holding up stream startup.
+    join_shell_session_tasks(*runtime);
     // Keep the menu's working controller open while render resources change. The Xbox
     // SDL backend owns a pending USB read that must not be torn down at this boundary.
     std::unique_ptr<SDL_GameController, decltype(&SDL_GameControllerClose)> retainedController(std::exchange(resources->controller, nullptr), SDL_GameControllerClose);
     close_shell_resources(resources);
 
-    std::string sessionMessage;
-    SDL_GameController *returnController = nullptr;
-    const bool streamStarted = streaming::run_stream_session(window, activeVideoMode, state.settings, *streamHost, *streamApp, clientIdentity, retainedController.get(), &returnController, &sessionMessage);
-    state.shell.statusMessage = sessionMessage;
+    streaming::StreamSessionReport report;
+    logging::info("stream", "Stream startup: menu preparation took " + std::to_string(SDL_GetTicks() - preparationStarted) + " ms");
+    const bool streamStarted = streaming::run_stream_session(window, activeVideoMode, state.settings, *streamHost, *streamApp, clientIdentity, retainedController.get(), report);
+    state.shell.statusMessage = std::move(report.message);
     if (!streamStarted) {
       app::show_notification(state, app::NotificationKind::error, "Streaming failed", "Check that the PC is online and Sunshine is running, then try again.");
     }
-    if (returnController != nullptr) {
-      retainedController.reset(returnController);
+    if (report.controller != nullptr) {
+      retainedController.reset(report.controller);
     }
     resources->controller = retainedController.release();
 
@@ -5351,6 +5399,8 @@ namespace {
     }
 
     initialize_shell_runtime(state, runtime);
+    finish_host_discovery_task_if_ready(state, &runtime->hostDiscoveryTask, &runtime->nextHostProbeTick);
+    finish_host_probe_task_if_ready(state, &runtime->hostProbeTask);
     app::AppUpdate settingsUpdate {};
     settingsUpdate.persistence.settingsChanged = state.settings.dirty;
     persist_settings_if_needed(state, settingsUpdate);
@@ -5358,6 +5408,14 @@ namespace {
       state.hosts.active.appListState = app::HostAppListState::loading;
       state.hosts.active.appListStatusMessage = "Refreshing host apps after the stream session...";
       state.hosts.active.lastAppListRefreshTick = 0U;
+    }
+    if (streamStarted) {
+      // Require a new press once the summary opens, even if input queued during teardown.
+      SDL_PumpEvents();
+      SDL_FlushEvent(SDL_KEYDOWN);
+      SDL_FlushEvent(SDL_CONTROLLERBUTTONDOWN);
+      app::show_stream_summary(state, std::move(report.summaryLines));
+      return draw_current_shell_frame(activeVideoMode, state, resources, runtime);
     }
 
     return true;
@@ -5511,36 +5569,37 @@ namespace {
   }
 
   /**
-   * @brief Join any background shell tasks before renderer resources are released.
-   *
+   * @brief Join interactive shell requests before starting a stream or exiting the shell.
    * @param runtime Runtime state that owns the background tasks.
    */
-  void finalize_shell_tasks(ShellRuntimeState *runtime) {
-    if (runtime == nullptr) {
-      return;
-    }
-
-    if (std::unique_ptr<PairingAttemptState> activeAttempt = std::move(runtime->pairingTask.activeAttempt); activeAttempt != nullptr) {
+  void join_shell_session_tasks(ShellRuntimeState &runtime) {
+    if (std::unique_ptr<PairingAttemptState> activeAttempt = std::move(runtime.pairingTask.activeAttempt); activeAttempt != nullptr) {
       activeAttempt->discardResult.store(true);
       finalize_pairing_attempt(nullptr, std::move(activeAttempt));
     }
-    while (!runtime->pairingTask.retiredAttempts.empty()) {
-      std::unique_ptr<PairingAttemptState> attempt = std::move(runtime->pairingTask.retiredAttempts.back());
-      runtime->pairingTask.retiredAttempts.pop_back();
+    while (!runtime.pairingTask.retiredAttempts.empty()) {
+      std::unique_ptr<PairingAttemptState> attempt = std::move(runtime.pairingTask.retiredAttempts.back());
+      runtime.pairingTask.retiredAttempts.pop_back();
       if (attempt != nullptr) {
         attempt->discardResult.store(true);
       }
       finalize_pairing_attempt(nullptr, std::move(attempt));
     }
 
-    wait_for_thread(runtime->appListTask.thread);
-    wait_for_thread(runtime->appQuitTask.thread);
-    runtime->appQuitTask.thread = nullptr;
-    wait_for_thread(runtime->connectionTestTask.thread);
-    runtime->connectionTestTask.thread = nullptr;
-    wait_for_thread(runtime->appArtTask.thread);
-    wait_for_thread(runtime->hostDiscoveryTask.thread);
-    for (const std::unique_ptr<HostProbeTaskState::ProbeWorkerState> &worker : runtime->hostProbeTask.workers) {
+    wait_for_thread(std::exchange(runtime.appListTask.thread, nullptr));
+    wait_for_thread(std::exchange(runtime.appQuitTask.thread, nullptr));
+    wait_for_thread(std::exchange(runtime.connectionTestTask.thread, nullptr));
+    wait_for_thread(std::exchange(runtime.appArtTask.thread, nullptr));
+  }
+
+  /**
+   * @brief Join remaining background workers before their shared shell state is destroyed.
+   * @param runtime Runtime state that owns the background tasks and result queues.
+   */
+  void finalize_shell_tasks(ShellRuntimeState &runtime) {
+    join_shell_session_tasks(runtime);
+    wait_for_thread(runtime.hostDiscoveryTask.thread);
+    for (const std::unique_ptr<HostProbeTaskState::ProbeWorkerState> &worker : runtime.hostProbeTask.workers) {
       if (worker == nullptr) {
         continue;
       }
@@ -5578,7 +5637,7 @@ namespace ui {
       }
     }
 
-    finalize_shell_tasks(&runtime);
+    finalize_shell_tasks(runtime);
     close_shell_resources(&resources);
     return 0;
   }

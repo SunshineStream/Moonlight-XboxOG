@@ -65,6 +65,7 @@ namespace app {
     directory_picker,  ///< Screenshot destination browser and local folder-name keyboard.
     screenshot_viewer,  ///< Local captures associated with the selected server and app.
     quit_progress,  ///< Authenticated host-app quit operation running in the background.
+    stream_summary,  ///< Completed stream details on the app picker.
   };
 
   /**
@@ -462,6 +463,7 @@ namespace app {
     DirectoryPickerState directoryPicker;  ///< Pending screenshot-directory workflow.
     ScreenshotViewerState screenshotViewer;  ///< Local app screenshot library, released when browsing ends.
     AppQuitState appQuit;  ///< Retained target for a confirmed host-app quit operation.
+    std::vector<std::string> streamSummaryLines;  ///< Session outcome and statistics retained until confirmation.
     ConfirmationDialogState confirmation;  ///< Confirmation dialog content for destructive actions.
   };
 
@@ -757,6 +759,13 @@ namespace app {
    * @param message Completion or actionable failure detail.
    */
   void apply_app_quit_result(ClientState &state, bool succeeded, const std::string &message);
+
+  /**
+   * @brief Open the completed stream summary over the current app picker.
+   * @param state Client state receiving the summary.
+   * @param lines Final session outcome and statistics.
+   */
+  void show_stream_summary(ClientState &state, std::vector<std::string> lines);
   /**
    * @brief Remove a deleted capture from the open viewer and keep its selection in range.
    * @param state Viewer that requested deletion.
