@@ -130,6 +130,26 @@ namespace {
     EXPECT_NE(invalid.warnings.front().find("streaming.gpu_presentation"), std::string::npos);
   }
 
+  /** @brief Round-trip explicit overclock opt-in and default to off for legacy or invalid settings. */
+  TEST_F(SettingsStorageTest, GpuOverclockRequiresExplicitOptIn) {
+    write_text_file(settingsPath, "[streaming]\ngpu_presentation = true\n");
+    EXPECT_FALSE(app::load_app_settings(settingsPath).settings.gpuOverclock);
+
+    app::AppSettings settings;
+    settings.gpuOverclock = true;
+    ASSERT_TRUE(app::save_app_settings(settings, settingsPath).success);
+    const auto enabled = app::load_app_settings(settingsPath);
+    EXPECT_TRUE(enabled.settings.gpuOverclock);
+    EXPECT_TRUE(enabled.warnings.empty());
+    EXPECT_FALSE(enabled.cleanupRequired);
+
+    write_text_file(settingsPath, "[streaming]\ngpu_overclock = 250\n");
+    const auto invalid = app::load_app_settings(settingsPath);
+    EXPECT_FALSE(invalid.settings.gpuOverclock);
+    ASSERT_EQ(invalid.warnings.size(), 1U);
+    EXPECT_NE(invalid.warnings.front().find("streaming.gpu_overclock"), std::string::npos);
+  }
+
   /** @brief A partial settings file derives bitrate from the saved resolution and active frame rate. */
   TEST_F(SettingsStorageTest, DerivesMissingBitrateFromSavedStreamMode) {
     write_text_file(settingsPath, "[streaming]\nvideo_width = 1280\nvideo_height = 720\nvideo_mode_selected = true\n");

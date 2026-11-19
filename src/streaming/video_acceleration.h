@@ -78,6 +78,7 @@ namespace streaming {
     std::string cpuFeatures;  ///< CPU optimizations enabled in the linked FFmpeg build.
     bool threaded = false;  ///< FFmpeg has internal synchronization, independently of the decoder worker count.
     bool gpuPresentationRequested = false;  ///< True when the stream was configured to try NV2A presentation.
+    std::string gpuOverclockStatus;  ///< Outcome of the experimental clock change, when requested.
 
     /**
      * @brief Retain the first reason for using software presentation.

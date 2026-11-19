@@ -611,6 +611,12 @@ namespace {
             true,
           },
           {
+            "toggle-gpu-overclock",
+            std::string("GPU Overclock: ") + (state.settings.presentation.gpuOverclock ? "On" : "Off"),
+            "Try a 241.7 MHz GPU core clock during GPU playback on a stock-clocked console. Experimental. May cause artifacts or freezes.",
+            state.settings.presentation.gpuPresentation,
+          },
+          {
             "toggle-show-performance-stats",
             std::string("Performance Stats: ") + (state.settings.presentation.showPerformanceStats ? "On" : "Off"),
             "Show performance statistics during playback and after the stream ends.",
@@ -2491,6 +2497,9 @@ namespace app {
     if (itemId == "toggle-gpu-presentation") {
       presentation.gpuPresentation = !presentation.gpuPresentation;
       state.shell.statusMessage = std::string("Video presentation set to ") + (presentation.gpuPresentation ? "GPU" : "Software");
+    } else if (itemId == "toggle-gpu-overclock" && presentation.gpuPresentation) {
+      presentation.gpuOverclock = !presentation.gpuOverclock;
+      state.shell.statusMessage = std::string("GPU overclock ") + (presentation.gpuOverclock ? "enabled" : "disabled");
     } else if (itemId == "toggle-show-performance-stats") {
       presentation.showPerformanceStats = !presentation.showPerformanceStats;
       state.shell.statusMessage = std::string("Performance stats ") + (presentation.showPerformanceStats ? "enabled" : "disabled");

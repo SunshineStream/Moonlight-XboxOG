@@ -19,8 +19,16 @@
 namespace {
   constexpr std::uint32_t VIDEO_BUFFER = 0x8700;  ///< Overlay buffer submission register.
   constexpr std::uint32_t VIDEO_STOP = 0x8704;  ///< Normal overlay stop register.
+  constexpr std::uint32_t NVPLL_COEFF = 0x680500;  ///< NV2A core PLL register, separate from memory and pixel clocks.
+  constexpr std::uint32_t NVPLL_STATUS = 0x680514;  ///< PRAMDAC PLL test and lock status.
+  constexpr std::uint32_t NVPLL_LOCKED = 1U << 29;  ///< Core PLL lock bit in PRAMDAC PLL status.
+  constexpr std::uint32_t NVPLL_DIVISORS = 0x0007ffff;  ///< M, N and P fields in the coefficient register.
+  constexpr std::uint32_t STOCK_NVPLL = 0x00011c01;  ///< Retail 233.3 MHz clock (16.667 MHz times 28 divided by 2).
+  constexpr std::uint32_t NVPLL_N_STEP = 1U << 8;  ///< Increase N from 28 to 29 for a 241.7 MHz core clock.
+  constexpr std::uint32_t PTIMER_NUMERATOR = 0x9200;  ///< Counter clock ratio numerator programmed by pbkit.
+  constexpr std::uint32_t PTIMER_DENOMINATOR = 0x9210;  ///< Counter clock ratio denominator programmed by pbkit.
   constexpr std::array<std::uint8_t, 4> CRTC_REGISTERS {31, 82, 32, 27};  ///< VGA controls changed by pb_init but not restored by pb_kill.
-  bool overlayQuarantined = false;  ///< A synchronization failure disables overlays until process exit.
+  bool overlayQuarantined = false;  ///< A synchronization or clock restoration failure disables overlays until process exit.
   std::array<std::uint8_t *, 2> quarantinedBuffers {};  ///< Keep uncertain DMA references resident instead of freeing memory still in use.
 
   /**
@@ -57,6 +65,25 @@ namespace {
       Sleep(1);
     }
     return true;
+  }
+
+  /**
+   * @brief Program NVCLK and verify the divider values and PLL lock within a bounded interval.
+   * @param coefficients Complete NVPLL register value.
+   * @return True when the new clock reads back and is locked.
+   * @see https://github.com/GXTX/XboxOverclock/blob/master/main.c
+   * @see https://envytools.readthedocs.io/en/latest/hw/display/nv3/pramdac.html
+   */
+  bool set_nvpll(std::uint32_t coefficients) {
+    VIDEOREG(NVPLL_COEFF) = coefficients;
+    const DWORD started = GetTickCount();
+    do {
+      Sleep(1);
+      if ((VIDEOREG(NVPLL_COEFF) & NVPLL_DIVISORS) == (coefficients & NVPLL_DIVISORS) && (VIDEOREG(NVPLL_STATUS) & NVPLL_LOCKED) != 0) {
+        return true;
+      }
+    } while (GetTickCount() - started < 50U);
+    return false;
   }
 
   constexpr std::array<std::uint32_t, 28> SAVED_REGISTERS {
@@ -113,12 +140,67 @@ namespace streaming {
     return active_;
   }
 
+  void PvideoPresenter::set_overclock_enabled(bool enabled) {
+    overclockEnabled_ = enabled;
+  }
+
+  const char *PvideoPresenter::overclock_status() const {
+    return overclockStatus_;
+  }
+
+#ifdef NXDK
+  bool PvideoPresenter::try_overclock() {
+    if (!overclockEnabled_) {
+      return true;
+    }
+    const std::uint32_t original = VIDEOREG(NVPLL_COEFF);
+    if ((original & NVPLL_DIVISORS) != STOCK_NVPLL || (VIDEOREG(NVPLL_STATUS) & NVPLL_LOCKED) == 0) {
+      overclockStatus_ = "Skipped (requires a locked stock NV2A clock)";
+      return true;
+    }
+
+    // Only change the feedback multiplier. Preserve the firmware's other
+    // fields and let pb_init derive the matching PTIMER ratio from NVCLK.
+    if (set_nvpll(original + NVPLL_N_STEP)) {
+      savedNvpll_ = original;
+      savedTimerNumerator_ = VIDEOREG(PTIMER_NUMERATOR);
+      savedTimerDenominator_ = VIDEOREG(PTIMER_DENOMINATOR);
+      overclockStatus_ = "241.7 MHz applied";
+      return true;
+    }
+    if (set_nvpll(original)) {
+      overclockStatus_ = "241.7 MHz failed to lock or verify. Original clock restored.";
+      return true;
+    }
+    overclockStatus_ = "Original GPU clock could not be verified. Power cycle the console.";
+    overlayQuarantined = true;
+    return false;
+  }
+
+  void PvideoPresenter::restore_gpu_clock() {
+    if (savedNvpll_ == 0) {
+      return;
+    }
+    if (!set_nvpll(savedNvpll_)) {
+      overclockStatus_ = "Original GPU clock could not be verified. Power cycle the console.";
+      overlayQuarantined = true;
+    }
+    VIDEOREG(PTIMER_NUMERATOR) = savedTimerNumerator_;
+    VIDEOREG(PTIMER_DENOMINATOR) = savedTimerDenominator_;
+    savedNvpll_ = 0;
+  }
+#endif
+
   bool PvideoPresenter::initialize_scanout_surface(std::string *error) {
 #ifdef NXDK
     const VIDEO_MODE mode = XVideoGetMode();
     void *framebuffer = XVideoGetFB();
     if (framebuffer == nullptr || mode.bpp != 32 || mode.width <= 0 || mode.height <= 0 || (mode.width * 4 & 63) != 0) {
       *error = "GPU scanout requires a 32-bit framebuffer with a 64-byte aligned pitch";
+      return false;
+    }
+    if (!try_overclock()) {
+      *error = "Original GPU clock could not be restored after overclocking";
       return false;
     }
     for (std::size_t index = 0; index < SAVED_REGISTERS.size(); ++index) {
@@ -188,6 +270,7 @@ namespace streaming {
       }
       surfaceActive_ = false;
     }
+    restore_gpu_clock();
     if (scanoutStateSaved_) {
       for (std::size_t index = 0; index < SAVED_REGISTERS.size(); ++index) {
         VIDEOREG(SAVED_REGISTERS[index]) = savedRegisters_[index];
@@ -223,7 +306,7 @@ namespace streaming {
     }
 #ifdef NXDK
     if (failure.empty() && overlayQuarantined) {
-      failure = "GPU overlay disabled after a scanout timeout";
+      failure = "GPU overlay disabled after a scanout or clock restoration failure";
     }
     const int pitch = failure.empty() ? (frame.width * 2 + 63) & ~63 : 0;
     // Retain one cache line beyond the visible rows for fetch padding and an

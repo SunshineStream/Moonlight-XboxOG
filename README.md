@@ -78,6 +78,19 @@ No network connection or JavaScript runtime is needed to display the icons on th
 scaling with automatic software fallback. **Software** combines the decoded video and overlay on the
 CPU before displaying each frame. Moonlight keeps your selection in `streaming.gpu_presentation`.
 
+**Settings → Display → GPU Overclock** is experimental and defaults to **Off**. With **GPU** video
+presentation selected, it tries one core clock step from 233.3 to 241.7 MHz on a console with the
+stock clock dividers. Moonlight restores the incoming core clock when leaving GPU playback, including
+on software fallback. The setting is saved as `streaming.gpu_overclock`. The stream summary reports
+whether the clock change was applied or skipped when GPU playback initializes.
+
+The higher clock may help GPU-bound presentation. H.264 decoding and frame packing still run on the
+CPU. Compare two runs on the same console with identical stream settings and **Performance Stats**
+enabled. Use the summary to compare rendered FPS, presentation time and dropped frames. xemu can
+exercise the emulated clock registers. Measuring the effect on playback requires real Xbox hardware.
+If the console shows artifacts or freezes, power-cycle it and turn **GPU Overclock** off before
+restarting the stream.
+
 ## Stream audio
 
 Choose **Settings → Audio → Audio Mode** before starting or resuming a stream. **Stereo** keeps
@@ -453,4 +466,4 @@ scripts\setup-xemu.cmd --skip-support-files
   - [x] Save config and pairing states
   - [x] Host pairing
   - [x] Auto host discovery
-  - [ ] Possibly, GPU overclocking, see https://github.com/GXTX/XboxOverclock
+  - [x] Experimental GPU core overclocking

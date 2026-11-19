@@ -37,7 +37,7 @@ namespace streaming {
      */
     PvideoPresenter() = default;
     /**
-     * @brief Stop overlay DMA before releasing its contiguous buffers.
+     * @brief Stop overlay DMA and restore scanout and core clock state owned by this presenter.
      */
     ~PvideoPresenter();
     PvideoPresenter(const PvideoPresenter &) = delete;
@@ -57,7 +57,7 @@ namespace streaming {
     bool present(const Yuv420FrameView &frame, const VideoRectangle &destination, std::string *error, const OverlaySamplingRegion &sampling = {}, VideoOverlay *overlay = nullptr);
 
     /**
-     * @brief Stop DMA and release buffers only after a bounded scanout synchronization.
+     * @brief Stop DMA, synchronize buffer retirement and restore any temporary core clock change.
      *
      * @return False when buffers had to be quarantined after a scanout timeout.
      */
@@ -69,6 +69,18 @@ namespace streaming {
      */
     bool active() const;
 
+    /**
+     * @brief Select the experimental clock for the next GPU scanout initialization.
+     * @param enabled True to try the bounded NV2A core clock step.
+     */
+    void set_overclock_enabled(bool enabled);
+
+    /**
+     * @brief Describe the most recent clock attempt, including any restoration failure.
+     * @return Static status text, or an empty string if no clock change was attempted.
+     */
+    const char *overclock_status() const;
+
   private:
     /**
      * @brief Select a GPU-rendered scanout surface while retaining SDL's separate CPU framebuffer.
@@ -78,6 +90,24 @@ namespace streaming {
      */
     bool initialize_scanout_surface(std::string *error);
 
+#ifdef NXDK
+    /**
+     * @brief Try raising NVCLK before pbkit initializes the GPU timer for that clock.
+     * @return True if GPU presentation can proceed, including after a successful rollback.
+     */
+    bool try_overclock();
+
+    /**
+     * @brief Restore the incoming core clock and timer ratio after GPU teardown.
+     */
+    void restore_gpu_clock();
+
+    std::uint32_t savedNvpll_ = 0;  ///< Incoming core PLL coefficients, or zero when no change is active.
+    std::uint32_t savedTimerNumerator_ = 0;  ///< Timer numerator for the incoming clock.
+    std::uint32_t savedTimerDenominator_ = 0;  ///< Timer denominator for the incoming clock.
+#endif
+    bool overclockEnabled_ = false;  ///< Session preference for a temporary core clock increase.
+    const char *overclockStatus_ = "";  ///< Outcome retained through fallback and teardown for the stream report.
     std::array<std::uint8_t *, 2> buffers_ {};  ///< Contiguous write-combined YUY2 storage.
     std::array<std::uint32_t, 28> savedRegisters_ {};  ///< Overlay state restored on teardown.
     std::array<std::uint8_t, 4> savedCrtcRegisters_ {};  ///< Legacy scanout controls changed by pbkit.

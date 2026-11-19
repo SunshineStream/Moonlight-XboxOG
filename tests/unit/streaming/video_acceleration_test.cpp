@@ -86,12 +86,14 @@ TEST(VideoAccelerationTest, RetainsFirstFallbackAfterAccelerationRecovers) {
   report.record_fallback("Not enough contiguous memory");
   report.softwareFrames = 2;
   report.gpuFrames = 5;
+  report.gpuOverclockStatus = "241.7 MHz applied";
   report.record_fallback("Later failure");
   const auto lines = report.summary_lines();
-  ASSERT_GE(lines.size(), 3U);
+  ASSERT_GE(lines.size(), 4U);
   EXPECT_EQ(lines[0], "SOFTWARE FALLBACK USED");
   EXPECT_NE(lines[1].find("5 frames"), std::string::npos);
   EXPECT_EQ(lines[2], "Reason: Not enough contiguous memory");
+  EXPECT_EQ(lines[3], "GPU overclock: 241.7 MHz applied");
 }
 
 /**

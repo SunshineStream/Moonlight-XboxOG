@@ -1540,6 +1540,33 @@ namespace {
   }
 
   /**
+   * @brief Apply and persist the opt-in setting only when GPU presentation is selected.
+   */
+  TEST(ClientStateTest, DisplaySettingsCanEnableGpuOverclockForGpuPresentation) {
+    auto state = app::create_initial_state();
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-overclock"));
+    ASSERT_FALSE(state.settings.presentation.gpuOverclock);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "GPU Overclock: Off");
+
+    const auto enabled = app::handle_command(state, input::UiCommand::activate);
+    EXPECT_TRUE(enabled.persistence.settingsChanged);
+    EXPECT_TRUE(state.settings.presentation.gpuOverclock);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "GPU Overclock: On");
+
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-presentation"));
+    app::handle_command(state, input::UiCommand::activate);
+    EXPECT_FALSE(state.detailMenu.select_item_by_id("toggle-gpu-overclock"));
+    EXPECT_TRUE(state.settings.presentation.gpuOverclock);
+
+    app::handle_command(state, input::UiCommand::activate);
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("toggle-gpu-overclock"));
+    const auto disabled = app::handle_command(state, input::UiCommand::activate);
+    EXPECT_TRUE(disabled.persistence.settingsChanged);
+    EXPECT_FALSE(state.settings.presentation.gpuOverclock);
+  }
+
+  /**
    * @brief Navigate to Audio next to Display and focus its options.
    * @param state Client state starting on the hosts screen.
    */

@@ -69,6 +69,9 @@ namespace streaming {
     if (!fallbackReason.empty()) {
       lines.push_back("Reason: " + fallbackReason);
     }
+    if (!gpuOverclockStatus.empty()) {
+      lines.push_back("GPU overclock: " + gpuOverclockStatus);
+    }
     lines.push_back("FFmpeg: " + cpuFeatures + (threaded ? " | Threading enabled" : " | THREADING DISABLED"));
     lines.emplace_back("Video decoding: CPU");
     return lines;

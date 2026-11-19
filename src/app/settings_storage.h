@@ -31,6 +31,7 @@ namespace app {
     bool keyboardDockTop = false;  ///< Dock the stream keyboard to the top instead of the bottom.
     bool gpuPresentation = DEFAULT_GPU_PRESENTATION;  ///< Use NV2A presentation with software fallback.
     streaming::AudioMode audioMode = streaming::AudioMode::stereo;  ///< Source channels and local playback mix.
+    bool gpuOverclock = false;  ///< Opt in to the experimental NV2A core clock during GPU presentation.
   };
 
   /**

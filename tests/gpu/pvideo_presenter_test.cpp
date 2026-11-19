@@ -25,6 +25,13 @@ namespace {
   constexpr std::uint32_t CRTC_START = 0x600800;  ///< Physical scanout base.
   constexpr std::uint32_t CRTC_INTERRUPT = 0x600100;  ///< Vertical blank status.
   constexpr std::uint32_t CPU_FRAMEBUFFER = 0x40000;  ///< Fake physical address of the nxdk page.
+  constexpr std::uint32_t CORE_PLL = 0x680500;  ///< NV2A clock dividers.
+  constexpr std::uint32_t PLL_STATUS = 0x680514;  ///< PLL lock status.
+  constexpr std::uint32_t PLL_LOCK = 1U << 29;  ///< NV2A core PLL reports lock.
+  constexpr std::uint32_t STOCK_CLOCK = 0x00011c01;  ///< Example firmware clock coefficients for 233.3 MHz.
+  constexpr std::uint32_t BOOSTED_CLOCK = 0x00011d01;  ///< Clock coefficients for 241.7 MHz.
+  constexpr std::uint32_t TIMER_NUMERATOR = 0x9200;  ///< PTIMER ratio register.
+  constexpr std::uint32_t TIMER_DENOMINATOR = 0x9210;  ///< PTIMER ratio register.
 
   /**
    * @brief Track the surface latched by the fake software display at vblank.
@@ -53,6 +60,9 @@ namespace {
     int allocationsUntilFailure = -1;  ///< Negative disables allocation failure injection.
     int initializations = 0;  ///< Number of GPU context acquisitions.
     int shutdowns = 0;  ///< Number of GPU context releases.
+    std::uint32_t clockAtInit = 0;  ///< Divider value seen when pbkit initializes its timer.
+    std::uint32_t clockAtShutdown = 0;  ///< Divider value seen when pbkit tears down.
+    bool rejectOverclock = false;  ///< Leave the PLL unlocked at the higher frequency.
     unsigned int pitch = 640 * 4;  ///< GPU buffer pitch.
     std::uint32_t originalStart = 0;  ///< CPU scanout restored by pb_kill.
     bool videoEnabled = true;  ///< TV encoder output state.
@@ -81,6 +91,10 @@ namespace {
       hardware.initResult = 0;
       hardware.allocationsUntilFailure = -1;
       hardware.initializations = hardware.shutdowns = 0;
+      hardware.clockAtInit = hardware.clockAtShutdown = 0;
+      hardware.rejectOverclock = false;
+      hardware.registers[CORE_PLL / 4] = STOCK_CLOCK;
+      hardware.registers[PLL_STATUS / 4] = PLL_LOCK;
       hardware.pitch = 640 * 4;
       hardware.videoEnabled = true;
       hardware.backgroundCleared = false;
@@ -138,6 +152,9 @@ DWORD GetTickCount() {
 void Sleep(DWORD milliseconds) {
   hardware.ticks += milliseconds;
   ++hardware.vblanks;
+  if (hardware.rejectOverclock) {
+    VIDEOREG(PLL_STATUS) = VIDEOREG(CORE_PLL) == BOOSTED_CLOCK ? 0 : PLL_LOCK;
+  }
   if (hardware.softwareDisplay.pollVblank && hardware.softwareDisplay.signalVblank) {
     hardware.softwareDisplay.displayedScanout = VIDEOREG(CRTC_START);
     hardware.softwareDisplay.primaryPixelAtVblank = hardware.framebuffer[0];
@@ -155,6 +172,9 @@ int pb_busy() {
 
 int pb_init() {
   ++hardware.initializations;
+  hardware.clockAtInit = VIDEOREG(CORE_PLL);
+  VIDEOREG(TIMER_NUMERATOR) = 65;
+  VIDEOREG(TIMER_DENOMINATOR) = 512;
   hardware.originalStart = VIDEOREG(0x600800);
   hardware.crtc[31] = 87;
   hardware.crtc[82] += 4;
@@ -170,6 +190,7 @@ int pb_init() {
 
 void pb_kill() {
   ++hardware.shutdowns;
+  hardware.clockAtShutdown = VIDEOREG(CORE_PLL);
   VIDEOREG(0x600800) = hardware.originalStart;
   hardware.videoEnabled = false;
 }
@@ -378,6 +399,81 @@ TEST_F(PvideoPresenterTest, AlternatesMemoryWithoutSelectingUnsupportedOverlayBa
 }
 
 /**
+ * @brief Default GPU presentation uses the incoming core clock.
+ */
+TEST_F(PvideoPresenterTest, KeepsTheIncomingClockByDefault) {
+  streaming::PvideoPresenter presenter;
+  ASSERT_TRUE(presenter.present(frame, destination, nullptr));
+  EXPECT_EQ(hardware.clockAtInit, STOCK_CLOCK);
+  EXPECT_STREQ(presenter.overclock_status(), "");
+}
+
+/**
+ * @brief The core clock brackets pbkit ownership and preserves the original register and counter ratio.
+ */
+TEST_F(PvideoPresenterTest, RaisesCoreClockBeforePbkitAndRestoresItAfterTeardown) {
+  constexpr std::uint32_t preservedBits = 0x00800000;
+  VIDEOREG(CORE_PLL) |= preservedBits;
+  VIDEOREG(TIMER_NUMERATOR) = 14;
+  VIDEOREG(TIMER_DENOMINATOR) = 100;
+  VIDEOREG(CORE_PLL + 4) = 0x12345;
+  VIDEOREG(CORE_PLL + 8) = 0x23456;
+  streaming::PvideoPresenter presenter;
+  presenter.set_overclock_enabled(true);
+  ASSERT_TRUE(presenter.present(frame, destination, nullptr));
+  EXPECT_EQ(hardware.clockAtInit, BOOSTED_CLOCK | preservedBits);
+  EXPECT_EQ(VIDEOREG(CORE_PLL), BOOSTED_CLOCK | preservedBits);
+  EXPECT_STREQ(presenter.overclock_status(), "241.7 MHz applied");
+  EXPECT_TRUE(presenter.reset());
+  EXPECT_EQ(hardware.clockAtShutdown, BOOSTED_CLOCK | preservedBits);
+  EXPECT_EQ(VIDEOREG(CORE_PLL), STOCK_CLOCK | preservedBits);
+  EXPECT_EQ(VIDEOREG(TIMER_NUMERATOR), 14U);
+  EXPECT_EQ(VIDEOREG(TIMER_DENOMINATOR), 100U);
+  EXPECT_EQ(VIDEOREG(CORE_PLL + 4), 0x12345U);
+  EXPECT_EQ(VIDEOREG(CORE_PLL + 8), 0x23456U);
+}
+
+/**
+ * @brief Going from a GPU frame to a software-only frame restores the incoming clock immediately.
+ */
+TEST_F(PvideoPresenterTest, RestoresOriginalClockWhenPlaybackFallsBackToSoftware) {
+  streaming::PvideoPresenter presenter;
+  presenter.set_overclock_enabled(true);
+  ASSERT_TRUE(presenter.present(frame, destination, nullptr));
+  ASSERT_EQ(VIDEOREG(CORE_PLL), BOOSTED_CLOCK);
+  frame.fullRange = true;
+  EXPECT_FALSE(presenter.present(frame, destination, nullptr));
+  EXPECT_FALSE(presenter.active());
+  EXPECT_EQ(VIDEOREG(CORE_PLL), STOCK_CLOCK);
+}
+
+/**
+ * @brief Firmware that already selected a different clock keeps its coefficients.
+ */
+TEST_F(PvideoPresenterTest, SkipsOverclockWhenTheIncomingDividersDiffer) {
+  constexpr std::uint32_t customClock = 0x00011e01;
+  VIDEOREG(CORE_PLL) = customClock;
+  streaming::PvideoPresenter presenter;
+  presenter.set_overclock_enabled(true);
+  ASSERT_TRUE(presenter.present(frame, destination, nullptr));
+  EXPECT_EQ(hardware.clockAtInit, customClock);
+  EXPECT_STREQ(presenter.overclock_status(), "Skipped (requires a locked stock NV2A clock)");
+}
+
+/**
+ * @brief A failed PLL lock test rolls back before pbkit and continues with stock GPU presentation.
+ */
+TEST_F(PvideoPresenterTest, UsesOriginalClockWhenTheNewClockCannotLock) {
+  hardware.rejectOverclock = true;
+  streaming::PvideoPresenter presenter;
+  presenter.set_overclock_enabled(true);
+  ASSERT_TRUE(presenter.present(frame, destination, nullptr));
+  EXPECT_EQ(hardware.clockAtInit, STOCK_CLOCK);
+  EXPECT_EQ(VIDEOREG(PLL_STATUS), PLL_LOCK);
+  EXPECT_STREQ(presenter.overclock_status(), "241.7 MHz failed to lock or verify. Original clock restored.");
+}
+
+/**
  * @brief The production GPU path composites the cached panel before submitting either buffer.
  */
 TEST_F(PvideoPresenterTest, CompositesStatisticsIntoSubmittedVideoBuffer) {
@@ -449,15 +545,20 @@ TEST_F(PvideoPresenterTest, RestoresSoftwareOutputAfterPartialAllocationFailure)
 }
 
 /**
- * @brief pbkit failure may disable output internally, so initialization failures also restore it.
+ * @brief Restore software output, clock and timer even when pbkit fails during initialization.
  */
 TEST_F(PvideoPresenterTest, RestoresSoftwareOutputAfterGpuInitializationFailure) {
   hardware.initResult = -4;
   streaming::PvideoPresenter presenter;
+  presenter.set_overclock_enabled(true);
   std::string error;
   EXPECT_FALSE(presenter.present(frame, destination, &error));
   EXPECT_NE(error.find("pbkit -4"), std::string::npos);
   EXPECT_TRUE(hardware.videoEnabled);
+  EXPECT_EQ(hardware.clockAtInit, BOOSTED_CLOCK);
+  EXPECT_EQ(VIDEOREG(CORE_PLL), STOCK_CLOCK);
+  EXPECT_EQ(VIDEOREG(TIMER_NUMERATOR), 0U);
+  EXPECT_EQ(VIDEOREG(TIMER_DENOMINATOR), 0U);
   EXPECT_EQ(hardware.shutdowns, 0);
 }
 

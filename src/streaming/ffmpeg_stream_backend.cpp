@@ -341,7 +341,9 @@ extern "C" std::size_t moonlight_screenshot_file_write(SDL_RWops *stream, const 
 namespace streaming {
 
   VideoAccelerationReport FfmpegStreamBackend::acceleration_report() const {
-    return acceleration_;
+    auto report = acceleration_;
+    report.gpuOverclockStatus = presenter_.overclock_status();
+    return report;
   }
 
   VideoStatisticsCounters FfmpegStreamBackend::performance_counters() const {
@@ -572,8 +574,9 @@ namespace streaming {
     return audio_;
   }
 
-  void FfmpegStreamBackend::set_gpu_presentation_enabled(bool enabled) {
+  void FfmpegStreamBackend::configure_gpu_presentation(bool enabled, bool overclock) {
     gpuPresentationEnabled_ = enabled;
+    presenter_.set_overclock_enabled(enabled && overclock);
   }
 
   void FfmpegStreamBackend::shutdown() {

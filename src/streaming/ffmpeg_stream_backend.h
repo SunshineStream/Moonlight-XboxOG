@@ -75,10 +75,11 @@ namespace streaming {
     AudioPlayer &audio_player();
 
     /**
-     * @brief Select the preferred presentation path before starting the session.
+     * @brief Configure GPU presentation and its optional core clock before starting the session.
      * @param enabled True to try NV2A with automatic software fallback.
+     * @param overclock True to try the experimental clock while using NV2A presentation.
      */
-    void set_gpu_presentation_enabled(bool enabled);
+    void configure_gpu_presentation(bool enabled, bool overclock);
 
     /**
      * @brief Drain any pending screenshot and release FFmpeg, SDL, and cached frame resources.

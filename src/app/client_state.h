@@ -390,6 +390,7 @@ namespace app {
    */
   struct VideoPresentationPreferences {
     bool gpuPresentation = DEFAULT_GPU_PRESENTATION;  ///< Use NV2A presentation with software fallback on new streams.
+    bool gpuOverclock = false;  ///< Try the experimental NV2A core clock during GPU presentation.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
   };
 
