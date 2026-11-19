@@ -301,7 +301,7 @@ namespace streaming {
      * @brief Retain converted GPU colors, coverage and the geometry they describe.
      */
     struct Yuy2Cache {
-      std::unique_ptr<std::uint8_t, decltype(&moonlight_ffmpeg_aligned_free)> bytes {nullptr, moonlight_ffmpeg_aligned_free};  ///< Packed colors followed by optional coverage.
+      std::unique_ptr<std::uint8_t, decltype(&moonlight_ffmpeg_aligned_free)> bytes {nullptr, &moonlight_ffmpeg_aligned_free};  ///< Packed colors followed by optional coverage.
       std::size_t capacity = 0;  ///< Bytes available for colors and coverage.
       bool sharedCoverage = false;  ///< Read coverage directly from the retained raster.
       bool repeatRows = false;  ///< Each cached row serves two output rows at 2x.
