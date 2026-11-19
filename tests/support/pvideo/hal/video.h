@@ -44,6 +44,10 @@ VIDEO_MODE XVideoGetMode();
  */
 unsigned char *XVideoGetFB();
 /**
+ * @brief Record when the CPU has finished writing a framebuffer.
+ */
+void XVideoFlushFB();
+/**
  * @brief Enable or disable output.
  *
  * @param enable Nonzero enables video.

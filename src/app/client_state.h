@@ -78,6 +78,7 @@ namespace app {
 
   inline constexpr int DEFAULT_STREAM_FRAMERATE = 60;  ///< Stream frame rate at the default 640x480 resolution.
   inline constexpr int DEFAULT_STREAM_BITRATE_KBPS = 3000;  ///< Bitrate for the default 640x480, 60 FPS profile.
+  inline constexpr bool DEFAULT_GPU_PRESENTATION = true;  ///< Default to NV2A presentation with software fallback.
 
   /**
    * @brief Focus areas used by the two-pane settings screen.
@@ -387,7 +388,7 @@ namespace app {
    * @brief Preferences for presenting decoded video and its on-screen statistics.
    */
   struct VideoPresentationPreferences {
-    bool gpuPresentation = false;  ///< Opt in to NV2A presentation with software fallback on new streams.
+    bool gpuPresentation = DEFAULT_GPU_PRESENTATION;  ///< Use NV2A presentation with software fallback on new streams.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
   };
 

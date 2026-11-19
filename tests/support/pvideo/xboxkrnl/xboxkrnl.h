@@ -7,6 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 
+inline constexpr int PAGE_READWRITE = 4;  ///< Writable allocation flag.
+inline constexpr int PAGE_WRITECOMBINE = 0x400;  ///< Write-combined allocation flag.
+
 /**
  * @brief Allocate tracked DMA storage.
  * @param size Allocation size.
