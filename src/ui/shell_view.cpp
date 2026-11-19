@@ -715,6 +715,12 @@ namespace {
         viewModel->modal.busy = true;
         viewModel->modal.iconAssetPath = "icons\\loader-circle.svg";
         return;
+      case app::ModalId::stream_summary:
+        viewModel->modal.title = "Stream Summary";
+        viewModel->modal.lines = state.streamSummaryLines;
+        viewModel->modal.compactBody = true;
+        viewModel->modal.footerActions = {{"confirm-stream-summary", "Confirm", "icons\\button-a.svg", {}, true}};
+        return;
       case app::ModalId::log_viewer:
         fill_log_viewer_modal_view(state, viewModel);
         return;
@@ -926,7 +932,7 @@ namespace ui {
   }
 
   bool same_action_dialog_content(const ShellModalView &previous, const ShellModalView &current) {
-    if (previous.folderBrowser != current.folderBrowser || !previous.visible || !current.visible || previous.busy || current.busy || previous.title != current.title || previous.iconAssetPath != current.iconAssetPath || previous.lines != current.lines || previous.actions.size() != current.actions.size() || previous.footerActions.size() != current.footerActions.size()) {
+    if (previous.folderBrowser != current.folderBrowser || previous.compactBody != current.compactBody || !previous.visible || !current.visible || previous.busy || current.busy || previous.title != current.title || previous.iconAssetPath != current.iconAssetPath || previous.lines != current.lines || previous.actions.size() != current.actions.size() || previous.footerActions.size() != current.footerActions.size()) {
       return false;
     }
     for (std::size_t i = 0; i < current.actions.size(); ++i) {
@@ -1026,6 +1032,29 @@ namespace ui {
     if (clampedOffset > 0U) {
       viewModel->overlay.lines.emplace(viewModel->overlay.lines.begin(), "Showing earlier log entries");
     }
+  }
+
+  ShellModalView build_stream_launch_dialog(const app::HostRecord &host, const app::HostAppRecord &app, StreamStartupStep step) {
+    ShellModalView dialog {};
+    dialog.visible = true;
+    dialog.busy = true;
+    dialog.title = "Starting " + app.name;
+    dialog.streamStartupStep = step;
+    switch (step) {
+      case StreamStartupStep::preparing:
+        dialog.lines = {"Preparing to connect to " + host.displayName + "..."};
+        break;
+      case StreamStartupStep::starting_on_host:
+        dialog.lines = {"Waiting for " + host.displayName + " to start the stream..."};
+        break;
+      case StreamStartupStep::connecting:
+        dialog.lines = {"Connecting to " + host.displayName + "..."};
+        break;
+      case StreamStartupStep::first_frame:
+        dialog.lines = {"Waiting for the first video frame..."};
+        break;
+    }
+    return dialog;
   }
 
   ShellViewModel build_shell_view_model(

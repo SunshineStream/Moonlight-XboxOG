@@ -92,15 +92,10 @@ namespace streaming {
      */
     void close_if_removed(int instance);
     /**
-     * @brief Sample devices for summary dismissal.
+     * @brief Sample the state of all connected controllers.
      * @return True when any controller has the menu chord pressed.
      */
     bool poll();
-    /**
-     * @brief Check summary dismissal buttons.
-     * @return True if any connected pad has a pressed button or trigger.
-     */
-    bool any_button_pressed() const;
     /**
      * @brief Transfer a connected controller to the shell.
      * @return Owned reference, or nullptr.

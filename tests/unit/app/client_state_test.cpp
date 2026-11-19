@@ -20,6 +20,38 @@
 namespace {
 
   /**
+   * @brief The summary accepts only the displayed confirmation and consumes it before it reaches the app grid.
+   */
+  TEST(ClientStateTest, StreamSummaryRequiresExplicitConfirmation) {
+    auto state = app::create_initial_state();
+    state.shell.activeScreen = app::ScreenId::apps;
+    state.apps.selectedAppIndex = 1U;
+    for (const auto device : {input::UiInputDevice::gamepad, input::UiInputDevice::keyboard}) {
+      state.shell.inputDevice = device;
+      state.shell.overlayVisible = true;
+      app::show_stream_summary(state, {"Stopped streaming Desktop"});
+      EXPECT_FALSE(state.shell.overlayVisible);
+      const bool keyboard = device == input::UiInputDevice::keyboard;
+      const auto confirm = keyboard ? input::UiCommand::confirm : input::UiCommand::activate;
+      const auto other = keyboard ? input::UiCommand::activate : input::UiCommand::confirm;
+      for (const auto command : {input::UiCommand::back, input::UiCommand::move_left, input::UiCommand::toggle_overlay, other}) {
+        const auto update = app::handle_command(state, command);
+        EXPECT_EQ(state.modal.id, app::ModalId::stream_summary);
+        EXPECT_FALSE(state.shell.overlayVisible);
+        EXPECT_FALSE(update.requests.streamLaunchRequested);
+        EXPECT_FALSE(update.navigation.modalClosed);
+      }
+      const auto update = app::handle_command(state, confirm);
+      EXPECT_EQ(state.modal.id, app::ModalId::none);
+      EXPECT_TRUE(state.streamSummaryLines.empty());
+      EXPECT_EQ(state.shell.activeScreen, app::ScreenId::apps);
+      EXPECT_EQ(state.apps.selectedAppIndex, 1U);
+      EXPECT_TRUE(update.navigation.modalClosed);
+      EXPECT_FALSE(update.requests.streamLaunchRequested);
+    }
+  }
+
+  /**
    * @brief Queue distinct events together without duplicating an outstanding notification.
    */
   TEST(ClientStateTest, QueuesDistinctNotificationsAndCoalescesDuplicates) {

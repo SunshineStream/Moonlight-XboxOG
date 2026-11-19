@@ -221,6 +221,7 @@ namespace network {
    * @param appId Host application identifier.
    * @param assetBytes Output vector populated with downloaded asset bytes.
    * @param errorMessage Optional output for request failures.
+   * @param cancelRequested Optional flag checked during the transfer and before trying alternate asset paths.
    * @return true when the asset was downloaded successfully.
    */
   bool query_app_asset(
@@ -229,7 +230,8 @@ namespace network {
     const PairingIdentity *clientIdentity,
     int appId,
     std::vector<unsigned char> *assetBytes,
-    std::string *errorMessage = nullptr
+    std::string *errorMessage = nullptr,
+    const std::atomic<bool> *cancelRequested = nullptr
   );
 
   /**

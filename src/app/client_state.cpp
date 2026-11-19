@@ -694,7 +694,7 @@ namespace {
 
   /**
    * @brief Close the active dialog and release staged picker data before streaming can begin.
-   * @param state Client state containing the dialog and any temporary folder listing.
+   * @param state Client state containing the dialog and its temporary content.
    */
   void close_modal(app::ClientState &state) {
     if (state.modal.id == app::ModalId::directory_picker) {
@@ -702,6 +702,9 @@ namespace {
     }
     if (state.modal.id == app::ModalId::screenshot_viewer) {
       state.screenshotViewer = {};
+    }
+    if (state.modal.id == app::ModalId::stream_summary) {
+      state.streamSummaryLines.clear();
     }
     state.modal = {};
     reset_confirmation(state);
@@ -801,6 +804,7 @@ namespace {
       case app::ModalId::connection_test:
       case app::ModalId::screenshot_viewer:
       case app::ModalId::quit_progress:
+      case app::ModalId::stream_summary:
         return 0U;
     }
     return 0U;
@@ -1600,6 +1604,7 @@ namespace {
       case app::ModalId::directory_picker:
       case app::ModalId::screenshot_viewer:
       case app::ModalId::quit_progress:
+      case app::ModalId::stream_summary:
         return true;
       case app::ModalId::confirmation:
         return handle_confirmation_modal_activation(state, update);
@@ -1796,6 +1801,17 @@ namespace {
   bool handle_modal_command(app::ClientState &state, input::UiCommand command, app::AppUpdate *update) {
     if (!state.modal.active()) {
       return false;
+    }
+
+    if (state.modal.id == app::ModalId::stream_summary) {
+      const auto confirm = state.shell.inputDevice == input::UiInputDevice::keyboard ? input::UiCommand::confirm : input::UiCommand::activate;
+      if (command == confirm) {
+        close_modal_and_mark_closed(state, update);
+        if (update != nullptr) {
+          update->navigation.activatedItemId = "confirm-stream-summary";
+        }
+      }
+      return true;
     }
 
     if (state.modal.id == app::ModalId::connection_test && state.connectionTest.inProgress) {
@@ -3023,10 +3039,17 @@ namespace app {
     state.appQuit = {};
   }
 
+  void show_stream_summary(ClientState &state, std::vector<std::string> lines) {
+    state.streamSummaryLines = std::move(lines);
+    state.shell.overlayVisible = false;
+    state.shell.overlayScrollOffset = 0U;
+    open_modal(state, ModalId::stream_summary);
+  }
+
   AppUpdate handle_command(ClientState &state, input::UiCommand command) {
     AppUpdate update {};
 
-    if (handle_overlay_command(state, command, &update)) {
+    if (state.modal.id != ModalId::stream_summary && handle_overlay_command(state, command, &update)) {
       return update;
     }
 

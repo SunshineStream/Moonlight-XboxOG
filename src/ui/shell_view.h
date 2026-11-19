@@ -6,6 +6,7 @@
 
 // standard includes
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -152,17 +153,31 @@ namespace ui {
   };
 
   /**
+   * @brief Startup milestones in the order shown by the progress bar.
+   */
+  enum class StreamStartupStep {
+    preparing,  ///< Preparing the client and handing off from the app picker.
+    starting_on_host,  ///< Waiting for the host to launch or resume the app.
+    connecting,  ///< Establishing the stream transport.
+    first_frame,  ///< Waiting for video to be presented.
+  };
+
+  constexpr int STREAM_STARTUP_STEP_COUNT = static_cast<int>(StreamStartupStep::first_frame) + 1;  ///< Number of segments in the startup bar.
+
+  /**
    * @brief Modal dialog view rendered on top of the current shell page.
    */
   struct ShellModalView {
     bool visible = false;  ///< True when a modal dialog should be rendered.
     bool busy = false;  ///< Show progress instead of dismissal controls while work is pending.
     bool folderBrowser = false;  ///< Directory-dialog style; all static action dialogs share retained focus repainting.
+    bool compactBody = false;  ///< Use closer line spacing for dense details such as stream statistics.
     std::string title;  ///< Modal dialog title.
     std::string iconAssetPath;  ///< Optional status icon beside the dialog title.
     std::vector<std::string> lines;  ///< Modal dialog body lines.
     std::vector<ShellActionRow> actions;  ///< Modal action rows.
     std::vector<ShellFooterAction> footerActions;  ///< Footer actions displayed while a modal is open.
+    std::optional<StreamStartupStep> streamStartupStep;  ///< Replaces the busy footer with a stepped progress bar.
   };
 
   /**
@@ -172,6 +187,15 @@ namespace ui {
    * @return True when every visible property except the focused action is unchanged.
    */
   bool same_action_dialog_content(const ShellModalView &previous, const ShellModalView &current);
+
+  /**
+   * @brief Build the busy dialog shown immediately after selecting a stream.
+   * @param host Selected PC.
+   * @param app Selected app on that PC.
+   * @param step Current startup milestone.
+   * @return Dialog identifying the stream that is being prepared.
+   */
+  ShellModalView build_stream_launch_dialog(const app::HostRecord &host, const app::HostAppRecord &app, StreamStartupStep step = StreamStartupStep::preparing);
   /**
    * @brief Identify views whose visible contents animate without input or a completed task.
    * @param state Current shell and workflow state.

@@ -6,6 +6,7 @@
 
 // standard includes
 #include <string>
+#include <vector>
 
 // local includes
 #include "src/app/client_state.h"
@@ -19,9 +20,19 @@ typedef struct _SDL_GameController SDL_GameController;  ///< SDL controller hand
 namespace streaming {
 
   /**
+   * @brief Result returned to the shell after the stream resources are released.
+   */
+  struct StreamSessionReport {
+    SDL_GameController *controller = nullptr;  ///< Owned controller reference to keep or close on return, or nullptr.
+    std::string message;  ///< Final session status or reason startup failed.
+    std::vector<std::string> summaryLines;  ///< Outcome and statistics for the app picker's summary dialog.
+  };
+
+  /**
    * @brief Run one Xbox streaming session for the selected host app.
    *
-   * The session launches or resumes the selected app on the host, starts the
+   * The session displays a progress dialog while launching or resuming the selected app,
+   * establishing the connection and waiting for video. It starts the
    * Moonlight transport runtime, decodes negotiated video and Opus audio with
    * FFmpeg, forwards controller input, renders the latest decoded frame with a
    * lightweight overlay, and returns once the user stops streaming or the host
@@ -37,8 +48,7 @@ namespace streaming {
    * @param app Selected host app.
    * @param clientIdentity Paired client identity used for authenticated launch requests.
    * @param preferredController Controller retained by the shell throughout the session, or nullptr to use the first available device.
-   * @param returnController Optional output receiving an owned reference to the controller used to dismiss the summary, or nullptr on failure. The shell must preserve or close this reference.
-   * @param statusMessage Output message describing the final session result.
+   * @param report Output receiving the final status, summary and an owned controller reference when available.
    * @return True when the stream session started successfully.
    */
   bool run_stream_session(
@@ -49,8 +59,7 @@ namespace streaming {
     const app::HostAppRecord &app,
     const network::PairingIdentity &clientIdentity,
     SDL_GameController *preferredController,
-    SDL_GameController **returnController,
-    std::string *statusMessage
+    StreamSessionReport &report
   );
 
 }  // namespace streaming

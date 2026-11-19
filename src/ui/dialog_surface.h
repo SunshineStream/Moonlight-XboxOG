@@ -48,4 +48,27 @@ namespace ui {
     draw_dialog_round_rect(renderer, {rect.x + 20, rect.y + 16, 36, 3}, {0x82, 0xB4, 0xFF, 255}, 1);
     SDL_SetRenderDrawBlendMode(renderer, previousBlend);
   }
+
+  /**
+   * @brief Paint a progress bar with separate completed, active and pending segments.
+   * @param renderer Active SDL renderer.
+   * @param rect Full progress bar bounds.
+   * @param step Zero-based index of the active segment.
+   * @param count Total number of segments.
+   */
+  inline void draw_dialog_progress(SDL_Renderer *renderer, SDL_Rect rect, int step, int count) {
+    constexpr int gap = 4;
+    const int trackWidth = rect.w - gap * (count - 1);
+    if (count <= 0 || trackWidth < count || rect.h <= 0) {
+      return;
+    }
+    for (int segment = 0; segment < count; ++segment) {
+      const int left = segment * trackWidth / count;
+      const int right = (segment + 1) * trackWidth / count;
+      const SDL_Color color = segment < step  ? SDL_Color {0x82, 0xB4, 0xFF, 255} :
+                              segment == step ? SDL_Color {0x4D, 0x77, 0xB3, 255} :
+                                                SDL_Color {0x30, 0x3D, 0x52, 255};
+      draw_dialog_round_rect(renderer, {rect.x + left + gap * segment, rect.y, right - left, rect.h}, color, 2);
+    }
+  }
 }  // namespace ui
