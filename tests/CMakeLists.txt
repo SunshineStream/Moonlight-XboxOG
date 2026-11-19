@@ -103,6 +103,7 @@ gtest_discover_tests(${PROJECT_NAME}
 add_executable(test_pvideo_presenter
         "${CMAKE_SOURCE_DIR}/tests/gpu/pvideo_presenter_test.cpp"
         "${CMAKE_SOURCE_DIR}/src/streaming/pvideo_presenter.cpp"
+        "${CMAKE_SOURCE_DIR}/src/streaming/software_scanout.cpp"
         "${CMAKE_SOURCE_DIR}/src/streaming/video_acceleration.cpp"
         "${CMAKE_SOURCE_DIR}/src/streaming/video_overlay.cpp")
 target_compile_definitions(test_pvideo_presenter PRIVATE NXDK)

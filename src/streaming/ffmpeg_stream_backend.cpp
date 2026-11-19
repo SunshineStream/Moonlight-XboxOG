@@ -595,17 +595,6 @@ namespace streaming {
     return video_.codecName;
   }
 
-  /**
-   * @brief Return whether two SDL rectangles describe the same area.
-   *
-   * @param left First rectangle.
-   * @param right Second rectangle.
-   * @return True when every rectangle field matches.
-   */
-  bool rectangles_match(const SDL_Rect &left, const SDL_Rect &right) {
-    return left.x == right.x && left.y == right.y && left.w == right.w && left.h == right.h;
-  }
-
 #ifdef NXDK
   /**
    * @brief Convert the active Xbox framebuffer bpp to FFmpeg's packed RGB format.
@@ -663,10 +652,10 @@ namespace streaming {
            " ms / age " + std::to_string(video_.lastReceiveAgeUs.load() / 1000U) + " ms | " + audio_.describe_playback();
   }
 
-  bool FfmpegStreamBackend::render_latest_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool allowDirectFramebuffer) {
+  bool FfmpegStreamBackend::render_latest_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight) {
     const auto before = acceleration_.gpuFrames + acceleration_.softwareFrames;
     const auto started = PltGetMicroseconds();
-    const bool result = render_video_frame(renderer, screenWidth, screenHeight, allowDirectFramebuffer);
+    const bool result = render_video_frame(renderer, screenWidth, screenHeight);
     if (result) {
       statisticsBitmapChanged_ = false;
       if (acceleration_.gpuFrames + acceleration_.softwareFrames > before) {
@@ -676,7 +665,7 @@ namespace streaming {
     return result;
   }
 
-  bool FfmpegStreamBackend::render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool allowDirectFramebuffer) {
+  bool FfmpegStreamBackend::render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight) {
     if (renderer == nullptr || !video_.hasFrame.load()) {
       return false;
     }
@@ -700,7 +689,7 @@ namespace streaming {
     }
 
 #ifdef NXDK
-    if (allowDirectFramebuffer && gpuPresentationEnabled_ && !overlayFailed_) {
+    if (gpuPresentationEnabled_ && !overlayFailed_) {
       if (!textureNeedsUpload && !statisticsBitmapChanged_ && presenter_.active()) {
         return true;
       }
@@ -723,14 +712,17 @@ namespace streaming {
       acceleration_.record_fallback(reason);
       logging::warn("stream", "GPU presentation fallback: " + reason);
     }
-    if (allowDirectFramebuffer && render_latest_video_frame_to_framebuffer(screenWidth, screenHeight)) {
-      if (textureNeedsUpload) {
-        ++acceleration_.softwareFrames;
+    if (!softwareScanoutFailed_) {
+      if (render_latest_video_frame_to_framebuffer(screenWidth, screenHeight)) {
+        if (textureNeedsUpload) {
+          ++acceleration_.softwareFrames;
+        }
+        return true;
       }
-      return true;
+      softwareScanoutFailed_ = true;
+      logging::warn("stream", "Double-buffered scanout unavailable; using SDL software presentation");
+      stop_video_presentation();
     }
-#else
-    (void) allowDirectFramebuffer;
 #endif
 
     if (video_.texture == nullptr || video_.textureWidth != frame.width || video_.textureHeight != frame.height) {
@@ -755,10 +747,13 @@ namespace streaming {
       return false;
     }
 
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
     const SDL_Rect destination = build_letterboxed_destination(screenWidth, screenHeight, frame.width, frame.height);
     const bool presented = SDL_RenderCopy(renderer, video_.texture, nullptr, &destination) == 0;
     if (presented) {
       render_sdl_statistics(renderer, destination);
+      SDL_RenderPresent(renderer);
     }
     if (presented && textureNeedsUpload) {
       ++acceleration_.softwareFrames;
@@ -808,6 +803,7 @@ namespace streaming {
     acceleration_.gpuPresentationRequested = gpuPresentationEnabled_;
     statistics_.reset();
     overlayFailed_ = false;
+    softwareScanoutFailed_ = false;
     const int cpuFlags = av_get_cpu_flags();
     acceleration_.cpuFeatures = (cpuFlags & AV_CPU_FLAG_SSE) != 0 ? "MMX/SSE" : ((cpuFlags & AV_CPU_FLAG_MMX) != 0 ? "MMX" : "Scalar");
     acceleration_.threaded = std::string(avcodec_configuration()).find("--enable-w32threads") != std::string::npos;
@@ -885,6 +881,9 @@ namespace streaming {
       acceleration_.record_fallback("GPU overlay teardown timed out; acceleration disabled");
       logging::warn("stream", "GPU overlay teardown timed out; buffers retained to avoid DMA into freed storage");
     }
+    if (!softwareScanout_.reset()) {
+      logging::warn("stream", "Software scanout retirement timed out; extra framebuffer retained");
+    }
   }
 
   void FfmpegStreamBackend::cleanup_video_decoder() {
@@ -935,8 +934,6 @@ namespace streaming {
     video_.renderedFrameVersion = 0;
     video_.publishedFrameVersion.store(0);
     video_.codecName = "video";
-    video_.directFramebufferDestination = SDL_Rect {0, 0, 0, 0};
-    video_.directFramebufferCleared = false;
     video_.decoderStopRequested.store(false);
     video_.hasFrame.store(false);
     video_.submittedDecodeUnitCount.store(0);
@@ -1071,10 +1068,9 @@ namespace streaming {
   bool FfmpegStreamBackend::render_latest_video_frame_to_framebuffer(int screenWidth, int screenHeight) {
 #ifdef NXDK
     const VIDEO_MODE videoMode = XVideoGetMode();
-    std::uint8_t *framebuffer = XVideoGetFB();
     const int bytesPerPixel = xbox_framebuffer_bytes_per_pixel(videoMode.bpp);
     const AVPixelFormat destinationFormat = xbox_framebuffer_pixel_format(videoMode.bpp);
-    if (framebuffer == nullptr || videoMode.width <= 0 || videoMode.height <= 0 || bytesPerPixel <= 0 || destinationFormat == AV_PIX_FMT_NONE) {
+    if (videoMode.width <= 0 || videoMode.height <= 0 || bytesPerPixel <= 0 || destinationFormat == AV_PIX_FMT_NONE) {
       return false;
     }
 
@@ -1087,10 +1083,11 @@ namespace streaming {
     }
 
     const int framebufferPitch = videoMode.width * bytesPerPixel;
-    if (!video_.directFramebufferCleared || !rectangles_match(video_.directFramebufferDestination, destination)) {
-      std::memset(framebuffer, 0, static_cast<std::size_t>(framebufferPitch) * static_cast<std::size_t>(videoMode.height));
-      video_.directFramebufferDestination = destination;
-      video_.directFramebufferCleared = true;
+    const auto framebufferSize = static_cast<std::size_t>(framebufferPitch) * videoMode.height;
+    const VideoRectangle videoArea {destination.x, destination.y, destination.w, destination.h};
+    auto *framebuffer = softwareScanout_.back_buffer(framebufferSize, videoArea);
+    if (framebuffer == nullptr) {
+      return false;
     }
 
     video_.presentScaleContext = sws_getCachedContext(
@@ -1141,9 +1138,8 @@ namespace streaming {
       return false;
     }
 
-    statisticsOverlay_.draw_rgb(framebuffer, static_cast<std::size_t>(framebufferPitch) * videoMode.height, framebufferPitch, videoMode.width, videoMode.height, videoMode.bpp, {destination.x, destination.y, destination.w, destination.h});
-    XVideoFlushFB();
-    return true;
+    statisticsOverlay_.draw_rgb(framebuffer, framebufferSize, framebufferPitch, videoMode.width, videoMode.height, videoMode.bpp, videoArea);
+    return softwareScanout_.present();
 #else
     (void) screenWidth;
     (void) screenHeight;

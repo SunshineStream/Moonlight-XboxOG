@@ -74,10 +74,10 @@ No network connection or JavaScript runtime is needed to display the icons on th
 
 ## Video presentation
 
-**Settings → Display → Video Presentation** defaults to **Software**, which writes directly to the
-framebuffer when available and performed better in xemu. **GPU** uses NV2A color conversion and scaling
-with automatic software fallback. The setting is saved as `streaming.gpu_presentation` and both paths
-are available in the same build.
+**Settings → Display → Video Presentation** defaults to **Software**, which combines the decoded video
+and overlay before displaying each frame. **GPU** uses NV2A color conversion and scaling with automatic
+software fallback. The setting is saved as `streaming.gpu_presentation` and both paths are available in
+the same build.
 
 ## Stream audio
 

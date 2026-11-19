@@ -1208,25 +1208,12 @@ namespace {
     SDL_GetRendererOutputSize(resources->renderer, &screenWidth, &screenHeight);
 
     const bool hasDecodedVideo = mediaBackend != nullptr && mediaBackend->has_decoded_video();
-#ifdef NXDK
-    if (hasDecodedVideo && mediaBackend->render_latest_video_frame(resources->renderer, screenWidth, screenHeight, true)) {
+    if (hasDecodedVideo && mediaBackend->render_latest_video_frame(resources->renderer, screenWidth, screenHeight)) {
       render_stream_input_diagnostics(resources);
       return true;
     }
-#endif
-    if (hasDecodedVideo) {
-      SDL_SetRenderDrawColor(resources->renderer, 0x00, 0x00, 0x00, 0xFF);
-    } else {
-      SDL_SetRenderDrawColor(resources->renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
-    }
+    SDL_SetRenderDrawColor(resources->renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
     SDL_RenderClear(resources->renderer);
-
-    const bool renderedVideo = hasDecodedVideo && mediaBackend->render_latest_video_frame(resources->renderer, screenWidth, screenHeight, false);
-    if (renderedVideo) {
-      SDL_RenderPresent(resources->renderer);
-      render_stream_input_diagnostics(resources);
-      return true;
-    }
 
     int cursorY = 28;
     int titleHeight = 0;
@@ -1240,11 +1227,9 @@ namespace {
       mediaBackend != nullptr ? mediaBackend->build_overlay_status_line() : std::string("FFmpeg decode backend unavailable"),
       input::STREAM_EXIT_HINT,
     };
-    if (!renderedVideo) {
-      lines.emplace(lines.begin() + 2, std::string("Mode: ") + std::to_string(context.streamConfiguration.width) + "x" + std::to_string(context.streamConfiguration.height) + " @ " + std::to_string(context.streamConfiguration.fps) + " FPS | " + (mediaBackend != nullptr ? mediaBackend->active_video_decoder_name() : std::string("video")) + " | Stereo");
-      lines.emplace(lines.begin() + 4, std::string("Launch mode: ") + (context.serverInformation.rtspSessionUrl != nullptr ? "Session URL supplied by host" : "Default RTSP discovery"));
-      lines.emplace(lines.begin() + 5, "Waiting for the first decoded video frame and audio output.");
-    }
+    lines.emplace(lines.begin() + 2, std::string("Mode: ") + std::to_string(context.streamConfiguration.width) + "x" + std::to_string(context.streamConfiguration.height) + " @ " + std::to_string(context.streamConfiguration.fps) + " FPS | " + (mediaBackend != nullptr ? mediaBackend->active_video_decoder_name() : std::string("video")) + " | Stereo");
+    lines.emplace(lines.begin() + 4, std::string("Launch mode: ") + (context.serverInformation.rtspSessionUrl != nullptr ? "Session URL supplied by host" : "Default RTSP discovery"));
+    lines.emplace(lines.begin() + 5, "Waiting for the first decoded video frame and audio output.");
 
     render_text_lines(resources->renderer, resources->bodyFont, lines, screenWidth, &cursorY);
 

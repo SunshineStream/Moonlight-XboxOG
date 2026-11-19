@@ -23,6 +23,7 @@
 #include "src/streaming/audio_player.h"
 #include "src/streaming/ffmpeg_video_frame.h"
 #include "src/streaming/pvideo_presenter.h"
+#include "src/streaming/software_scanout.h"
 #include "src/streaming/stats_overlay.h"
 
 struct AVCodecContext;
@@ -183,10 +184,9 @@ namespace streaming {
      * @param renderer SDL renderer used by the stream session.
      * @param screenWidth Current renderer output width.
      * @param screenHeight Current renderer output height.
-     * @param allowDirectFramebuffer True when platform-specific direct presentation may bypass SDL's renderer.
-     * @return True when a decoded frame was available and rendered.
+     * @return True when decoded video is displayed on any presentation path.
      */
-    bool render_latest_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool allowDirectFramebuffer = true);
+    bool render_latest_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight);
 
     /**
      * @brief Restore CPU framebuffer output before drawing shutdown or summary UI on the render thread.
@@ -262,10 +262,9 @@ namespace streaming {
      * @param renderer SDL video renderer.
      * @param screenWidth Output width.
      * @param screenHeight Output height.
-     * @param allowDirectFramebuffer Permit Xbox GPU or direct framebuffer presentation.
      * @return True after successful presentation.
      */
-    bool render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool allowDirectFramebuffer);
+    bool render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight);
     /**
      * @brief Draw the cached panel when the SDL presentation fallback is used.
      * @param renderer SDL video renderer.
@@ -406,11 +405,9 @@ namespace streaming {
       mutable std::mutex frameMutex_;  ///< Guards latest decoded frame publication between worker and render threads.
 
     public:
-      SDL_Rect directFramebufferDestination {0, 0, 0, 0};
       FfmpegVideoFrame latestFrame;  ///< Mailbox slot exchanged under frameMutex_.
       FfmpegVideoFrame decodeFrame;  ///< Decoder-owned slot reused to publish each new reference.
       FfmpegVideoFrame renderFrame;  ///< Render-thread reference retained for presentation and UI redraws.
-      bool directFramebufferCleared = false;
       std::atomic<bool> decoderStopRequested = false;
       std::atomic<bool> hasFrame = false;
       std::atomic<std::uint64_t> publishedFrameVersion = 0;
@@ -427,6 +424,7 @@ namespace streaming {
     AudioPlayer audio_;  ///< Session Opus decoder and SDL playback device.
     ScreenshotTask screenshot_ {};  ///< Single capture slot, bounded to one additional YUV frame.
     PvideoPresenter presenter_;  ///< Main-thread GPU presentation resources.
+    SoftwareScanout softwareScanout_;  ///< Main-thread software scanout pages.
     VideoOverlay statisticsOverlay_;  ///< Shared cached panel for all presentation paths.
     VideoStatistics statistics_;  ///< Cumulative decode and presentation telemetry.
     SDL_Texture *statisticsTexture_ = nullptr;  ///< Cached panel texture for SDL's final fallback.
@@ -436,6 +434,7 @@ namespace streaming {
     VideoAccelerationReport acceleration_;  ///< Session diagnostics survive decoder cleanup.
     bool gpuPresentationEnabled_ = false;  ///< Session opt-in applied before decoder setup.
     bool overlayFailed_ = false;  ///< Avoid repeating a known failing hardware path this session.
+    bool softwareScanoutFailed_ = false;  ///< Use the SDL fallback after software scanout fails.
   };
 
 }  // namespace streaming
