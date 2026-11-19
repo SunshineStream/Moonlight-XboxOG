@@ -2,7 +2,7 @@
  * @file tests/unit/startup/video_mode_test.cpp
  * @brief Verifies video mode selection helpers.
  */
-// test includes
+// test header include
 #include "src/startup/video_mode.h"
 
 // standard includes
@@ -58,6 +58,56 @@ namespace {
     EXPECT_EQ(bestVideoMode.height, 720);
     EXPECT_EQ(bestVideoMode.bpp, 32);
     EXPECT_EQ(bestVideoMode.refresh, 60);
+  }
+
+  /** @brief Native 1080i uses a smaller framebuffer at the requested resolution. */
+  TEST(VideoModeTest, Uses16BitScanoutFor1080i) {
+    const VIDEO_MODE stream {1920, 1080, 32, 60};
+    const VIDEO_MODE shell {1280, 720, 32, 60};
+    const auto output = startup::choose_stream_output_mode(stream, shell);
+
+    EXPECT_EQ(output.width, 1920);
+    EXPECT_EQ(output.height, 1080);
+    EXPECT_EQ(output.bpp, 16);
+    EXPECT_EQ(output.refresh, 60);
+  }
+
+  /** @brief Start a 1080i session in the active shell mode, including its refresh and color depth. */
+  TEST(VideoModeTest, KeepsShellScanoutWhileStarting1080i) {
+    const auto mode = startup::choose_stream_startup_mode({1920, 1080, 16, 60}, {720, 480, 32, 50});
+
+    EXPECT_EQ(mode.width, 720);
+    EXPECT_EQ(mode.height, 480);
+    EXPECT_EQ(mode.bpp, 32);
+    EXPECT_EQ(mode.refresh, 50);
+  }
+
+  /** @brief Lower-resolution sessions continue to switch before showing the launch dialog. */
+  TEST(VideoModeTest, Starts720pWithItsStreamScanout) {
+    const auto mode = startup::choose_stream_startup_mode({1280, 720, 32, 60}, {640, 480, 16, 50});
+
+    EXPECT_EQ(mode.width, 1280);
+    EXPECT_EQ(mode.height, 720);
+    EXPECT_EQ(mode.bpp, 32);
+    EXPECT_EQ(mode.refresh, 60);
+  }
+
+  /** @brief Lower stream resolutions still select their corresponding Xbox output modes. */
+  TEST(VideoModeTest, SwitchesToTheRequestedOutputForLowerResolutions) {
+    const auto output = startup::choose_stream_output_mode({640, 480, 32, 50}, {1280, 720, 32, 60});
+
+    EXPECT_EQ(output.width, 640);
+    EXPECT_EQ(output.height, 480);
+    EXPECT_EQ(output.bpp, 32);
+    EXPECT_EQ(output.refresh, 50);
+  }
+
+  /** @brief Incomplete requests retain the active output. */
+  TEST(VideoModeTest, KeepsTheShellOutputForAnInvalidStreamMode) {
+    const auto output = startup::choose_stream_output_mode({1920, 0, 32, 60}, {1280, 720, 32, 60});
+
+    EXPECT_EQ(output.width, 1280);
+    EXPECT_EQ(output.height, 720);
   }
 
   TEST(VideoModeTest, ExposesOnlyXboxVideoModeStreamChoicesAsFallbacks) {

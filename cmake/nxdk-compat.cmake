@@ -56,6 +56,14 @@ function(moonlight_prepare_nxdk_compat)
     target_include_directories(moonlight_nxdk_compat PUBLIC "${compat}/include")
     target_compile_options(moonlight_nxdk_compat INTERFACE
             -include "${compat}/include/moonlight_posix.h")
+
+    # PVIDEO needs one immutable background page at 1080i. Link the adapted
+    # object directly so nxdk's stock pbkit core is not also extracted.
+    moonlight_patch_sources("${NXDK_DIR}" "${port}" "${compat}/pbkit-static-scanout.patch"
+            lib/pbkit/pbkit.c)
+    add_library(moonlight_pbkit_scanout OBJECT "${port}/lib/pbkit/pbkit.c")
+    target_include_directories(moonlight_pbkit_scanout PRIVATE "${NXDK_DIR}/lib/pbkit")
+
     file(GLOB_RECURSE compat_inputs CONFIGURE_DEPENDS "${compat}/*.h" "${compat}/*.c")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${compat_inputs})
 endfunction()

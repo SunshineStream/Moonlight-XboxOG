@@ -16,6 +16,12 @@
   #include <windows.h>
   #include <xboxkrnl/xboxkrnl.h>
 
+/**
+ * @brief Initialize the adapted pbkit with one color page for the stationary PVIDEO background.
+ * @return Zero on success or a pbkit initialization error.
+ */
+extern "C" int moonlight_pb_init_static_scanout(void);
+
 namespace {
   constexpr std::uint32_t VIDEO_BUFFER = 0x8700;  ///< Overlay buffer submission register.
   constexpr std::uint32_t VIDEO_STOP = 0x8704;  ///< Normal overlay stop register.
@@ -117,8 +123,9 @@ namespace streaming {
 #ifdef NXDK
     const VIDEO_MODE mode = XVideoGetMode();
     void *framebuffer = XVideoGetFB();
-    if (framebuffer == nullptr || mode.bpp != 32 || mode.width <= 0 || mode.height <= 0 || (mode.width * 4 & 63) != 0) {
-      *error = "GPU scanout requires a 32-bit framebuffer with a 64-byte aligned pitch";
+    const int pitch = mode.width * (mode.bpp / 8);
+    if (framebuffer == nullptr || (mode.bpp != 16 && mode.bpp != 32) || mode.width <= 0 || mode.height <= 0 || (pitch & 63) != 0) {
+      *error = "GPU scanout requires a 16-bit or 32-bit framebuffer with a 64-byte aligned pitch";
       return false;
     }
     for (std::size_t index = 0; index < SAVED_REGISTERS.size(); ++index) {
@@ -132,20 +139,20 @@ namespace streaming {
     VIDEOREG8(0x6013d4) = crtcIndex;
     savedCrtcConfig_ = VIDEOREG(0x600804);
     scanoutStateSaved_ = true;
-    pb_set_color_format(NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8, false);
-    const int status = pb_init();
+    pb_set_color_format(mode.bpp == 16 ? NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5 : NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8, false);
+    const int status = mode.height >= 1080 ? moonlight_pb_init_static_scanout() : pb_init();
     if (status != 0) {
       *error = "GPU scanout initialization failed (pbkit " + std::to_string(status) + ")";
       return false;
     }
     surfaceActive_ = true;
-    if (pb_back_buffer_pitch() != static_cast<unsigned int>(mode.width * 4)) {
+    if (pb_back_buffer_pitch() != static_cast<unsigned int>(pitch)) {
       *error = "GPU scanout pitch does not match the active display mode";
       return false;
     }
     // Keep SDL's CPU framebuffer outside the GPU render targets. Rendering
     // into it would leave a cached GPU surface over later CPU menu updates.
-    pb_fill(0, 0, mode.width, mode.height, 0xff000000U);
+    pb_fill(0, 0, mode.width, mode.height, mode.bpp == 16 ? 0U : 0xff000000U);
     if (!wait_for_gpu_idle()) {
       *error = "Timed out preparing the GPU scanout surface";
       return false;
@@ -269,12 +276,11 @@ namespace streaming {
         failure = "Timed out waiting for GPU scanout; using software presentation";
       } else if (!pack_overlay_yuy2(frame, buffers_[nextBuffer_], bufferSize_, pitch_)) {
         failure = "Failed to pack the GPU overlay frame";
+      } else if (overlay != nullptr && !overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination, frame.matrix)) {
+        failure = "Could not compose stream controls with GPU presentation";
       }
     }
     if (failure.empty()) {
-      if (overlay != nullptr) {
-        overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination, frame.matrix);
-      }
       __atomic_thread_fence(__ATOMIC_SEQ_CST);
       // Rotate memory buffers through overlay bank zero. xemu composes bank
       // zero only; alternating hardware overlay banks hides every other frame.

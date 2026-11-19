@@ -95,6 +95,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
         NXDK::NXDK_CXX
         NXDK::Net
         moonlight_nxdk_compat
+        moonlight_pbkit_scanout
         NXDK::SDL2
         NXDK::SDL2_Image
         NXDK::SDL2_TTF
@@ -188,7 +189,7 @@ if(MOONLIGHT_BUILD_VIDEO_EXPERIMENTS)
     target_include_directories(pvideo_presentation_probe PRIVATE "${CMAKE_SOURCE_DIR}")
     target_compile_definitions(pvideo_presentation_probe PRIVATE NXDK XBOX)
     target_compile_options(pvideo_presentation_probe PRIVATE -std=gnu++17)
-    target_link_libraries(pvideo_presentation_probe PRIVATE NXDK::NXDK NXDK::NXDK_CXX)
+    target_link_libraries(pvideo_presentation_probe PRIVATE moonlight_pbkit_scanout NXDK::NXDK NXDK::NXDK_CXX)
     set(_pvideo_probe_xbe_dir "${CMAKE_CURRENT_BINARY_DIR}/pvideo-presentation-probe")
     file(MAKE_DIRECTORY "${_pvideo_probe_xbe_dir}")
     add_custom_target(pvideo_presentation_probe_iso ALL
@@ -212,7 +213,7 @@ if(MOONLIGHT_BUILD_VIDEO_EXPERIMENTS)
     target_include_directories(mpeg2_motion_probe PRIVATE "${CMAKE_SOURCE_DIR}")
     target_compile_definitions(mpeg2_motion_probe PRIVATE NXDK XBOX)
     target_compile_options(mpeg2_motion_probe PRIVATE -std=gnu++17)
-    target_link_libraries(mpeg2_motion_probe PRIVATE NXDK::NXDK NXDK::NXDK_CXX)
+    target_link_libraries(mpeg2_motion_probe PRIVATE moonlight_pbkit_scanout NXDK::NXDK NXDK::NXDK_CXX)
     set(_mpeg2_probe_xbe_dir "${CMAKE_CURRENT_BINARY_DIR}/mpeg2-motion-probe")
     file(MAKE_DIRECTORY "${_mpeg2_probe_xbe_dir}")
     add_custom_target(mpeg2_motion_probe_iso ALL

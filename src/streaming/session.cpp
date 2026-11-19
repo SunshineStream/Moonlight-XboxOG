@@ -40,6 +40,7 @@
 #include "src/logging/logger.h"
 #include "src/os.h"
 #include "src/startup/memory_stats.h"
+#include "src/startup/video_mode.h"
 #include "src/streaming/ffmpeg_stream_backend.h"
 #include "src/streaming/stats_overlay.h"
 #include "src/streaming/stream_controls.h"
@@ -96,6 +97,7 @@ namespace {
     streaming::StreamControls controller;
     streaming::FfmpegStreamBackend mediaBackend {};
     std::optional<Uint32> startupTick;  ///< Session entry tick, cleared when the first video frame is presented.
+    std::optional<VIDEO_MODE> pendingVideoMode;  ///< Output to switch to immediately before presenting decoded video.
     bool ttfInitialized = false;
   };
 
@@ -181,13 +183,15 @@ namespace {
     std::string &statusMessage;  ///< Result text to update if setup fails.
   };
 
+  class ScopedStreamVideoMode;
+
   struct ActiveStreamLoopContext {
-    const app::SettingsState &settings;
     const app::HostRecord &host;
     const app::HostAppRecord &app;
     StreamStartContext &startContext;
     StreamConnectionState &connectionState;
     StreamUiResources &resources;
+    ScopedStreamVideoMode &videoMode;  ///< Owns the temporary mode switch and restores the shell mode on exit.
   };
 
   struct ResolvedStreamParameters {
@@ -224,21 +228,21 @@ namespace {
     return left.width == right.width && left.height == right.height && left.bpp == right.bpp && left.refresh == right.refresh;
   }
 
-  VIDEO_MODE select_stream_presentation_video_mode(const VIDEO_MODE &fallbackVideoMode, const VIDEO_MODE &streamVideoMode) {
-    if (streamVideoMode.width > 0 && streamVideoMode.height > 0) {
-      return streamVideoMode;
-    }
-
-    return fallbackVideoMode;
-  }
-
   class ScopedStreamVideoMode {
   public:
     ScopedStreamVideoMode(SDL_Window *window, const VIDEO_MODE &originalVideoMode, const VIDEO_MODE &requestedVideoMode):
         window_(window),
         originalVideoMode_(originalVideoMode),
         activeVideoMode_(originalVideoMode) {
-      if (requestedVideoMode.width <= 0 || requestedVideoMode.height <= 0 || video_modes_match(requestedVideoMode, originalVideoMode)) {
+      switch_to(requestedVideoMode);
+    }
+
+    /**
+     * @brief Apply a streaming display mode to the Xbox and SDL window.
+     * @param requestedVideoMode The desired output mode.
+     */
+    void switch_to(const VIDEO_MODE &requestedVideoMode) {
+      if (requestedVideoMode.width <= 0 || requestedVideoMode.height <= 0 || video_modes_match(requestedVideoMode, activeVideoMode_)) {
         return;
       }
 
@@ -253,11 +257,11 @@ namespace {
       }
 
       activeVideoMode_ = requestedVideoMode;
-      changed_ = true;
+      changed_ = !video_modes_match(activeVideoMode_, originalVideoMode_);
       if (window_ != nullptr) {
         SDL_SetWindowSize(window_, activeVideoMode_.width, activeVideoMode_.height);
       }
-      logging::info("stream", "Switched Xbox video mode for stream presentation to " + std::to_string(activeVideoMode_.width) + "x" + std::to_string(activeVideoMode_.height));
+      logging::info("stream", "Switched Xbox video mode for stream presentation to " + std::to_string(activeVideoMode_.width) + "x" + std::to_string(activeVideoMode_.height) + " at " + std::to_string(activeVideoMode_.bpp) + " bpp");
 #else
       (void) requestedVideoMode;
 #endif
@@ -666,7 +670,7 @@ namespace {
 
     const std::string fontPath = build_font_path();
     resources->titleFont = TTF_OpenFont(fontPath.c_str(), std::max(22, videoMode.height / 18));
-    resources->bodyFont = TTF_OpenFont(fontPath.c_str(), std::max(16, videoMode.height / 28));
+    resources->bodyFont = TTF_OpenFont(fontPath.c_str(), std::max(16, videoMode.height / streaming::controls_raster_scale(videoMode.height) / 28));
     if (resources->titleFont == nullptr || resources->bodyFont == nullptr) {
       if (errorMessage != nullptr) {
         *errorMessage = std::string("Failed to load the streaming session font from ") + fontPath + ": " + TTF_GetError();
@@ -1068,7 +1072,7 @@ namespace {
    * @return True when the video must be refreshed to display a new panel.
    */
   bool update_stream_statistics_overlay(const StreamStartContext &context, const StreamConnectionState &connectionState, StreamUiResources *resources) {
-    if (resources == nullptr || resources->controller.has_overlay() || !resources->statisticsEnabled || resources->statisticsFont == nullptr || !resources->mediaBackend.has_decoded_video()) {
+    if (resources == nullptr || resources->pendingVideoMode || resources->controller.has_overlay() || !resources->statisticsEnabled || resources->statisticsFont == nullptr || !resources->mediaBackend.has_decoded_video()) {
       return false;
     }
     const auto now = PltGetMicroseconds();
@@ -1254,7 +1258,7 @@ namespace {
     int screenHeight = 0;
     SDL_GetRendererOutputSize(resources->renderer, &screenWidth, &screenHeight);
 
-    const bool hasDecodedVideo = mediaBackend != nullptr && mediaBackend->has_decoded_video();
+    const bool hasDecodedVideo = !resources->pendingVideoMode && mediaBackend != nullptr && mediaBackend->has_decoded_video();
     if (hasDecodedVideo && mediaBackend->render_latest_video_frame(resources->renderer, screenWidth, screenHeight)) {
       if (resources->startupTick.has_value()) {
         logging::info("stream", "Stream startup: first video frame presented after " + std::to_string(SDL_GetTicks() - *resources->startupTick) + " ms in the session");
@@ -1362,8 +1366,43 @@ namespace {
     return run_stream_start_attempt(attempt);
   }
 
+  /**
+   * @brief Switch to the pending 1080i mode once the first frame is ready.
+   * @param loopContext Active stream resources and display mode.
+   */
+  void activate_pending_stream_video_mode(const ActiveStreamLoopContext &loopContext) {
+    auto &resources = loopContext.resources;
+    const int previousHeight = loopContext.videoMode.active_video_mode().height;
+    loopContext.videoMode.switch_to(*resources.pendingVideoMode);
+    resources.pendingVideoMode.reset();
+    const int outputHeight = loopContext.videoMode.active_video_mode().height;
+    if (outputHeight == previousHeight) {
+      return;
+    }
+
+    resources.controller.invalidate_panel(resources.mediaBackend);
+    const std::string fontPath = build_font_path();
+    const auto resizeFont = [&fontPath](TTF_Font *&font, int size) {
+      if (font == nullptr) {
+        return;
+      }
+      if (auto *replacement = TTF_OpenFont(fontPath.c_str(), size); replacement != nullptr) {
+        TTF_CloseFont(font);
+        font = replacement;
+      } else {
+        logging::warn("stream", std::string("Unable to resize a streaming font: ") + TTF_GetError());
+      }
+    };
+    resizeFont(resources.titleFont, std::max(22, outputHeight / 18));
+    resizeFont(resources.bodyFont, std::max(16, outputHeight / streaming::controls_raster_scale(outputHeight) / 28));
+    resizeFont(resources.statisticsFont, std::max(12, outputHeight / 45));
+  }
+
   void render_active_stream_frame_if_needed(const ActiveStreamLoopContext &loopContext, Uint32 *lastIdleVideoIdrRequestTick) {
     const bool hasDecodedVideo = loopContext.resources.mediaBackend.has_decoded_video();
+    if (hasDecodedVideo && loopContext.resources.pendingVideoMode) {
+      activate_pending_stream_video_mode(loopContext);
+    }
     const bool statisticsChanged = update_stream_statistics_overlay(loopContext.startContext, loopContext.connectionState, &loopContext.resources);
     if (const bool shouldRenderFrame = !hasDecodedVideo || statisticsChanged || loopContext.resources.mediaBackend.has_pending_overlay() || loopContext.resources.mediaBackend.has_unrendered_video_frame(); shouldRenderFrame) {
       render_stream_frame(
@@ -1445,13 +1484,17 @@ namespace streaming {
     const Uint32 sessionStarted = SDL_GetTicks();
     report = {};
     const ResolvedStreamParameters streamParameters = resolve_stream_parameters(videoMode, settings);
-    const VIDEO_MODE streamPresentationVideoMode = select_stream_presentation_video_mode(videoMode, streamParameters.videoMode);
-    ScopedStreamVideoMode scopedStreamVideoMode(window, videoMode, streamPresentationVideoMode);
-    const VIDEO_MODE &activeStreamVideoMode = scopedStreamVideoMode.active_video_mode();
+    const VIDEO_MODE streamPresentationVideoMode = startup::choose_stream_output_mode(streamParameters.videoMode, videoMode);
+    const VIDEO_MODE startupVideoMode = startup::choose_stream_startup_mode(streamPresentationVideoMode, videoMode);
+    ScopedStreamVideoMode scopedStreamVideoMode(window, videoMode, startupVideoMode);
 
     StreamUiResources resources {};
+    if (!video_modes_match(startupVideoMode, streamPresentationVideoMode)) {
+      resources.pendingVideoMode = streamPresentationVideoMode;
+    }
     resources.startupTick = sessionStarted;
     resources.statisticsEnabled = settings.presentation.showPerformanceStats;
+    const auto &activeStreamVideoMode = scopedStreamVideoMode.active_video_mode();
     if (std::string initializationError; !initialize_stream_ui_resources(window, activeStreamVideoMode, preferredController, &resources, &initializationError)) {
       report.message = initializationError;
       logging::error("stream", initializationError);
@@ -1475,6 +1518,7 @@ namespace streaming {
     const uint16_t httpPort = host.resolvedHttpPort == 0U ? app::effective_host_port(host.port) : host.resolvedHttpPort;
 
     network::StreamLaunchResult launchResult {};
+    const VIDEO_MODE negotiatedOutputMode = resources.pendingVideoMode.value_or(activeStreamVideoMode);
     network::StreamLaunchConfiguration launchConfiguration {};
     launchConfiguration.appId = app.id;
     launchConfiguration.width = select_stream_width(streamParameters.videoMode);
@@ -1482,7 +1526,7 @@ namespace streaming {
     launchConfiguration.fps = streamParameters.fps;
     launchConfiguration.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
     launchConfiguration.playAudioOnPc = settings.audio.playOnPc;
-    launchConfiguration.clientRefreshRateX100 = select_client_refresh_rate_x100(activeStreamVideoMode);
+    launchConfiguration.clientRefreshRateX100 = select_client_refresh_rate_x100(negotiatedOutputMode);
     launchConfiguration.remoteInputAesKeyHex = hex_encode(remoteInputKey.data(), remoteInputKey.size());
     launchConfiguration.remoteInputAesIvHex = hex_encode(remoteInputIv.data(), remoteInputIv.size());
 
@@ -1507,7 +1551,7 @@ namespace streaming {
     StreamStartContext startContext {};
     startContext.connectionState = &connectionState;
     startContext.mediaBackend = &resources.mediaBackend;
-    configure_stream_start_context(launchResult, remoteInputKey, remoteInputIv, activeStreamVideoMode, streamParameters, &startContext);
+    configure_stream_start_context(launchResult, remoteInputKey, remoteInputIv, negotiatedOutputMode, streamParameters, &startContext);
     if (startContext.appVersion != startContext.reportedAppVersion) {
       logging::info(
         "stream",
@@ -1560,7 +1604,7 @@ namespace streaming {
     }
 
     logging::info("stream", std::string(launchResult.resumedSession ? "Resumed stream for " : "Launched stream for ") + app.name + " on " + host.displayName);
-    run_active_stream_loop({settings, host, app, startContext, connectionState, resources});
+    run_active_stream_loop({host, app, startContext, connectionState, resources, scopedStreamVideoMode});
 
     streaming::StreamStatisticsSnapshot finalStatistics = sample_stream_statistics(startContext, connectionState, resources.mediaBackend);
     resources.statisticsSampler.apply(&finalStatistics);

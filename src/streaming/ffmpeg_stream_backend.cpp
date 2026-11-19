@@ -362,8 +362,12 @@ namespace streaming {
     invalidate_overlay_texture();
   }
 
-  void FfmpegStreamBackend::set_color_overlay_surface(int width, int height, const std::uint8_t *pixels, std::size_t capacity, int pitch, VideoOverlayPlacement placement, bool opaqueBackground) {
-    if (statisticsOverlay_.set_argb_surface(width, height, pixels, capacity, pitch, placement, opaqueBackground)) {
+  void FfmpegStreamBackend::set_color_overlay_surface(const std::shared_ptr<SDL_Surface> &surface, VideoOverlayPlacement placement, bool opaqueBackground, int scale) {
+    if (!surface || surface->pitch != surface->w * 4) {
+      return;
+    }
+    const auto pixels = std::shared_ptr<const std::uint8_t>(surface, static_cast<const std::uint8_t *>(surface->pixels));
+    if (statisticsOverlay_.share_argb_surface(surface->w, surface->h, pixels, static_cast<std::size_t>(surface->pitch) * surface->h, placement, opaqueBackground, scale)) {
       invalidate_overlay_texture();
     }
   }
@@ -382,8 +386,8 @@ namespace streaming {
     }
   }
 
-  void FfmpegStreamBackend::update_color_overlay(const VideoRectangle &region, const std::vector<std::uint8_t> &pixels) {
-    if (!statisticsOverlay_.update_argb_bitmap(region, pixels)) {
+  void FfmpegStreamBackend::update_color_overlay(const VideoRectangle &region) {
+    if (!statisticsOverlay_.update_shared_argb_surface(region)) {
       return;
     }
     if (statisticsTextureChanged_) {
@@ -690,6 +694,12 @@ namespace streaming {
 
     const SDL_Rect destination = build_letterboxed_destination(screenWidth, screenHeight, frame.width, frame.height);
 #ifdef NXDK
+    // The startup dialog may have uploaded a full-size SDL controls texture.
+    // Retire it before native presentation allocates its scanout buffers.
+    if (!softwareScanoutFailed_ && statisticsTexture_ != nullptr) {
+      SDL_DestroyTexture(statisticsTexture_);
+      statisticsTexture_ = nullptr;
+    }
     if (render_gpu_video_frame(destination, newFrame)) {
       return true;
     }
@@ -791,16 +801,24 @@ namespace streaming {
       return;
     }
     if (statisticsTextureChanged_) {
-      const auto &pixels = statisticsOverlay_.argb_pixels();
-      const SDL_Rect damage {statisticsTextureDamage_.x, statisticsTextureDamage_.y, statisticsTextureDamage_.width, statisticsTextureDamage_.height};
-      if (const auto offset = (static_cast<std::size_t>(damage.y) * width + damage.x) * 4; SDL_UpdateTexture(statisticsTexture_, &damage, pixels.data() + offset, width * 4) != 0) {
+      const auto &region = statisticsTextureDamage_;
+      const SDL_Rect damage {region.x, region.y, region.width, region.height};
+      void *pixels = nullptr;
+      int pitch = 0;
+      if (SDL_LockTexture(statisticsTexture_, &damage, &pixels, &pitch) != 0) {
+        return;
+      }
+      const bool uploaded = statisticsOverlay_.copy_argb_region(region, static_cast<std::uint8_t *>(pixels), pitch);
+      SDL_UnlockTexture(statisticsTexture_);
+      if (!uploaded) {
         return;
       }
       statisticsTextureChanged_ = false;
     }
     const auto bounds = statisticsOverlay_.rectangle({destination.x, destination.y, destination.w, destination.h});
+    const auto bitmap = statisticsOverlay_.bitmap_rectangle(bounds);
     const SDL_Rect panel {bounds.x, bounds.y, bounds.width, bounds.height};
-    const SDL_Rect source {0, 0, bounds.width, bounds.height};
+    const SDL_Rect source {bitmap.x, bitmap.y, bitmap.width, bitmap.height};
     SDL_RenderCopy(renderer, statisticsTexture_, &source, &panel);
   }
 

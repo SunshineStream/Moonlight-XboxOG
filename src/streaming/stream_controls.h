@@ -82,6 +82,11 @@ namespace streaming {
      */
     void close();
     /**
+     * @brief Drop a cached panel before changing video modes while preserving its input state.
+     * @param backend Presentation owner of the shared panel raster.
+     */
+    void invalidate_panel(FfmpegStreamBackend &backend);
+    /**
      * @brief Open a controller in the lowest free local slot.
      * @param deviceIndex SDL joystick index.
      */
@@ -183,14 +188,16 @@ namespace streaming {
      */
     void refresh_overlay(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool wasVisible, bool screenshotChanged, bool stats);
     /**
-     * @brief Draw cached colored controls with an opaque OSK and a translucent wheel backdrop.
+     * @brief Draw cached colored controls with a bounded raster for 1080i.
      * @param backend Video backend.
      * @param font Menu font.
      * @param width Output width.
      * @param height Output height.
      * @param stats Current statistics toggle.
+     * @param scale Output pixels per raster sample, chosen before letterboxing.
+     * @return True if the panel is ready to display.
      */
-    void render_menu(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool stats);
+    bool render_menu(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool stats, int scale);
     /**
      * @brief Draw a compact screenshot progress or completion popup without capturing host input.
      * @param backend Shared GPU/software overlay owner.
@@ -256,20 +263,20 @@ namespace streaming {
     void render_exit_confirmation(SDL_Renderer *renderer, TTF_Font *font, int width, int height);
     /**
      * @brief Allocate panel geometry when needed and enforce the raster cache budget.
+     * @param backend Presentation owner of the previous raster.
      * @param width Panel width.
      * @param height Panel height.
      * @return True when a panel renderer is available.
      */
-    bool prepare_panel(int width, int height);
+    bool prepare_panel(FfmpegStreamBackend &backend, int width, int height);
     /**
      * @brief Publish changed panel regions through the shared GPU and software overlay.
      * @param backend Overlay backend.
-     * @param width Panel width.
-     * @param height Panel height.
      * @param keyboard Opaque docked keyboard placement.
      * @param focusOnly Publish only damaged regions.
+     * @param scale Output pixels per raster sample.
      */
-    void publish_panel(FfmpegStreamBackend &backend, int width, int height, bool keyboard, bool focusOnly) const;
+    void publish_panel(FfmpegStreamBackend &backend, bool keyboard, bool focusOnly, int scale) const;
     /**
      * @brief Draw the keyboard, optionally repainting only the old and new focus cells.
      * @param renderer Software panel renderer.
@@ -485,7 +492,7 @@ namespace streaming {
       int height = 0;  ///< Last video rectangle height used for local controls.
       Uint32 logRefreshTick = 0;  ///< Last live log refresh.
       std::map<std::pair<std::string, int>, std::shared_ptr<SDL_Surface>> icons;  ///< Cached SVG rasters survive panel renderer replacement.
-      std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface {nullptr, &SDL_FreeSurface};  ///< Retained software composition target.
+      std::shared_ptr<SDL_Surface> surface;  ///< Software composition target shared with the presentation backend.
       std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer {nullptr, &SDL_DestroyRenderer};  ///< Renderer reused at a stable panel size.
       std::map<std::tuple<TTF_Font *, std::string, int, Uint32>, CachedText> text;  ///< Bounded cache of unchanged label rasters.
       std::size_t textBytes = 0;  ///< Estimated text texture bytes, bounded to protect the Xbox memory budget.

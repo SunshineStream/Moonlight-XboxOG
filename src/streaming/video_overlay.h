@@ -4,6 +4,9 @@
  */
 #pragma once
 
+// standard includes
+#include <memory>
+
 // local includes
 #include "src/streaming/video_acceleration.h"
 
@@ -78,12 +81,21 @@ namespace streaming {
    * @brief Placement of a shared panel inside the presented video rectangle.
    */
   enum class VideoOverlayPlacement {
-    top_left,  ///< Statistics and full-menu placement.
+    top_left,  ///< Statistics with the legacy safe-area inset.
     bottom_center,  ///< Centered bottom panel with the legacy safe-area inset.
     dock_bottom,  ///< Centered keyboard flush with the bottom edge.
     dock_top,  ///< Centered keyboard flush with the top edge.
     full_screen,  ///< Full-stream overlay without an inset.
   };
+
+  /**
+   * @brief Choose the controls raster scale for the active output height.
+   * @param height Output height in pixels.
+   * @return Pixels per raster sample. A 1080i panel uses a half-size raster to fit alongside GPU video.
+   */
+  constexpr int controls_raster_scale(int height) {
+    return height >= 1080 ? 2 : 1;
+  }
 
   /**
    * @brief Colored UI or grayscale statistics with a shared anchor for every presentation path.
@@ -124,6 +136,28 @@ namespace streaming {
      */
     bool set_argb_surface(int width, int height, const std::uint8_t *pixels, std::size_t capacity, int pitch, VideoOverlayPlacement placement, bool opaqueBackground = false);
     /**
+     * @brief Share a tightly packed premultiplied SDL panel without allocating a second color bitmap.
+     *
+     * Publish only completed raster updates on the presentation thread. The owner must
+     * report affected rectangles before drawing against mutated pixels.
+     *
+     * @param width Source width in pixels.
+     * @param height Source height in pixels.
+     * @param pixels Shared owner aliased to the first B, G, R, A byte.
+     * @param capacity Accessible source byte count.
+     * @param placement Panel anchor inside the video rectangle.
+     * @param opaqueBackground Source was rendered onto an opaque panel.
+     * @param scale Output pixels per raster pixel, either one or two.
+     * @return False for invalid source storage, preserving the previous overlay.
+     */
+    bool share_argb_surface(int width, int height, std::shared_ptr<const std::uint8_t> pixels, std::size_t capacity, VideoOverlayPlacement placement, bool opaqueBackground, int scale = 1);
+    /**
+     * @brief Refresh the converted part of a shared surface after an in-place repaint.
+     * @param region Updated rectangle in panel pixels.
+     * @return True for a valid repaint of a shared panel.
+     */
+    bool update_shared_argb_surface(const VideoRectangle &region);
+    /**
      * @brief Replace a bounded part of an existing colored panel without scanning or copying unchanged pixels.
      * @param region Rectangle in panel pixels; must be wholly inside the current panel.
      * @param pixels Tightly packed straight B, G, R, A bytes for the region.
@@ -136,6 +170,12 @@ namespace streaming {
      * @return Anchored panel rectangle, empty when the panel or available area is empty.
      */
     VideoRectangle rectangle(const VideoRectangle &destination) const;
+    /**
+     * @brief Resolve the source crop for an already clipped output panel.
+     * @param panel Panel bounds returned by rectangle, in output pixels.
+     * @return Visible bitmap bounds before scaling.
+     */
+    VideoRectangle bitmap_rectangle(const VideoRectangle &panel) const;
     /**
      * @brief Get the panel width.
      *
@@ -155,6 +195,14 @@ namespace streaming {
      */
     const std::vector<std::uint8_t> &argb_pixels();
     /**
+     * @brief Write straight ARGB directly into a locked SDL texture region.
+     * @param region Source rectangle in the panel.
+     * @param pixels Destination address at the first pixel of the locked region.
+     * @param pitch Destination row stride in bytes.
+     * @return False for an invalid region or destination.
+     */
+    bool copy_argb_region(const VideoRectangle &region, std::uint8_t *pixels, int pitch) const;
+    /**
      * @brief Alpha-composite the panel into a validated packed YUY2 frame before GPU submission.
      *
      * Luma uses per-pixel coverage; shared chroma uses the mean coverage of each pixel pair.
@@ -165,7 +213,7 @@ namespace streaming {
      * @param frameHeight Frame height.
      * @param destination Output video rectangle controlling panel scale.
      * @param matrix Host video's color matrix used to encode UI colors.
-     * @return True when the panel was copied or is empty.
+     * @return True when the panel was copied or is empty. False for invalid storage or insufficient memory.
      */
     bool draw_yuy2(std::uint8_t *pixels, std::size_t capacity, int pitch, int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix = VideoColorMatrix::bt601);
     /**
@@ -194,7 +242,7 @@ namespace streaming {
      * @param destination Output video rectangle.
      * @param matrix Host color matrix.
      * @param rebuild Receives whether geometry or matrix changed.
-     * @return False when no overlay pixels are visible.
+     * @return False when the converted overlay cannot be allocated.
      */
     bool prepare_yuy2(int frameWidth, int frameHeight, const VideoRectangle &destination, VideoColorMatrix matrix, bool &rebuild);
     /**
@@ -209,11 +257,10 @@ namespace streaming {
     void convert_yuy2_pair(int row, int column, int bitmapRow, int firstBitmapColumn, int secondBitmapColumn, VideoColorMatrix matrix);
     /**
      * @brief Refresh only damaged YUY2 cache rows and columns.
-     * @param destination Output video rectangle.
      * @param matrix Host color matrix.
      * @param rebuild True to convert the entire overlay.
      */
-    void update_yuy2(const VideoRectangle &destination, VideoColorMatrix matrix, bool rebuild);
+    void update_yuy2(VideoColorMatrix matrix, bool rebuild);
     /**
      * @brief Blend the prepared YUY2 cache into validated framebuffer storage.
      * @param pixels Framebuffer storage.
@@ -232,6 +279,17 @@ namespace streaming {
      */
     void invalidate_caches();
     /**
+     * @brief Check whether a repaint rectangle fits wholly inside the panel.
+     * @param region Proposed repaint.
+     * @return True when a nonempty rectangle fits.
+     */
+    bool contains_region(const VideoRectangle &region) const;
+    /**
+     * @brief Merge a bounded repaint into the area due for conversion.
+     * @param region Bounded repaint rectangle.
+     */
+    void mark_damage(const VideoRectangle &region);
+    /**
      * @brief Convert source colors only when the software framebuffer's pixel depth changes.
      *
      * @param bpp RGB pixel depth.
@@ -239,16 +297,22 @@ namespace streaming {
     void prepare_rgb(int bpp);
     int width_ = 0;  ///< Packed panel width.
     int height_ = 0;  ///< Packed panel height.
+    int scale_ = 1;  ///< Output pixels per raster pixel.
     VideoOverlayPlacement placement_ = VideoOverlayPlacement::top_left;  ///< Panel anchor shared by SDL, RGB and YUY2 paths.
     VideoRectangle damage_ {};  ///< Pending source-pixel changes; only affected YUY2 pairs need reconversion.
     std::vector<std::uint8_t> grayscale_;  ///< Unpremultiplied font and UI colors.
     std::vector<std::uint8_t> opacity_;  ///< Optional source coverage; empty for legacy opaque statistics.
     std::vector<std::uint8_t> argb_;  ///< Original straight ARGB UI colors; empty for grayscale statistics.
+    std::shared_ptr<const std::uint8_t> sharedArgb_;  ///< Tightly packed premultiplied panel kept alive by its raster owner.
     bool opaque_ = true;  ///< Fully opaque panels use row-copy presentation paths.
     std::vector<std::uint8_t> rgb_;  ///< Cached RGB panel.
     int rgbBpp_ = 0;  ///< Pixel format of the RGB cache.
-    std::vector<std::uint8_t> yuy2_;  ///< Cached source-resolution panel for scanout scaling.
-    std::vector<std::uint8_t> yuy2Opacity_;  ///< Coverage scaled with the packed GPU panel.
+    std::unique_ptr<std::uint8_t[]> yuy2_;  ///< Packed GPU panel followed by its optional coverage plane.
+    std::size_t yuy2Capacity_ = 0;  ///< Allocated bytes shared by the packed colors and coverage.
+    bool sharedCoverage_ = false;  ///< Read coverage directly from the retained raster.
+    bool repeatCacheRows_ = false;  ///< At 2x presentation, each cached row serves two output rows.
+    int cacheHeight_ = 0;  ///< Number of rows physically stored in the YUY2 cache.
+    VideoRectangle bitmapBounds_ {};  ///< Visible source raster used by the YUY2 cache.
     VideoRectangle source_ {};  ///< Panel bounds in source luma pixels.
     int frameWidth_ = 0;  ///< Source width used by the YUY2 cache.
     int frameHeight_ = 0;  ///< Source height used by the YUY2 cache.

@@ -1,0 +1,47 @@
+diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
+--- a/lib/pbkit/pbkit.c
++++ b/lib/pbkit/pbkit.c
+@@ -2210,6 +2210,6 @@ static inline void pb_calc_ptimer_param (uint32_t nvclk, uint32_t *denominator,
+ }
+ 
+-int pb_init(void)
++static int pb_init_with_color_buffers(bool static_scanout)
+ {
+     DWORD           old;
+ 
+@@ -2927,8 +2927,8 @@ int pb_init(void)
+     Width=vm.width;
+     Height=vm.height;
+ 
+-    BackBufferCount=2;          //triple buffering technic!
+-                        //allows dynamic details adjustment
++    // PVIDEO presents independently of the background; it never flips color buffers.
++    BackBufferCount=static_scanout ? 0 : 2;
+ 
+     pb_FrameBuffersCount=BackBufferCount+1; //front buffer + back buffers
+     pb_FrameBuffersWidth=Width;
+@@ -3274,7 +3274,7 @@ int pb_init(void)
+     memset((DWORD *)pb_FBAddr[0],0,pb_FBSize);
+     memset((DWORD *)pb_DSAddr,0,pb_DSSize);
+ 
+-    pb_back_index=1;        //frame buffer #1 is the back buffer for now
++    pb_back_index=static_scanout ? 0 : 1;
+     pb_target_back_buffer();    //tells GPU what is the frame buffer target
+ 
+     pb_front_index=0;       //frame buffer #0 is the front buffer for now
+@@ -3287,5 +3287,15 @@ int pb_init(void)
+     return 0;
+ }
+ 
++int pb_init(void)
++{
++    return pb_init_with_color_buffers(false);
++}
++
++int moonlight_pb_init_static_scanout(void)
++{
++    return pb_init_with_color_buffers(true);
++}
++
+ static NTAPI VOID pb_shutdown_notification_routine (PHAL_SHUTDOWN_REGISTRATION ShutdownRegistration)
+ {
