@@ -5,7 +5,7 @@
 #pragma once
 
 // lib includes
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 namespace input {
   /**
@@ -17,5 +17,5 @@ namespace input {
    * @param controller Owned menu controller reference to preserve or replace; null is ignored.
    * @return True when the owned menu reference changed, so the caller can reset stale gamepad holds.
    */
-  bool recover_shell_controller(SDL_GameController **controller);
+  bool recover_shell_controller(SDL_Gamepad **controller);
 }  // namespace input

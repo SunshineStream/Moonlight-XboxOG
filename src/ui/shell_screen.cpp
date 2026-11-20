@@ -20,9 +20,9 @@
 #include <vector>
 
 // lib includes
-#include <SDL.h>
-#include <SDL_image.h>
-#include <SDL_ttf.h>
+#include <SDL3/SDL.h>
+#include <SDL3_image/SDL_image.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 // nxdk includes
 #include <hal/debug.h>
@@ -51,6 +51,7 @@
 #include "src/ui/dialog_surface.h"
 #include "src/ui/host_probe_result_queue.h"
 #include "src/ui/screenshot_image.h"
+#include "src/ui/sdl_render.h"
 #include "src/ui/shell_layout.h"
 #include "src/ui/shell_view.h"
 #include "src/ui/svg_assets.h"
@@ -114,6 +115,27 @@ namespace {
   }
 
   /**
+   * @brief Start a worker with enough stack for the synchronous TLS handshake.
+   * @param function SDL thread entry point.
+   * @param name Diagnostic thread name.
+   * @param stackSize Requested stack size in bytes.
+   * @param context Entry point userdata.
+   * @return Owned SDL thread, or null on failure.
+   */
+  SDL_Thread *create_pairing_thread(SDL_ThreadFunction function, const char *name, Sint64 stackSize, void *context) {
+    const SDL_PropertiesID properties = SDL_CreateProperties();
+    if (properties == 0) {
+      return nullptr;
+    }
+    SDL_Thread *thread = nullptr;
+    if (SDL_SetPointerProperty(properties, SDL_PROP_THREAD_CREATE_ENTRY_FUNCTION_POINTER, reinterpret_cast<void *>(function)) && SDL_SetStringProperty(properties, SDL_PROP_THREAD_CREATE_NAME_STRING, name) && SDL_SetNumberProperty(properties, SDL_PROP_THREAD_CREATE_STACKSIZE_NUMBER, stackSize) && SDL_SetPointerProperty(properties, SDL_PROP_THREAD_CREATE_USERDATA_POINTER, context)) {
+      thread = SDL_CreateThreadWithProperties(properties);
+    }
+    SDL_DestroyProperties(properties);
+    return thread;
+  }
+
+  /**
    * @brief Build an asset texture cache key, including raster dimensions for size-aware SVG textures.
    *
    * @param relativePath Asset path relative to `DATA_PATH/assets`.
@@ -139,15 +161,15 @@ namespace {
       return nullptr;
     }
 
-    SDL_Surface *normalizedSurface = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ARGB8888, 0);
+    SDL_Surface *normalizedSurface = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_ARGB8888);
     if (normalizedSurface == nullptr) {
-      SDL_FreeSurface(surface);
+      SDL_DestroySurface(surface);
       return nullptr;
     }
 
-    SDL_FreeSurface(surface);
-    if (SDL_SetSurfaceBlendMode(normalizedSurface, SDL_BLENDMODE_BLEND) != 0) {
-      SDL_FreeSurface(normalizedSurface);
+    SDL_DestroySurface(surface);
+    if (!SDL_SetSurfaceBlendMode(normalizedSurface, SDL_BLENDMODE_BLEND)) {
+      SDL_DestroySurface(normalizedSurface);
       return nullptr;
     }
 
@@ -160,16 +182,19 @@ namespace {
 
   SDL_Texture *load_texture_from_asset(SDL_Renderer *renderer, const char *relativePath, int maxWidth, int maxHeight);
 
-  SDL_Texture *create_texture_from_surface_with_scale_quality(SDL_Renderer *renderer, SDL_Surface *surface, const char *scaleQualityHint) {
-    if (renderer == nullptr || surface == nullptr || scaleQualityHint == nullptr) {
+  /**
+   * @brief Upload a texture with the filter appropriate for its artwork.
+   * @param renderer Active shell renderer.
+   * @param surface Decoded artwork.
+   * @param scaleMode Texture sampling mode.
+   * @return Owned texture, or null on failure.
+   */
+  SDL_Texture *create_asset_texture(SDL_Renderer *renderer, SDL_Surface *surface, SDL_ScaleMode scaleMode) {
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (texture != nullptr && !SDL_SetTextureScaleMode(texture, scaleMode)) {
+      SDL_DestroyTexture(texture);
       return nullptr;
     }
-
-    const char *previousHint = SDL_GetHint(SDL_HINT_RENDER_SCALE_QUALITY);
-    const std::string previousHintValue = previousHint == nullptr ? std::string {} : std::string(previousHint);
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, scaleQualityHint);
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, previousHintValue.empty() ? "0" : previousHintValue.c_str());
     return texture;
   }
 
@@ -193,20 +218,20 @@ namespace {
 
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
     if (texture == nullptr) {
-      SDL_FreeSurface(surface);
+      SDL_DestroySurface(surface);
       return false;
     }
 
     SDL_Rect destination {x, y, surface->w, surface->h};
-    SDL_FreeSurface(surface);
-    const int renderResult = SDL_RenderCopy(renderer, texture, nullptr, &destination);
+    SDL_DestroySurface(surface);
+    const bool rendered = ui::render_texture(renderer, texture, nullptr, &destination);
     destroy_texture(texture);
 
     if (drawnHeight != nullptr) {
       *drawnHeight = destination.h;
     }
 
-    return renderResult == 0;
+    return rendered;
   }
 
   /**
@@ -539,20 +564,20 @@ namespace {
       return nullptr;
     }
 
-    SDL_RWops *rw = SDL_RWFromConstMem(loadResult.bytes.data(), static_cast<int>(loadResult.bytes.size()));
+    SDL_IOStream *rw = SDL_IOFromConstMem(loadResult.bytes.data(), loadResult.bytes.size());
     if (rw == nullptr) {
       cache->failedKeys[cacheKey] = true;
       return nullptr;
     }
 
-    SDL_Surface *surface = IMG_Load_RW(rw, 1);
+    SDL_Surface *surface = IMG_Load_IO(rw, true);
     if (surface == nullptr) {
       cache->failedKeys[cacheKey] = true;
       return nullptr;
     }
 
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
     if (texture == nullptr) {
       cache->failedKeys[cacheKey] = true;
       return nullptr;
@@ -590,8 +615,8 @@ namespace {
       return nullptr;
     }
 
-    SDL_Texture *texture = create_texture_from_surface_with_scale_quality(renderer, surface, asset_path_is_svg_icon(relativePath) ? "0" : "1");
-    SDL_FreeSurface(surface);
+    SDL_Texture *texture = create_asset_texture(renderer, surface, asset_path_is_svg_icon(relativePath) ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
+    SDL_DestroySurface(surface);
     return texture;
   }
 
@@ -621,12 +646,12 @@ namespace {
 
   void fill_rect(SDL_Renderer *renderer, const SDL_Rect &rect, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha = 0xFF) {
     SDL_SetRenderDrawColor(renderer, red, green, blue, alpha);
-    SDL_RenderFillRect(renderer, &rect);
+    ui::fill_rect(renderer, rect);
   }
 
   void draw_rect(SDL_Renderer *renderer, const SDL_Rect &rect, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha = 0xFF) {
     SDL_SetRenderDrawColor(renderer, red, green, blue, alpha);
-    SDL_RenderDrawRect(renderer, &rect);
+    ui::draw_rect(renderer, rect);
   }
 
   /**
@@ -741,12 +766,12 @@ namespace {
     const std::string renderText = sanitize_text_for_render(text);
     if (renderText.empty()) {
       if (drawnHeight != nullptr) {
-        *drawnHeight = TTF_FontLineSkip(font);
+        *drawnHeight = TTF_GetFontLineSkip(font);
       }
       return true;
     }
 
-    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(font, renderText.c_str(), color, static_cast<Uint32>(maxWidth));
+    SDL_Surface *surface = TTF_RenderText_Blended_Wrapped(font, renderText.c_str(), 0, color, static_cast<Uint32>(maxWidth));
     if (surface == nullptr) {
       return false;
     }
@@ -772,18 +797,18 @@ namespace {
     if (rect.w <= 0 || rect.h <= 0 || text.empty()) {
       return true;
     }
-    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(font, sanitize_text_for_render(text).c_str(), color, static_cast<Uint32>(rect.w));
+    SDL_Surface *surface = TTF_RenderText_Blended_Wrapped(font, sanitize_text_for_render(text).c_str(), 0, color, static_cast<Uint32>(rect.w));
     if (surface == nullptr) {
       return false;
     }
     const SDL_Rect source {0, 0, surface->w, std::min(surface->h, rect.h)};
     const SDL_Rect destination {rect.x, rect.y, source.w, source.h};
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
     if (texture == nullptr) {
       return false;
     }
-    const bool success = SDL_RenderCopy(renderer, texture, &source, &destination) == 0;
+    const bool success = ui::render_texture(renderer, texture, &source, &destination);
     destroy_texture(texture);
     if (drawnHeight != nullptr) {
       *drawnHeight = source.h;
@@ -803,14 +828,14 @@ namespace {
 
     int textWidth = 0;
     int textHeight = 0;
-    if (TTF_SizeText(font, sanitized.c_str(), &textWidth, &textHeight) == 0 && textWidth <= maxWidth) {
+    if (TTF_GetStringSize(font, sanitized.c_str(), 0, &textWidth, &textHeight) && textWidth <= maxWidth) {
       return sanitized;
     }
 
     const std::string ellipsis = "...";
     for (std::size_t length = sanitized.size(); length > 0U; --length) {
       const std::string candidate = sanitize_ascii_text_for_render(std::string_view(sanitized).substr(0, length)) + ellipsis;
-      if (TTF_SizeText(font, candidate.c_str(), &textWidth, &textHeight) == 0 && textWidth <= maxWidth) {
+      if (TTF_GetStringSize(font, candidate.c_str(), 0, &textWidth, &textHeight) && textWidth <= maxWidth) {
         return candidate;
       }
     }
@@ -838,12 +863,12 @@ namespace {
     const std::string renderText = fit_single_line_text(font, text, maxWidth);
     if (renderText.empty()) {
       if (drawnHeight != nullptr) {
-        *drawnHeight = TTF_FontLineSkip(font);
+        *drawnHeight = TTF_GetFontLineSkip(font);
       }
       return true;
     }
 
-    SDL_Surface *surface = TTF_RenderText_Blended(font, renderText.c_str(), color);
+    SDL_Surface *surface = TTF_RenderText_Blended(font, renderText.c_str(), 0, color);
     if (surface == nullptr) {
       return false;
     }
@@ -889,25 +914,25 @@ namespace {
     cache->maxWidth = maxWidth;
     cache->color = color;
     cache->wrapped = true;
-    cache->height = renderText.empty() ? TTF_FontLineSkip(font) : 0;
+    cache->height = renderText.empty() ? TTF_GetFontLineSkip(font) : 0;
 
     if (renderText.empty()) {
       return true;
     }
 
-    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(font, renderText.c_str(), color, static_cast<Uint32>(maxWidth));
+    SDL_Surface *surface = TTF_RenderText_Blended_Wrapped(font, renderText.c_str(), 0, color, static_cast<Uint32>(maxWidth));
     if (surface == nullptr) {
-      cache->height = TTF_FontLineSkip(font);
+      cache->height = TTF_GetFontLineSkip(font);
       return false;
     }
 
     cache->width = surface->w;
     cache->height = surface->h;
     cache->texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
     if (cache->texture == nullptr) {
       cache->width = 0;
-      cache->height = TTF_FontLineSkip(font);
+      cache->height = TTF_GetFontLineSkip(font);
       return false;
     }
 
@@ -952,25 +977,25 @@ namespace {
     cache->maxWidth = maxWidth;
     cache->color = color;
     cache->wrapped = false;
-    cache->height = renderText.empty() ? TTF_FontLineSkip(font) : 0;
+    cache->height = renderText.empty() ? TTF_GetFontLineSkip(font) : 0;
 
     if (renderText.empty()) {
       return true;
     }
 
-    SDL_Surface *surface = TTF_RenderText_Blended(font, renderText.c_str(), color);
+    SDL_Surface *surface = TTF_RenderText_Blended(font, renderText.c_str(), 0, color);
     if (surface == nullptr) {
-      cache->height = TTF_FontLineSkip(font);
+      cache->height = TTF_GetFontLineSkip(font);
       return false;
     }
 
     cache->width = surface->w;
     cache->height = surface->h;
     cache->texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
     if (cache->texture == nullptr) {
       cache->width = 0;
-      cache->height = TTF_FontLineSkip(font);
+      cache->height = TTF_GetFontLineSkip(font);
       return false;
     }
 
@@ -996,7 +1021,7 @@ namespace {
     }
 
     const SDL_Rect destination {x, y, cache.width, cache.height};
-    const bool rendered = SDL_RenderCopy(renderer, cache.texture, nullptr, &destination) == 0;
+    const bool rendered = ui::render_texture(renderer, cache.texture, nullptr, &destination);
     if (drawnHeight != nullptr) {
       *drawnHeight = cache.height;
     }
@@ -1026,7 +1051,7 @@ namespace {
       cache.width,
       cache.height,
     };
-    const bool rendered = SDL_RenderCopy(renderer, cache.texture, nullptr, &destination) == 0;
+    const bool rendered = ui::render_texture(renderer, cache.texture, nullptr, &destination);
     if (drawnHeight != nullptr) {
       *drawnHeight = cache.height;
     }
@@ -1044,14 +1069,14 @@ namespace {
     const std::string renderText = fit_single_line_text(font, text, rect.w);
     if (renderText.empty()) {
       if (drawnHeight != nullptr) {
-        *drawnHeight = TTF_FontLineSkip(font);
+        *drawnHeight = TTF_GetFontLineSkip(font);
       }
       return true;
     }
 
     int textWidth = 0;
     int textHeight = 0;
-    if (TTF_SizeText(font, renderText.c_str(), &textWidth, &textHeight) != 0) {
+    if (!TTF_GetStringSize(font, renderText.c_str(), 0, &textWidth, &textHeight)) {
       return render_text_line_simple(renderer, font, renderText, color, rect.x + 8, rect.y + 8, std::max(1, rect.w - 16), drawnHeight);
     }
 
@@ -1067,16 +1092,16 @@ namespace {
 
     const std::string renderText = sanitize_text_for_render(text);
     if (renderText.empty()) {
-      return TTF_FontLineSkip(font);
+      return TTF_GetFontLineSkip(font);
     }
 
-    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(font, renderText.c_str(), {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, static_cast<Uint32>(maxWidth));
+    SDL_Surface *surface = TTF_RenderText_Blended_Wrapped(font, renderText.c_str(), 0, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, static_cast<Uint32>(maxWidth));
     if (surface == nullptr) {
-      return TTF_FontLineSkip(font);
+      return TTF_GetFontLineSkip(font);
     }
 
     const int height = surface->h;
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
     return height;
   }
 
@@ -1144,7 +1169,7 @@ namespace {
   ) {
     int textWidth = 0;
     int textHeight = 0;
-    if (TTF_SizeUTF8(font, text.c_str(), &textWidth, &textHeight) != 0) {
+    if (!TTF_GetStringSize(font, text.c_str(), 0, &textWidth, &textHeight)) {
       return render_text_line(renderer, font, text, color, rect.x + 8, rect.y + 8, rect.w - 16, drawnHeight);
     }
 
@@ -1166,15 +1191,15 @@ namespace {
       return false;
     }
 
-    int textureWidth = 0;
-    int textureHeight = 0;
-    if (SDL_QueryTexture(texture, nullptr, nullptr, &textureWidth, &textureHeight) != 0 || textureWidth <= 0 || textureHeight <= 0) {
+    float width = 0;
+    float height = 0;
+    if (!SDL_GetTextureSize(texture, &width, &height) || width <= 0 || height <= 0) {
       return false;
     }
 
-    const SDL_Rect destination = sdl_rect(ui::fit_screenshot({textureWidth, textureHeight}, {rect.x, rect.y, rect.w, rect.h}));
+    const SDL_Rect destination = sdl_rect(ui::fit_screenshot({static_cast<int>(width), static_cast<int>(height)}, {rect.x, rect.y, rect.w, rect.h}));
 
-    return SDL_RenderCopy(renderer, texture, nullptr, &destination) == 0;
+    return ui::render_texture(renderer, texture, nullptr, &destination);
   }
 
   bool render_texture_fill(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_Rect &rect) {
@@ -1182,12 +1207,14 @@ namespace {
       return false;
     }
 
-    int textureWidth = 0;
-    int textureHeight = 0;
-    if (SDL_QueryTexture(texture, nullptr, nullptr, &textureWidth, &textureHeight) != 0 || textureWidth <= 0 || textureHeight <= 0) {
+    float width = 0;
+    float height = 0;
+    if (!SDL_GetTextureSize(texture, &width, &height) || width <= 0 || height <= 0) {
       return false;
     }
 
+    const int textureWidth = static_cast<int>(width);
+    const int textureHeight = static_cast<int>(height);
     SDL_Rect source {0, 0, textureWidth, textureHeight};
     if ((textureWidth * rect.h) > (textureHeight * rect.w)) {
       source.w = std::max(1, (textureHeight * rect.w) / rect.h);
@@ -1197,7 +1224,7 @@ namespace {
       source.y = std::max(0, (textureHeight - source.h) / 2);
     }
 
-    return SDL_RenderCopy(renderer, texture, &source, &rect) == 0;
+    return ui::render_texture(renderer, texture, &source, &rect);
   }
 
   /**
@@ -1216,7 +1243,8 @@ namespace {
       return false;
     }
 
-    if (angle != 0.0 && SDL_RenderCopyEx(renderer, texture, nullptr, &rect, angle, nullptr, SDL_FLIP_NONE) == 0) {
+    const auto destination = ui::render_bounds(rect);
+    if (angle != 0.0 && SDL_RenderTextureRotated(renderer, texture, nullptr, &destination, angle, nullptr, SDL_FLIP_NONE)) {
       return true;
     }
 
@@ -1256,7 +1284,7 @@ namespace {
 
   void draw_line(SDL_Renderer *renderer, int x1, int y1, int x2, int y2, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha = 0xFF) {  // NOSONAR(cpp:S107) low-level draw helper intentionally mirrors SDL primitive arguments
     SDL_SetRenderDrawColor(renderer, red, green, blue, alpha);
-    SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+    SDL_RenderLine(renderer, x1, y1, x2, y2);
   }
 
   /**
@@ -1303,8 +1331,8 @@ namespace {
     }
     const std::string badge = tile.badgeLabel;
     if (!badge.empty()) {
-      const int badgeHeight = TTF_FontLineSkip(labelFont) + 8;
-      const int badgeWidth = std::min(rect.w - 12, static_cast<int>(badge.size()) * std::max(7, TTF_FontHeight(labelFont) / 2) + 16);
+      const int badgeHeight = TTF_GetFontLineSkip(labelFont) + 8;
+      const int badgeWidth = std::min(rect.w - 12, static_cast<int>(badge.size()) * std::max(7, TTF_GetFontHeight(labelFont) / 2) + 16);
       const SDL_Rect badgeRect {rect.x + 6, rect.y + 6, badgeWidth, badgeHeight};
       fill_rounded_rect(renderer, badgeRect, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xEF}, 4);
       if (!render_text_centered_simple(renderer, labelFont, badge, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, badgeRect)) {
@@ -1367,7 +1395,7 @@ namespace {
       if (!render_text_line_simple(renderer, smallFont, "Earlier lines above", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, textRect.x + 6, contentCursorY, std::max(1, textRect.w - 12))) {
         return false;
       }
-      contentCursorY += TTF_FontLineSkip(smallFont) + 4;
+      contentCursorY += TTF_GetFontLineSkip(smallFont) + 4;
     }
 
     if (layout.visibleLines.size() == 1U && layout.visibleLines.front() == nullptr) {
@@ -1385,7 +1413,7 @@ namespace {
     }
 
     if (viewModel.logViewer.scrollOffset > 0U) {
-      return render_text_line_simple(renderer, smallFont, "Newer lines below", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, textRect.x + 6, std::max(textRect.y + 6, textRect.y + textRect.h - TTF_FontLineSkip(smallFont) - 6), std::max(1, textRect.w - 12));
+      return render_text_line_simple(renderer, smallFont, "Newer lines below", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, textRect.x + 6, std::max(textRect.y + 6, textRect.y + textRect.h - TTF_GetFontLineSkip(smallFont) - 6), std::max(1, textRect.w - 12));
     }
     return true;
   }
@@ -1642,7 +1670,7 @@ namespace {
     }
     const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
     const int labelWidth = rowRect.x + rowRect.w - labelX - 12 - (row.checkable ? checkboxSize + 16 : 0);
-    const int labelY = rowRect.y + (rowRect.h - TTF_FontLineSkip(font)) / 2;
+    const int labelY = rowRect.y + (rowRect.h - TTF_GetFontLineSkip(font)) / 2;
     if (folder != nullptr) {
       auto &label = folder->labels[index];
       if (!ensure_single_line_text_texture(renderer, font, row.label, color, labelWidth, &label) || !render_cached_text_texture(renderer, label, labelX, labelY)) {
@@ -1721,7 +1749,7 @@ namespace {
       return false;
     }
 
-    return render_text_line_simple(renderer, smallFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, iconRect.x + iconRect.w + 8, buttonRect.y + std::max(6, (buttonRect.h - TTF_FontLineSkip(smallFont)) / 2), buttonRect.w - (iconRect.w + 26));
+    return render_text_line_simple(renderer, smallFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, iconRect.x + iconRect.w + 8, buttonRect.y + std::max(6, (buttonRect.h - TTF_GetFontLineSkip(smallFont)) / 2), buttonRect.w - (iconRect.w + 26));
   }
 
   /**
@@ -1740,7 +1768,7 @@ namespace {
 
   int measure_footer_action_label_width(TTF_Font *font, const std::string &label) {
     int labelWidth = 0;
-    if (int labelHeight = 0; TTF_SizeUTF8(font, label.c_str(), &labelWidth, &labelHeight) != 0) {
+    if (int labelHeight = 0; !TTF_GetStringSize(font, label.c_str(), 0, &labelWidth, &labelHeight)) {
       return static_cast<int>(label.size()) * 8;
     }
     return labelWidth;
@@ -1758,7 +1786,7 @@ namespace {
   FooterActionChipLayout measure_footer_action_chip(TTF_Font *font, const ui::ShellFooterAction &action, int chipHeight, bool compact) {
     FooterActionChipLayout layout;
     const bool keyboard = !action.keyLabel.empty() || !action.secondaryKeyLabel.empty();
-    layout.iconSize = keyboard ? std::max(18, TTF_FontHeight(font) + 6) : std::max(18, chipHeight - 14);
+    layout.iconSize = keyboard ? std::max(18, TTF_GetFontHeight(font) + 6) : std::max(18, chipHeight - 14);
     layout.primaryIconWidth = action.iconAssetPath.empty() ? 0 : layout.iconSize;
     if (!action.keyLabel.empty()) {
       layout.primaryIconWidth = measure_footer_action_label_width(font, action.keyLabel) + 12;
@@ -1784,7 +1812,7 @@ namespace {
    * @return Height including vertical padding and wrapped rows.
    */
   int measure_footer_actions_height(TTF_Font *font, const std::vector<ui::ShellFooterAction> &actions, int width, bool compact) {
-    const int chipHeight = std::max(30, TTF_FontLineSkip(font) + 12);
+    const int chipHeight = std::max(30, TTF_GetFontLineSkip(font) + 12);
     const int available = std::max(1, width - 32);
     const int gap = compact ? 6 : 12;
     int rows = 1;
@@ -1853,7 +1881,7 @@ namespace {
   ) {
     fill_rounded_rect(renderer, chipRect, {PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xFF}, 6);
     const int contentX = render_footer_action_icons(renderer, font, assetCache, action, chipRect, layout);
-    return render_text_line(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, contentX, chipRect.y + std::max(6, (chipRect.h - TTF_FontLineSkip(font)) / 2), chipRect.w - (contentX - chipRect.x) - layout.horizontalPadding);
+    return render_text_line(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, contentX, chipRect.y + std::max(6, (chipRect.h - TTF_GetFontLineSkip(font)) / 2), chipRect.w - (contentX - chipRect.x) - layout.horizontalPadding);
   }
 
   /**
@@ -1877,7 +1905,7 @@ namespace {
   ) {
     int cursorX = footerRect.x + 16;
     const int availableRight = footerRect.x + footerRect.w - 16;
-    const int chipHeight = std::max(30, TTF_FontLineSkip(font) + 12);
+    const int chipHeight = std::max(30, TTF_GetFontLineSkip(font) + 12);
     int cursorY = footerRect.y + std::max(0, std::min(8, (footerRect.h - chipHeight) / 2));
     for (const auto &action : actions) {
       auto layout = measure_footer_action_chip(font, action, chipHeight, compact);
@@ -1922,13 +1950,13 @@ namespace {
     }
     const int padding = 16;
     const int innerWidth = area.w - padding * 2;
-    const int titleHeight = TTF_FontLineSkip(titleFont);
+    const int titleHeight = TTF_GetFontLineSkip(titleFont);
     const int iconSize = std::max(20, titleHeight - 2);
-    const int actionHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 18);
+    const int actionHeight = std::max(36, TTF_GetFontLineSkip(bodyFont) + 18);
     std::vector<int> heights;
     for (std::size_t offset = 0; offset < std::min(notifications.size(), ui::MAX_VISIBLE_NOTIFICATIONS); ++offset) {
       const auto &notification = notifications[notifications.size() - offset - 1U];
-      const int messageHeight = std::min(measure_wrapped_text_height(bodyFont, notification.message, innerWidth), TTF_FontLineSkip(bodyFont) * 3);
+      const int messageHeight = std::min(measure_wrapped_text_height(bodyFont, notification.message, innerWidth), TTF_GetFontLineSkip(bodyFont) * 3);
       heights.push_back(28 + titleHeight + 8 + messageHeight + padding + (notification.actions.empty() ? 0 : actionHeight + 12));
     }
     const auto cards = ui::calculate_notification_stack({area.x, area.y, area.w, area.h}, heights);
@@ -1982,29 +2010,29 @@ namespace {
 
   input::UiCommand translate_controller_button(Uint8 button) {
     switch (button) {
-      case SDL_CONTROLLER_BUTTON_DPAD_UP:
+      case SDL_GAMEPAD_BUTTON_DPAD_UP:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::dpad_up);
-      case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+      case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::dpad_down);
-      case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+      case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::dpad_left);
-      case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+      case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::dpad_right);
-      case SDL_CONTROLLER_BUTTON_A:
+      case SDL_GAMEPAD_BUTTON_SOUTH:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::a);
-      case SDL_CONTROLLER_BUTTON_B:
+      case SDL_GAMEPAD_BUTTON_EAST:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::b);
-      case SDL_CONTROLLER_BUTTON_X:
+      case SDL_GAMEPAD_BUTTON_WEST:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::x);
-      case SDL_CONTROLLER_BUTTON_Y:
+      case SDL_GAMEPAD_BUTTON_NORTH:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::y);
-      case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+      case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::left_shoulder);
-      case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+      case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::right_shoulder);
-      case SDL_CONTROLLER_BUTTON_START:
+      case SDL_GAMEPAD_BUTTON_START:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::start);
-      case SDL_CONTROLLER_BUTTON_BACK:
+      case SDL_GAMEPAD_BUTTON_BACK:
         return input::map_gamepad_button_to_ui_command(input::GamepadButton::back);
       default:
         return input::UiCommand::none;
@@ -2012,7 +2040,7 @@ namespace {
   }
 
   input::UiCommand translate_keyboard_key(SDL_Keycode key, Uint16 modifiers) {
-    const bool shiftPressed = (modifiers & KMOD_SHIFT) != 0;
+    const bool shiftPressed = (modifiers & SDL_KMOD_SHIFT) != 0;
 
     switch (key) {
       case SDLK_UP:
@@ -2040,9 +2068,9 @@ namespace {
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::page_up, shiftPressed);
       case SDLK_PAGEDOWN:
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::page_down, shiftPressed);
-      case SDLK_i:
+      case SDLK_I:
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::i, shiftPressed);
-      case SDLK_m:
+      case SDLK_M:
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::m, shiftPressed);
       case SDLK_F3:
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::f3, shiftPressed);
@@ -2051,7 +2079,7 @@ namespace {
     }
   }
 
-  input::UiCommand translate_trigger_axis(const SDL_ControllerAxisEvent &event, bool *leftTriggerPressed, bool *rightTriggerPressed) {
+  input::UiCommand translate_trigger_axis(const SDL_GamepadAxisEvent &event, bool *leftTriggerPressed, bool *rightTriggerPressed) {
     if (leftTriggerPressed == nullptr || rightTriggerPressed == nullptr) {
       return input::UiCommand::none;
     }
@@ -2059,7 +2087,7 @@ namespace {
     const bool thresholdCrossed = event.value >= TRIGGER_PAGE_SCROLL_THRESHOLD;
 
     switch (event.axis) {
-      case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
+      case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:
         if (thresholdCrossed && !*leftTriggerPressed) {
           *leftTriggerPressed = true;
           return input::UiCommand::fast_previous_page;
@@ -2068,7 +2096,7 @@ namespace {
           *leftTriggerPressed = false;
         }
         break;
-      case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
+      case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER:
         if (thresholdCrossed && !*rightTriggerPressed) {
           *rightTriggerPressed = true;
           return input::UiCommand::fast_next_page;
@@ -2276,15 +2304,15 @@ namespace {
    * @param controller SDL game controller to inspect.
    * @return True when any navigation direction is still held.
    */
-  bool is_controller_navigation_active(SDL_GameController *controller) {
+  bool is_controller_navigation_active(SDL_Gamepad *controller) {
     if (controller == nullptr) {
       return false;
     }
 
-    const Sint16 leftStickX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
-    const Sint16 leftStickY = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
-    return SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_UP) != 0 || SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0 ||
-           SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0 || SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0 ||
+    const Sint16 leftStickX = SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTX);
+    const Sint16 leftStickY = SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTY);
+    return SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_DPAD_UP) || SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_DPAD_DOWN) ||
+           SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) ||
            leftStickY <= -LEFT_STICK_NAVIGATION_RELEASE_THRESHOLD || leftStickY >= LEFT_STICK_NAVIGATION_RELEASE_THRESHOLD || leftStickX <= -LEFT_STICK_NAVIGATION_RELEASE_THRESHOLD ||
            leftStickX >= LEFT_STICK_NAVIGATION_RELEASE_THRESHOLD;
   }
@@ -2315,7 +2343,7 @@ namespace {
   }
 
   input::UiCommand poll_controller_navigation(
-    SDL_GameController *controller,
+    SDL_Gamepad *controller,
     Uint32 now,
     ControllerNavigationHoldState *upState,
     ControllerNavigationHoldState *downState,
@@ -2327,12 +2355,12 @@ namespace {
       return input::UiCommand::none;
     }
 
-    const Sint16 leftStickX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
-    const Sint16 leftStickY = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
-    const bool moveUpActive = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_UP) != 0 || axis_value_is_negative_navigation_active(leftStickY, upState);
-    const bool moveDownActive = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0 || axis_value_is_positive_navigation_active(leftStickY, downState);
-    const bool moveLeftActive = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0 || axis_value_is_negative_navigation_active(leftStickX, leftState);
-    const bool moveRightActive = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0 || axis_value_is_positive_navigation_active(leftStickX, rightState);
+    const Sint16 leftStickX = SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTX);
+    const Sint16 leftStickY = SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTY);
+    const bool moveUpActive = SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_DPAD_UP) || axis_value_is_negative_navigation_active(leftStickY, upState);
+    const bool moveDownActive = SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_DPAD_DOWN) || axis_value_is_positive_navigation_active(leftStickY, downState);
+    const bool moveLeftActive = SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || axis_value_is_negative_navigation_active(leftStickX, leftState);
+    const bool moveRightActive = SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || axis_value_is_positive_navigation_active(leftStickX, rightState);
 
     if (const input::UiCommand command = update_controller_navigation_hold_state(moveUpActive, now, input::map_gamepad_axis_direction_to_ui_command(input::GamepadAxisDirection::left_stick_up), upState); command != input::UiCommand::none) {
       return command;
@@ -3235,7 +3263,7 @@ namespace {
     task->message.clear();
     task->serverInfo = {};
     task->completed.store(false);
-    task->thread = SDL_CreateThreadWithStackSize(run_connection_test_task, "test-host", PAIRING_THREAD_STACK_SIZE, task);
+    task->thread = create_pairing_thread(run_connection_test_task, "test-host", PAIRING_THREAD_STACK_SIZE, task);
     if (task->thread == nullptr) {
       app::apply_connection_test_result(state, false, "Unable to start the connection test. Please try again.");
       logging::warn("hosts", SDL_GetError());
@@ -3550,7 +3578,7 @@ namespace {
       {},
     };
 
-    attempt->thread = SDL_CreateThreadWithStackSize(run_pairing_task, "pair-host", PAIRING_THREAD_STACK_SIZE, attempt.get());
+    attempt->thread = create_pairing_thread(run_pairing_task, "pair-host", PAIRING_THREAD_STACK_SIZE, attempt.get());
     if (attempt->thread == nullptr) {
       reset_pairing_attempt(attempt.get());
       const std::string createThreadError = std::string("Failed to start the background pairing task: ") + SDL_GetError();
@@ -3894,14 +3922,10 @@ namespace {
     int panelPadding
   ) {
     const int innerWidth = bodyPanel.w - panelPadding * 2;
-    const int rowHeight = std::max(34, TTF_FontLineSkip(bodyFont) + 12);
+    const int rowHeight = std::max(34, TTF_GetFontLineSkip(bodyFont) + 12);
     const int innerHeight = bodyPanel.h - panelPadding * 2;
-    const auto layout = ui::calculate_settings_detail_layout({bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth, innerHeight}, TTF_FontLineSkip(smallFont));
-    // SDL 2.0.9's software command queue starts each flush without a viewport.
-    // A standalone SDL_RenderSetClipRect() after a text texture flush can assert
-    // in SW_RunCommandQueue. Crop text textures instead of changing render clips.
-    // Legacy SDL_ttf derives surface height from the actual glyphs, so measured
-    // numeric values must not determine the help or option-row positions.
+    const auto layout = ui::calculate_settings_detail_layout({bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth, innerHeight}, TTF_GetFontLineSkip(smallFont));
+    // Crop text to the layout bounds and keep option-row positions independent of glyph metrics.
     const bool success = render_text_line_simple(renderer, smallFont, viewModel.content.selectedMenuRowLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.title.x, layout.title.y, layout.title.w) &&
                          render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowDescription, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, sdl_rect(layout.description));
     draw_line(renderer, layout.optionsHeader.x, layout.optionsHeader.y - 10, layout.optionsHeader.x + layout.optionsHeader.w, layout.optionsHeader.y - 10, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
@@ -3929,7 +3953,7 @@ namespace {
   ) {
     const int gap = std::max(14, gridRect.w / 50);
     const int columns = std::max(1, static_cast<int>(viewModel.content.appColumnCount));
-    const int captionHeight = TTF_FontLineSkip(smallFont) + 14;
+    const int captionHeight = TTF_GetFontLineSkip(smallFont) + 14;
     const int preferredHeight = ((gridRect.w - gap * (columns - 1)) / columns) * 3 / 2 + captionHeight;
     const ui::ShellRect bounds {gridRect.x + 4, gridRect.y + 4, gridRect.w - 8, gridRect.h - 8};
     const auto grid = ui::calculate_shell_grid(bounds, viewModel.content.appTiles.size(), viewModel.content.appColumnCount, selected_app_tile_index(viewModel.content.appTiles), preferredHeight, gap);
@@ -3972,8 +3996,8 @@ namespace {
     for (std::size_t index = first; index < end; ++index) {
       const SDL_Rect card = sdl_rect(ui::shell_grid_cell(bounds, grid, index));
       const auto &tile = viewModel.content.hostTiles[index];
-      const int nameHeight = TTF_FontLineSkip(bodyFont);
-      const int statusHeight = TTF_FontLineSkip(smallFont);
+      const int nameHeight = TTF_GetFontLineSkip(bodyFont);
+      const int statusHeight = TTF_GetFontLineSkip(smallFont);
       const int nameY = card.y + card.h - nameHeight - statusHeight - 24;
       const int iconSize = std::max(24, std::min(card.w - 24, nameY - card.y - 8));
       const SDL_Rect icon {card.x + (card.w - iconSize) / 2, card.y + std::max(12, (nameY - card.y - iconSize) / 2), iconSize, iconSize};
@@ -4031,10 +4055,10 @@ namespace {
     const int padding = std::max(18, height / 40);
     const int dialogWidth = std::min(760, width * 3 / 4);
     const int innerWidth = dialogWidth - padding * 2;
-    const int statusIconSize = modal.iconAssetPath.empty() ? 0 : std::max(28, TTF_FontLineSkip(titleFont));
-    const int titleHeight = std::max(TTF_FontLineSkip(titleFont), statusIconSize) + 18;
-    const int footerHeight = std::max(40, TTF_FontLineSkip(smallFont) + 18);
-    const int rowHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 16);
+    const int statusIconSize = modal.iconAssetPath.empty() ? 0 : std::max(28, TTF_GetFontLineSkip(titleFont));
+    const int titleHeight = std::max(TTF_GetFontLineSkip(titleFont), statusIconSize) + 18;
+    const int footerHeight = std::max(40, TTF_GetFontLineSkip(smallFont) + 18);
+    const int rowHeight = std::max(36, TTF_GetFontLineSkip(bodyFont) + 16);
     const int lineGap = modal.compactBody ? 3 : 8;
     const int textHeight = measure_body_lines_height(smallFont, modal.lines, innerWidth, lineGap);
     const int actionsHeight = static_cast<int>(modal.actions.size()) * (rowHeight + 6);
@@ -4106,11 +4130,11 @@ namespace {
     const bool keyboardGeometry = viewModel.keypad.rowCount != 0;
     const int rows = keyboardGeometry ? static_cast<int>(viewModel.keypad.rowCount) : std::max(1, static_cast<int>((viewModel.keypad.buttons.size() + columns - 1) / columns));
     const int gap = 8;
-    const int titleHeight = TTF_FontLineSkip(bodyFont) + 14;
+    const int titleHeight = TTF_GetFontLineSkip(bodyFont) + 14;
     const int hintHeight = keypad_modal_text_height(renderer, smallFont, viewModel, innerWidth, cache);
-    const int valueHeight = TTF_FontLineSkip(bodyFont) + 20;
+    const int valueHeight = TTF_GetFontLineSkip(bodyFont) + 20;
     const int footerHeight = measure_footer_actions_height(smallFont, viewModel.keypad.footerActions, innerWidth + 12, true);
-    const int preferredKeyHeight = std::max(36, TTF_FontLineSkip(bodyFont) + 18);
+    const int preferredKeyHeight = std::max(36, TTF_GetFontLineSkip(bodyFont) + 18);
     const int desiredHeight = padding * 2 + 12 + titleHeight + hintHeight + valueHeight + 20 + rows * (preferredKeyHeight + gap) + footerHeight;
     const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, desiredHeight));
     fill_rect(renderer, {0, 0, width, height}, 0, 0, 0, 0xA0);
@@ -4129,7 +4153,7 @@ namespace {
     const SDL_Rect valueRect {bounds.x + padding, cursorY + 2, innerWidth, valueHeight};
     if (viewModel.keypad.segmentedAddress) {
       const int separatorWidth = 18;
-      const auto octets = ui::calculate_keypad_columns({valueRect.x, valueRect.y, valueRect.w, valueRect.h}, viewModel.keypad.addressOctets.size(), TTF_FontLineSkip(bodyFont) * 4, separatorWidth);
+      const auto octets = ui::calculate_keypad_columns({valueRect.x, valueRect.y, valueRect.w, valueRect.h}, viewModel.keypad.addressOctets.size(), TTF_GetFontLineSkip(bodyFont) * 4, separatorWidth);
       for (std::size_t index = 0; index < viewModel.keypad.addressOctets.size(); ++index) {
         const SDL_Rect octetRect = sdl_rect(octets[index]);
         render_card_surface(renderer, octetRect, index == viewModel.keypad.activeOctet);
@@ -4151,7 +4175,7 @@ namespace {
     const int keysY = valueRect.y + valueRect.h + 12;
     const int footerY = bounds.y + bounds.h - padding - footerHeight;
     const int keyHeight = std::max(1, (footerY - 12 - keysY - gap * (rows - 1)) / rows);
-    const auto keyColumns = ui::calculate_keypad_columns({bounds.x + padding, keysY, innerWidth, keyHeight}, static_cast<std::size_t>(columns), TTF_FontLineSkip(bodyFont) * 5, gap);
+    const auto keyColumns = ui::calculate_keypad_columns({bounds.x + padding, keysY, innerWidth, keyHeight}, static_cast<std::size_t>(columns), TTF_GetFontLineSkip(bodyFont) * 5, gap);
     if (cache->buttonLabelTextures.size() > viewModel.keypad.buttons.size()) {
       for (std::size_t index = viewModel.keypad.buttons.size(); index < cache->buttonLabelTextures.size(); ++index) {
         clear_cached_text_texture(&cache->buttonLabelTextures[index]);
@@ -4185,12 +4209,12 @@ namespace {
    */
   std::pair<Uint32, int> folder_framebuffer_format(int bpp) {
     if (bpp == 32) {
-      return {SDL_PIXELFORMAT_RGB888, 4};
+      return {SDL_PIXELFORMAT_XRGB8888, 4};
     }
     if (bpp == 16) {
       return {SDL_PIXELFORMAT_RGB565, 2};
     }
-    return {SDL_PIXELFORMAT_RGB555, bpp == 15 ? 2 : 0};
+    return {SDL_PIXELFORMAT_XRGB1555, bpp == 15 ? 2 : 0};
   }
 
   /**
@@ -4204,7 +4228,7 @@ namespace {
    */
   bool copy_folder_framebuffer(SDL_Surface &surface, std::uint8_t *framebuffer, const VIDEO_MODE &mode, const ui::ShellRect &area, int bytes) {
     const bool locked = SDL_MUSTLOCK(&surface) != 0;
-    if (locked && SDL_LockSurface(&surface) != 0) {
+    if (locked && !SDL_LockSurface(&surface)) {
       return false;
     }
     for (int y = area.y; y < area.y + area.h; ++y) {
@@ -4229,15 +4253,15 @@ namespace {
    */
   void present_folder_damage(SDL_Renderer *renderer, SDL_Window *window, const SDL_Rect &logicalDamage, int logicalWidth) {
 #ifdef NXDK
-    if (SDL_RendererInfo info {}; window != nullptr && SDL_GetRendererInfo(renderer, &info) == 0 && (info.flags & SDL_RENDERER_SOFTWARE) != 0) {
-      SDL_RenderFlush(renderer);
+    if (const char *name = SDL_GetRendererName(renderer); window != nullptr && name != nullptr && std::strcmp(name, SDL_SOFTWARE_RENDERER) == 0) {
+      SDL_FlushRenderer(renderer);
       SDL_Surface *surface = SDL_GetWindowSurface(window);
       const VIDEO_MODE mode = XVideoGetMode();
       void *framebuffer = XVideoGetFB();
       const auto [format, bytes] = folder_framebuffer_format(mode.bpp);
       // The Xbox software window surface uses the video mode's RGB format.
       // Validate that relationship before copying into write-combined scanout.
-      if (surface != nullptr && framebuffer != nullptr && bytes > 0 && surface->w == mode.width && surface->h == mode.height && surface->format->format == format && surface->format->BytesPerPixel == bytes && surface->pitch >= mode.width * bytes) {
+      if (surface != nullptr && framebuffer != nullptr && bytes > 0 && surface->w == mode.width && surface->h == mode.height && surface->format == format && surface->pitch >= mode.width * bytes) {
         const auto area = ui::framebuffer_repaint_rect({logicalDamage.x, logicalDamage.y, logicalDamage.w, logicalDamage.h}, logicalWidth, mode.width, mode.height);
         if (copy_folder_framebuffer(*surface, static_cast<std::uint8_t *>(framebuffer), mode, area, bytes)) {
           return;
@@ -4285,7 +4309,7 @@ namespace {
     }
     if (SDL_Surface *surface = SDL_LoadBMP(path.c_str()); surface != nullptr) {
       cache.texture = SDL_CreateTextureFromSurface(renderer, surface);
-      SDL_FreeSurface(surface);
+      SDL_DestroySurface(surface);
     }
     if (cache.texture == nullptr) {
       cache.error = "Cannot load the screenshot. Close the viewer and try again.";
@@ -4308,8 +4332,8 @@ namespace {
     load_screenshot_texture(renderer, view.screenshot.path, cache);
     const SDL_Color text {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
     const SDL_Color muted {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
-    const int heading = TTF_FontLineSkip(bodyFont) + 8;
-    const int caption = TTF_FontLineSkip(smallFont) + 6;
+    const int heading = TTF_GetFontLineSkip(bodyFont) + 8;
+    const int caption = TTF_GetFontLineSkip(smallFont) + 6;
     const int footer = measure_footer_actions_height(smallFont, view.modal.footerActions, bounds.w);
     const SDL_Rect picture {bounds.x, bounds.y + heading + caption, bounds.w, std::max(1, bounds.h - heading - caption * 2 - footer - 12)};
     if (!render_text_line_simple(renderer, bodyFont, view.modal.title, text, bounds.x, bounds.y, bounds.w) || !render_text_line_simple(renderer, smallFont, view.screenshot.caption, muted, bounds.x, bounds.y + heading, bounds.w)) {
@@ -4361,7 +4385,7 @@ namespace {
   ) {
     int framebufferWidth = 0;
     int framebufferHeight = 0;
-    if (SDL_GetRendererOutputSize(renderer, &framebufferWidth, &framebufferHeight) != 0 || framebufferWidth <= 0 || framebufferHeight <= 0) {
+    if (!SDL_GetCurrentRenderOutputSize(renderer, &framebufferWidth, &framebufferHeight) || framebufferWidth <= 0 || framebufferHeight <= 0) {
       return false;
     }
 
@@ -4369,7 +4393,8 @@ namespace {
     const int screenWidth = splash::calculate_display_width(screenHeight, videoMode, encoderSettings);
     const float horizontalScale = static_cast<float>(framebufferWidth) / static_cast<float>(screenWidth);
 
-    auto *folder = keypadModalLayoutCache != nullptr ? &keypadModalLayoutCache->folder : nullptr;
+    // Partial redraws depend on a retained window surface. The GPU renderer flips buffers.
+    auto *folder = keypadModalLayoutCache != nullptr && keypadModalLayoutCache->window != nullptr ? &keypadModalLayoutCache->folder : nullptr;
     const bool folderBrowser = viewModel.modal.visible && !viewModel.modal.busy && !viewModel.modal.actions.empty() && !viewModel.logViewer.visible && !viewModel.screenshot.visible && !viewModel.overlay.visible && !viewModel.keypad.visible;
     if (folder != nullptr) {
       if (const bool reusable = folderBrowser && folder->valid && folder->logicalWidth == screenWidth && folder->framebufferWidth == framebufferWidth && folder->framebufferHeight == framebufferHeight && folder->titleFont == titleFont && folder->bodyFont == bodyFont && folder->smallFont == smallFont && ui::same_action_dialog_content(folder->content, viewModel.modal); reusable) {
@@ -4377,7 +4402,7 @@ namespace {
         if (selected == folder->selected) {
           return true;
         }
-        SDL_RenderSetScale(renderer, horizontalScale, 1.0f);
+        SDL_SetRenderScale(renderer, horizontalScale, 1.0f);
         const auto oldFirst = folder->first;
         const auto oldSelected = folder->selected;
         const bool painted = render_action_rows(renderer, bodyFont, viewModel.modal.actions, folder->rows, folder->rowHeight, {assetCache, true, folder, true});
@@ -4389,12 +4414,12 @@ namespace {
           damage.h = static_cast<int>(bottom - top) * (folder->rowHeight + 6) + folder->rowHeight;
         }
         present_folder_damage(renderer, keypadModalLayoutCache->window, damage, screenWidth);
-        SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
         return painted;
       }
       clear_folder_dialog_cache(*folder);
     }
-    SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
 
     const ui::ShellLayout layout = ui::calculate_shell_layout(screenWidth, screenHeight);
     const int outerMargin = layout.navigation.x;
@@ -4404,7 +4429,7 @@ namespace {
     const SDL_Rect footerRect = sdl_rect(layout.footer);
 
     SDL_SetRenderDrawColor(renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
-    if (SDL_RenderClear(renderer) != 0 || SDL_RenderSetScale(renderer, horizontalScale, 1.0f) != 0) {
+    if (!SDL_RenderClear(renderer) || !SDL_SetRenderScale(renderer, horizontalScale, 1.0f)) {
       return false;
     }
 
@@ -4416,7 +4441,7 @@ namespace {
     const SDL_Rect logoRect {headerRect.x, headerRect.y + (headerRect.h - logoSize) / 2, logoSize, logoSize};
     render_asset_icon(renderer, assetCache, "moonlight-logo.svg", logoRect);
     const int brandWidth = headerRect.w / 3;
-    if (!render_text_line_simple(renderer, bodyFont, viewModel.frame.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, logoRect.x + logoSize + 10, headerRect.y + (headerRect.h - TTF_FontLineSkip(bodyFont)) / 2, brandWidth - logoSize - 10)) {
+    if (!render_text_line_simple(renderer, bodyFont, viewModel.frame.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, logoRect.x + logoSize + 10, headerRect.y + (headerRect.h - TTF_GetFontLineSkip(bodyFont)) / 2, brandWidth - logoSize - 10)) {
       return false;
     }
     if (viewModel.frame.screen == app::ScreenId::hosts) {
@@ -4430,7 +4455,7 @@ namespace {
         buttonX += buttonWidth + buttonGap;
       }
     }
-    if (!render_text_line_simple(renderer, titleFont, viewModel.frame.pageTitle, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.heading.x, layout.heading.y, layout.heading.w) || !render_text_line_simple(renderer, smallFont, viewModel.frame.subtitle, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.heading.x, layout.heading.y + TTF_FontLineSkip(titleFont) + 5, layout.heading.w)) {
+    if (!render_text_line_simple(renderer, titleFont, viewModel.frame.pageTitle, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.heading.x, layout.heading.y, layout.heading.w) || !render_text_line_simple(renderer, smallFont, viewModel.frame.subtitle, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.heading.x, layout.heading.y + TTF_GetFontLineSkip(titleFont) + 5, layout.heading.w)) {
       return false;
     }
     draw_line(renderer, footerRect.x, footerRect.y - 6, footerRect.x + footerRect.w, footerRect.y - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
@@ -4474,8 +4499,8 @@ namespace {
       fill_rounded_rect(renderer, bodyPanel, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF});
       // Focus belongs to the selected row, rather than an entire outlined pane.
 
-      const SDL_Rect menuHeaderRect {menuPanel.x + panelPadding, menuPanel.y + panelPadding, menuPanel.w - (panelPadding * 2), std::max(34, TTF_FontLineSkip(smallFont) + 10)};
-      if (!render_text_line_simple(renderer, smallFont, settingsScreen ? "Categories" : "Actions", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, menuHeaderRect.x + 10, menuHeaderRect.y + std::max(6, (menuHeaderRect.h - TTF_FontLineSkip(smallFont)) / 2), menuHeaderRect.w - 20)) {
+      const SDL_Rect menuHeaderRect {menuPanel.x + panelPadding, menuPanel.y + panelPadding, menuPanel.w - (panelPadding * 2), std::max(34, TTF_GetFontLineSkip(smallFont) + 10)};
+      if (!render_text_line_simple(renderer, smallFont, settingsScreen ? "Categories" : "Actions", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, menuHeaderRect.x + 10, menuHeaderRect.y + std::max(6, (menuHeaderRect.h - TTF_GetFontLineSkip(smallFont)) / 2), menuHeaderRect.w - 20)) {
         return false;
       }
 
@@ -4551,7 +4576,7 @@ namespace {
         draw_rect(renderer, modalRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
         render_text_line_simple(renderer, bodyFont, "Log File", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 16, modalRect.w - 32);
         render_text_line_simple(renderer, smallFont, "The full log viewer could not be rendered safely.", {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54, modalRect.w - 32);
-        render_text_line_simple(renderer, smallFont, (viewModel.modal.footerActions.empty() || viewModel.modal.footerActions.back().keyLabel.empty() ? "Press B to close." : "Press Esc to close."), {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_FontLineSkip(smallFont) + 8, modalRect.w - 32);
+        render_text_line_simple(renderer, smallFont, (viewModel.modal.footerActions.empty() || viewModel.modal.footerActions.back().keyLabel.empty() ? "Press B to close." : "Press Esc to close."), {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_GetFontLineSkip(smallFont) + 8, modalRect.w - 32);
       }
     } else if (viewModel.modal.visible && !render_shell_dialog(renderer, {titleFont, bodyFont, smallFont}, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
       return false;
@@ -4571,22 +4596,22 @@ namespace {
       folder->smallFont = smallFont;
       folder->valid = true;
     }
-    SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
     return true;
   }
 
-  void close_controller(SDL_GameController *controller) {
+  void close_controller(SDL_Gamepad *controller) {
     if (controller != nullptr) {
-      SDL_GameControllerClose(controller);
+      SDL_CloseGamepad(controller);
     }
   }
 
-  bool should_open_added_controller(const SDL_GameController *controller, const SDL_ControllerDeviceEvent &event) {
-    return controller == nullptr && SDL_IsGameController(event.which);
+  bool should_open_added_controller(const SDL_Gamepad *controller, const SDL_GamepadDeviceEvent &event) {
+    return controller == nullptr && SDL_IsGamepad(event.which);
   }
 
-  bool should_close_removed_controller(const SDL_GameController *controller, const SDL_ControllerDeviceEvent &event) {
-    return controller != nullptr && controller == SDL_GameControllerFromInstanceID(event.which);
+  bool should_close_removed_controller(SDL_Gamepad *controller, const SDL_GamepadDeviceEvent &event) {
+    return controller != nullptr && SDL_GetGamepadID(controller) == event.which;
   }
 
   bool hosts_screen_exit_combo_allowed(const app::ClientState &state) {
@@ -4650,7 +4675,7 @@ namespace {
     }
 
     inputState->controllerExitComboArmed = true;
-    if (const Uint32 comboStartTick = inputState->controllerStartDownTick > inputState->controllerBackDownTick ? inputState->controllerStartDownTick : inputState->controllerBackDownTick; SDL_GetTicks() - comboStartTick < EXIT_COMBO_HOLD_MILLISECONDS) {
+    if (const Uint32 comboStartTick = inputState->controllerStartDownTick > inputState->controllerBackDownTick ? inputState->controllerStartDownTick : inputState->controllerBackDownTick; static_cast<Uint32>(SDL_GetTicks()) - comboStartTick < EXIT_COMBO_HOLD_MILLISECONDS) {
       return;
     }
 
@@ -4694,7 +4719,7 @@ namespace {
    * @param event SDL device-added notification.
    * @param inputState Holds to reset after controller ownership changes.
    */
-  void handle_controller_device_added(SDL_GameController **controller, const SDL_ControllerDeviceEvent &event, ShellInputState *inputState) {
+  void handle_controller_device_added(SDL_Gamepad **controller, const SDL_GamepadDeviceEvent &event, ShellInputState *inputState) {
     if (controller == nullptr || !should_open_added_controller(*controller, event)) {
       return;
     }
@@ -4707,7 +4732,7 @@ namespace {
     }
   }
 
-  void handle_controller_device_removed(SDL_GameController **controller, const SDL_ControllerDeviceEvent &event, ShellInputState *inputState) {
+  void handle_controller_device_removed(SDL_Gamepad **controller, const SDL_GamepadDeviceEvent &event, ShellInputState *inputState) {
     if (controller == nullptr || !should_close_removed_controller(*controller, event)) {
       return;
     }
@@ -4720,27 +4745,27 @@ namespace {
     logging::warn("input", "Controller disconnected");
   }
 
-  input::UiCommand handle_controller_button_down_event(const SDL_ControllerButtonEvent &event, const app::ClientState &state, ShellInputState *inputState) {
+  input::UiCommand handle_controller_button_down_event(const SDL_GamepadButtonEvent &event, const app::ClientState &state, ShellInputState *inputState) {
     if (inputState == nullptr) {
       return input::UiCommand::none;
     }
 
     const Uint32 controllerButtonDownTick = SDL_GetTicks();
-    if (event.button == SDL_CONTROLLER_BUTTON_START) {
+    if (event.button == SDL_GAMEPAD_BUTTON_START) {
       if (!inputState->controllerStartPressed) {
         inputState->controllerStartPressed = true;
         inputState->controllerStartDownTick = controllerButtonDownTick;
       }
-    } else if (event.button == SDL_CONTROLLER_BUTTON_BACK) {
+    } else if (event.button == SDL_GAMEPAD_BUTTON_BACK) {
       if (!inputState->controllerBackPressed) {
         inputState->controllerBackPressed = true;
         inputState->controllerBackDownTick = controllerButtonDownTick;
       }
     } else {
-      if (event.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
+      if (event.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) {
         inputState->leftShoulderPressed = true;
         inputState->leftShoulderRepeatTick = controllerButtonDownTick;
-      } else if (event.button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
+      } else if (event.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
         inputState->rightShoulderPressed = true;
         inputState->rightShoulderRepeatTick = controllerButtonDownTick;
       }
@@ -4768,25 +4793,25 @@ namespace {
     return input::UiCommand::none;
   }
 
-  input::UiCommand handle_controller_button_up_event(const SDL_ControllerButtonEvent &event, ShellInputState *inputState) {
+  input::UiCommand handle_controller_button_up_event(const SDL_GamepadButtonEvent &event, ShellInputState *inputState) {
     if (inputState == nullptr) {
       return input::UiCommand::none;
     }
 
     input::UiCommand command = input::UiCommand::none;
-    if (event.button == SDL_CONTROLLER_BUTTON_START && inputState->controllerStartPressed) {
+    if (event.button == SDL_GAMEPAD_BUTTON_START && inputState->controllerStartPressed) {
       inputState->controllerStartPressed = false;
       if (!inputState->controllerExitComboArmed && !inputState->controllerExitComboTriggered) {
         command = input::map_gamepad_button_to_ui_command(input::GamepadButton::start);
       }
-    } else if (event.button == SDL_CONTROLLER_BUTTON_BACK && inputState->controllerBackPressed) {
+    } else if (event.button == SDL_GAMEPAD_BUTTON_BACK && inputState->controllerBackPressed) {
       inputState->controllerBackPressed = false;
       if (!inputState->controllerExitComboArmed && !inputState->controllerExitComboTriggered) {
         command = input::map_gamepad_button_to_ui_command(input::GamepadButton::back);
       }
-    } else if (event.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
+    } else if (event.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) {
       inputState->leftShoulderPressed = false;
-    } else if (event.button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
+    } else if (event.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
       inputState->rightShoulderPressed = false;
     }
 
@@ -4810,10 +4835,10 @@ namespace {
    * @return True when the folder-name keyboard consumes this key.
    */
   bool handle_directory_key(app::ClientState &state, const SDL_KeyboardEvent &event) {
-    if (state.modal.id != app::ModalId::directory_picker || !state.directoryPicker.creating || event.keysym.sym < 32 || event.keysym.sym >= 127 || (event.keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) != 0) {
+    if (state.modal.id != app::ModalId::directory_picker || !state.directoryPicker.creating || event.key < 32 || event.key >= 127 || (event.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) != 0) {
       return false;
     }
-    const int code = input::keyboard_virtual_key(event.keysym.scancode);
+    const int code = input::keyboard_virtual_key(event.scancode);
     if (code == 0x20) {
       app::append_directory_name(state, " ");
       return true;
@@ -4823,7 +4848,7 @@ namespace {
       if (key.code != code) {
         continue;
       }
-      const bool shifted = ((event.keysym.mod & KMOD_SHIFT) != 0) != (code >= 'A' && code <= 'Z' && (event.keysym.mod & KMOD_CAPS) != 0);
+      const bool shifted = ((event.mod & SDL_KMOD_SHIFT) != 0) != (code >= 'A' && code <= 'Z' && (event.mod & SDL_KMOD_CAPS) != 0);
       if (const std::string text = shifted ? key.shifted : key.label; text.size() == 1) {
         app::append_directory_name(state, text);
       }
@@ -4843,53 +4868,53 @@ namespace {
   input::UiCommand handle_shell_event(
     app::ClientState &state,
     const SDL_Event &event,
-    SDL_GameController **controller,
+    SDL_Gamepad **controller,
     ShellInputState *inputState
   ) {
     switch (event.type) {
-      case SDL_QUIT:
+      case SDL_EVENT_QUIT:
         state.shell.shouldExit = true;
         return input::UiCommand::none;
-      case SDL_CONTROLLERDEVICEADDED:
-        handle_controller_device_added(controller, event.cdevice, inputState);
+      case SDL_EVENT_GAMEPAD_ADDED:
+        handle_controller_device_added(controller, event.gdevice, inputState);
         return input::UiCommand::none;
-      case SDL_CONTROLLERDEVICEREMOVED:
-        handle_controller_device_removed(controller, event.cdevice, inputState);
+      case SDL_EVENT_GAMEPAD_REMOVED:
+        handle_controller_device_removed(controller, event.gdevice, inputState);
         return input::UiCommand::none;
-      case SDL_CONTROLLERBUTTONDOWN:
+      case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         set_shell_input_device(state, inputState, input::UiInputDevice::gamepad);
-        return handle_controller_button_down_event(event.cbutton, state, inputState);
-      case SDL_CONTROLLERBUTTONUP:
-        return handle_controller_button_up_event(event.cbutton, inputState);
-      case SDL_CONTROLLERAXISMOTION:
+        return handle_controller_button_down_event(event.gbutton, state, inputState);
+      case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        return handle_controller_button_up_event(event.gbutton, inputState);
+      case SDL_EVENT_GAMEPAD_AXIS_MOTION:
         if (inputState == nullptr) {
           return input::UiCommand::none;
         }
 
-        if (input::is_gamepad_ui_activity(event.caxis.value, event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)) {
+        if (input::is_gamepad_ui_activity(event.gaxis.value, event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || event.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
           set_shell_input_device(state, inputState, input::UiInputDevice::gamepad);
         }
-        return translate_trigger_axis(event.caxis, &inputState->leftTriggerPressed, &inputState->rightTriggerPressed);
-      case SDL_KEYDOWN:
+        return translate_trigger_axis(event.gaxis, &inputState->leftTriggerPressed, &inputState->rightTriggerPressed);
+      case SDL_EVENT_KEY_DOWN:
         if (event.key.repeat != 0 || inputState == nullptr) {
           return input::UiCommand::none;
         }
         set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
-        if (event.key.keysym.sym == SDLK_F4 && (event.key.keysym.mod & KMOD_ALT) != 0 && hosts_screen_exit_combo_allowed(state) && !state.modal.active()) {
+        if (event.key.key == SDLK_F4 && (event.key.mod & SDL_KMOD_ALT) != 0 && hosts_screen_exit_combo_allowed(state) && !state.modal.active()) {
           state.shell.shouldExit = true;
           return input::UiCommand::none;
         }
         if (handle_directory_key(state, event.key)) {
           return input::UiCommand::none;
         }
-        return inputState->keyboardNavigation.press(event.key.keysym.scancode, translate_keyboard_key(event.key.keysym.sym, event.key.keysym.mod), SDL_GetTicks());
-      case SDL_KEYUP:
+        return inputState->keyboardNavigation.press(event.key.scancode, translate_keyboard_key(event.key.key, event.key.mod), SDL_GetTicks());
+      case SDL_EVENT_KEY_UP:
         if (inputState != nullptr) {
-          inputState->keyboardNavigation.release(event.key.keysym.scancode);
+          inputState->keyboardNavigation.release(event.key.scancode);
         }
         return input::UiCommand::none;
-      case SDL_WINDOWEVENT:
-        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+      case SDL_EVENT_WINDOW_FOCUS_LOST:
+        {
           reset_shell_input_state(inputState);
         }
         return input::UiCommand::none;
@@ -4901,7 +4926,7 @@ namespace {
   template<typename ProcessCommand>
   void process_polled_shell_events(
     app::ClientState &state,
-    SDL_GameController **controller,
+    SDL_Gamepad **controller,
     ShellInputState *inputState,
     const ProcessCommand &processCommand,
     bool *skipPolledControllerNavigation,
@@ -4916,11 +4941,11 @@ namespace {
     }
 
     do {
-      if (redrawRequested != nullptr && (event.type == SDL_KEYDOWN || event.type == SDL_TEXTINPUT || event.type == SDL_WINDOWEVENT || event.type == SDL_CONTROLLERBUTTONDOWN || event.type == SDL_CONTROLLERDEVICEADDED || event.type == SDL_CONTROLLERDEVICEREMOVED)) {
+      if (redrawRequested != nullptr && (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_TEXT_INPUT || (event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST) || event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_ADDED || event.type == SDL_EVENT_GAMEPAD_REMOVED)) {
         *redrawRequested = true;
       }
       const input::UiCommand command = handle_shell_event(state, event, controller, inputState);
-      if (event.type == SDL_CONTROLLERAXISMOTION && inputState != nullptr) {
+      if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && inputState != nullptr) {
         update_trigger_repeat_tick(command, SDL_GetTicks(), &inputState->leftTriggerRepeatTick, &inputState->rightTriggerRepeatTick);
       }
 
@@ -4944,7 +4969,7 @@ namespace {
 
   template<typename ProcessCommand>
   void process_controller_navigation(
-    SDL_GameController *controller,
+    SDL_Gamepad *controller,
     ShellInputState *inputState,
     bool skipPolledControllerNavigation,
     const ProcessCommand &processCommand
@@ -5038,12 +5063,11 @@ namespace {
     TTF_Font *titleFont = nullptr;  ///< Large font used for screen titles.
     TTF_Font *bodyFont = nullptr;  ///< Standard body font.
     TTF_Font *smallFont = nullptr;  ///< Small font for secondary labels.
-    SDL_GameController *controller = nullptr;  ///< Primary open game controller, when available.
+    SDL_Gamepad *controller = nullptr;  ///< Primary open game controller, when available.
     CoverArtTextureCache coverArtTextureCache;  ///< Cached cover-art textures.
     AssetTextureCache assetTextureCache;  ///< Cached UI asset textures.
     KeypadModalLayoutCache keypadModalLayoutCache;  ///< Cached keypad modal layout artifacts.
     unsigned long encoderSettings = 0;  ///< Active video encoder settings for layout calculations.
-    bool imageInitialized = false;  ///< Whether SDL_image was initialized in this shell session.
     bool ttfInitialized = false;  ///< Whether SDL_ttf was initialized in this shell session.
   };
 
@@ -5097,8 +5121,8 @@ namespace {
    *
    * @return The opened controller, or nullptr when none could be opened.
    */
-  SDL_GameController *open_primary_controller() {
-    SDL_GameController *controller = nullptr;
+  SDL_Gamepad *open_primary_controller() {
+    SDL_Gamepad *controller = nullptr;
     if (input::recover_shell_controller(&controller)) {
       logging::info("input", "Opened primary controller");
     }
@@ -5137,10 +5161,6 @@ namespace {
       SDL_DestroyRenderer(resources->renderer);
       resources->renderer = nullptr;
     }
-    if (resources->imageInitialized) {
-      IMG_Quit();
-      resources->imageInitialized = false;
-    }
     if (resources->ttfInitialized) {
       TTF_Quit();
       resources->ttfInitialized = false;
@@ -5163,21 +5183,27 @@ namespace {
       return false;
     }
 
-    if (TTF_Init() != 0) {
+    if (!TTF_Init()) {
       failure->category = "ttf";
-      failure->message = std::string("TTF_Init failed: ") + TTF_GetError();
+      failure->message = std::string("TTF_Init failed: ") + SDL_GetError();
       close_shell_resources(resources);
       return false;
     }
     resources->ttfInitialized = true;
 
-    IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
-    resources->imageInitialized = true;
-
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-
-    resources->renderer = SDL_CreateRenderer(window, -1, 0);
-    resources->keypadModalLayoutCache.window = window;
+    // The Xbox renderer excludes 720-pixel SD modes and needs several scanout buffers at 1080i.
+    if (videoMode.width != 720 && videoMode.height < 1080) {
+      resources->renderer = SDL_CreateRenderer(window, "nxdk_xgu");
+      if (resources->renderer == nullptr) {
+        logging::warn("sdl", std::string("Xbox renderer unavailable; using software: ") + SDL_GetError());
+      }
+    }
+    if (resources->renderer == nullptr) {
+      resources->renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
+      resources->keypadModalLayoutCache.window = window;
+    } else {
+      resources->keypadModalLayoutCache.window = nullptr;
+    }
     if (resources->renderer == nullptr) {
       failure->category = "sdl";
       failure->message = std::string("SDL_CreateRenderer failed: ") + SDL_GetError();
@@ -5196,12 +5222,12 @@ namespace {
     resources->smallFont = TTF_OpenFont(fontPath.c_str(), std::max(14, videoMode.height / 42));
     if (resources->titleFont == nullptr || resources->bodyFont == nullptr || resources->smallFont == nullptr) {
       failure->category = "ttf";
-      failure->message = std::string("Failed to load shell font from ") + fontPath + ": " + TTF_GetError();
+      failure->message = std::string("Failed to load shell font from ") + fontPath + ": " + SDL_GetError();
       close_shell_resources(resources);
       return false;
     }
 
-    if (resources->controller == nullptr || SDL_GameControllerGetAttached(resources->controller) == SDL_FALSE) {
+    if (resources->controller == nullptr || !SDL_GamepadConnected(resources->controller)) {
       close_controller(resources->controller);
       resources->controller = open_primary_controller();
     }
@@ -5238,20 +5264,15 @@ namespace {
    * @param state Client state to visualize.
    * @param resources Shell resources supplying the renderer and caches.
    * @param runtime Runtime state receiving redraw and shutdown updates.
-   * @param launchDialog Optional busy dialog for the handoff to a streaming session.
    * @return True when the frame rendered successfully.
    */
-  bool draw_current_shell_frame(const VIDEO_MODE &videoMode, app::ClientState &state, ShellResources *resources, ShellRuntimeState *runtime, const ui::ShellModalView *launchDialog = nullptr) {
+  bool draw_current_shell_frame(const VIDEO_MODE &videoMode, app::ClientState &state, ShellResources *resources, ShellRuntimeState *runtime) {
     if (resources == nullptr || runtime == nullptr) {
       return false;
     }
 
     const std::vector<logging::LogEntry> retainedEntries = logging::snapshot(logging::LogLevel::info);
-    auto viewModel = ui::build_shell_view_model(state, retainedEntries);
-    if (launchDialog != nullptr) {
-      viewModel.modal = *launchDialog;
-      viewModel.notification.visible = false;
-    }
+    const auto viewModel = ui::build_shell_view_model(state, retainedEntries);
     if (draw_shell(resources->renderer, videoMode, resources->encoderSettings, resources->titleFont, resources->bodyFont, resources->smallFont, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache)) {
       runtime->keypadRedrawRequested = false;
       return true;
@@ -5353,10 +5374,7 @@ namespace {
       return true;
     }
 
-    const Uint32 preparationStarted = SDL_GetTicks();
-    if (const auto launchDialog = ui::build_stream_launch_dialog(*streamHost, *streamApp); !draw_current_shell_frame(activeVideoMode, state, resources, runtime, &launchDialog)) {
-      return false;
-    }
+    const Uint64 preparationStarted = SDL_GetTicks();
     runtime->keypadRedrawRequested = true;
 
     network::PairingIdentity clientIdentity {};
@@ -5376,12 +5394,22 @@ namespace {
     join_shell_session_tasks(*runtime);
     // Keep the menu's working controller open while render resources change. The Xbox
     // SDL backend owns a pending USB read that must not be torn down at this boundary.
-    std::unique_ptr<SDL_GameController, decltype(&SDL_GameControllerClose)> retainedController(std::exchange(resources->controller, nullptr), SDL_GameControllerClose);
-    close_shell_resources(resources);
-
+    std::unique_ptr<SDL_Gamepad, decltype(&SDL_CloseGamepad)> retainedController(std::exchange(resources->controller, nullptr), SDL_CloseGamepad);
     streaming::StreamSessionReport report;
     logging::info("stream", "Stream startup: menu preparation took " + std::to_string(SDL_GetTicks() - preparationStarted) + " ms");
-    const bool streamStarted = streaming::run_stream_session(window, activeVideoMode, state.settings, *streamHost, *streamApp, clientIdentity, retainedController.get(), report);
+    const bool streamStarted = streaming::run_stream_session(
+      window,
+      activeVideoMode,
+      state.settings,
+      *streamHost,
+      *streamApp,
+      clientIdentity,
+      retainedController.get(),
+      [resources] {
+        close_shell_resources(resources);
+      },
+      report
+    );
     state.shell.statusMessage = std::move(report.message);
     if (!streamStarted) {
       app::show_notification(state, app::NotificationKind::error, "Streaming failed", "Check that the PC is online and Sunshine is running, then try again.");
@@ -5412,8 +5440,8 @@ namespace {
     if (streamStarted) {
       // Require a new press once the summary opens, even if input queued during teardown.
       SDL_PumpEvents();
-      SDL_FlushEvent(SDL_KEYDOWN);
-      SDL_FlushEvent(SDL_CONTROLLERBUTTONDOWN);
+      SDL_FlushEvent(SDL_EVENT_KEY_DOWN);
+      SDL_FlushEvent(SDL_EVENT_GAMEPAD_BUTTON_DOWN);
       app::show_stream_summary(state, std::move(report.summaryLines));
       return draw_current_shell_frame(activeVideoMode, state, resources, runtime);
     }
@@ -5543,7 +5571,7 @@ namespace {
       runtime->inputState.reset_after_controller_change();
       runtime->keypadRedrawRequested = true;
       if (resources->controller != nullptr) {
-        logging::info("input", "Recovered menu controller instance " + std::to_string(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(resources->controller))));
+        logging::info("input", "Recovered menu controller instance " + std::to_string(SDL_GetGamepadID(resources->controller)));
       } else {
         logging::warn("input", "Menu controller unavailable; waiting for an attached gamepad");
       }

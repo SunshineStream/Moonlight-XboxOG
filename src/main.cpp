@@ -11,7 +11,7 @@
 #include <vector>
 
 // lib includes
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 // nxdk includes
 #include <hal/debug.h>
@@ -265,8 +265,10 @@ int main() {
   const BOOL setVideoModeResult = XVideoSetMode(bestVideoMode.width, bestVideoMode.height, bestVideoMode.bpp, bestVideoMode.refresh);
   debug_print_startup_checkpoint(setVideoModeResult ? "Returned from XVideoSetMode successfully" : "XVideoSetMode returned failure");
 
+  // Window surfaces must stay independent of the renderer and of pbkit.
+  SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0");
   debug_print_startup_checkpoint("About to call SDL_Init");
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
     return report_startup_failure("sdl", std::string("SDL_Init failed: ") + SDL_GetError());
   }
   debug_print_startup_checkpoint("SDL_Init succeeded");
@@ -274,11 +276,9 @@ int main() {
   debug_print_startup_checkpoint("About to create SDL window");
   SDL_Window *window = SDL_CreateWindow(
     "Moonlight Xbox",
-    SDL_WINDOWPOS_UNDEFINED,
-    SDL_WINDOWPOS_UNDEFINED,
     bestVideoMode.width,
     bestVideoMode.height,
-    SDL_WINDOW_SHOWN
+    0
   );
   if (window == nullptr) {
     const int exitCode = report_startup_failure("sdl", std::string("SDL_CreateWindow failed: ") + SDL_GetError());

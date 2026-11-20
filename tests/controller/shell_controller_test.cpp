@@ -8,6 +8,7 @@
 // standard includes
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <vector>
 
 // lib includes
@@ -16,11 +17,14 @@
 /**
  * @brief Stable controller handle whose device can disappear from enumeration while its reference remains open.
  */
-struct _SDL_GameController {
-  int id = 0;  ///< Registry identity, independent of shifting SDL device indices.
+struct SDL_Gamepad {
+  int slot = 0;  ///< Index into the fake registry, independent of the SDL instance ID.
 };
 
 namespace {
+  // Exercise the upper half of SDL3's unsigned ID range.
+  constexpr SDL_JoystickID FIRST_INSTANCE = 0x80000011U;
+
   /**
    * @brief Simulated SDL device and reference ownership counters.
    */
@@ -39,8 +43,10 @@ namespace {
    */
   struct ControllerRegistry {
     std::array<Device, 5> devices;  ///< Devices survive removal until all open references are closed.
-    std::array<SDL_GameController, 5> handles;  ///< Stable objects returned by successful opens.
+    std::array<SDL_Gamepad, 5> handles;  ///< Stable objects returned by successful opens.
     std::vector<int> available;  ///< Current enumeration order; removal changes indices, not identities.
+    bool enumerationFailed = false;  ///< Simulated failure allocating the next enumeration.
+    int enumerationsOutstanding = 0;  ///< SDL-owned snapshots still needing SDL_free.
     int enumerationCalls = 0;  ///< Detect unnecessary rescans while the active pad remains attached.
   };
 
@@ -67,6 +73,14 @@ namespace {
       registry().handles = {};
       registry().available.clear();
       registry().enumerationCalls = 0;
+      registry().enumerationFailed = false;
+      registry().enumerationsOutstanding = 0;
+    }
+
+    /** @brief Check that all SDL enumeration snapshots were released. */
+    void TearDown() override {
+      EXPECT_EQ(registry().enumerationsOutstanding, 0);
+      BaseTest::TearDown();
     }
 
     /**
@@ -74,7 +88,7 @@ namespace {
      * @param id Stable registry identity.
      */
     void attach(int id) const {
-      registry().handles[id].id = id;
+      registry().handles[id].slot = id;
       registry().available.push_back(id);
     }
 
@@ -90,17 +104,38 @@ namespace {
 }  // namespace
 
 extern "C" {
-  int SDL_NumJoysticks() {
+  SDL_JoystickID *SDL_GetGamepads(int *count) {
     ++registry().enumerationCalls;
-    return static_cast<int>(registry().available.size());
+    *count = 0;
+    if (registry().enumerationFailed) {
+      return nullptr;
+    }
+    auto *ids = static_cast<SDL_JoystickID *>(std::malloc((registry().available.size() + 1) * sizeof(SDL_JoystickID)));
+    if (ids == nullptr) {
+      return nullptr;
+    }
+    ++registry().enumerationsOutstanding;
+    for (const int slot : registry().available) {
+      if (registry().devices[slot].mapped) {
+        ids[(*count)++] = FIRST_INSTANCE + slot;
+      }
+    }
+    ids[*count] = 0;
+    return ids;
   }
 
-  SDL_bool SDL_IsGameController(int index) {
-    return registry().devices[registry().available[index]].mapped ? SDL_TRUE : SDL_FALSE;
+  void SDL_free(void *memory) {
+    if (memory != nullptr) {
+      --registry().enumerationsOutstanding;
+      std::free(memory);
+    }
   }
 
-  SDL_GameController *SDL_GameControllerOpen(int index) {
-    const int id = registry().available[index];
+  SDL_Gamepad *SDL_OpenGamepad(SDL_JoystickID instance) {
+    if (instance < FIRST_INSTANCE || instance - FIRST_INSTANCE >= registry().devices.size()) {
+      return nullptr;
+    }
+    const auto id = instance - FIRST_INSTANCE;
     auto &device = registry().devices[id];
     if (!device.openable) {
       return nullptr;
@@ -113,15 +148,15 @@ extern "C" {
     return &registry().handles[id];
   }
 
-  void SDL_GameControllerClose(const SDL_GameController *controller) {
-    auto &device = registry().devices[controller->id];
+  void SDL_CloseGamepad(SDL_Gamepad *controller) {
+    auto &device = registry().devices[controller->slot];
     EXPECT_GT(device.references, 0);
     --device.references;
     ++device.closes;
   }
 
-  SDL_bool SDL_GameControllerGetAttached(const SDL_GameController *controller) {
-    return registry().devices[controller->id].attached ? SDL_TRUE : SDL_FALSE;
+  bool SDL_GamepadConnected(SDL_Gamepad *controller) {
+    return registry().devices[controller->slot].attached;
   }
 }
 
@@ -131,7 +166,7 @@ namespace {
    */
   TEST_F(ShellControllerTest, PreservesTheWorkingControllerAndItsReference) {
     attach(0);
-    auto *active = SDL_GameControllerOpen(0);
+    auto *active = SDL_OpenGamepad(FIRST_INSTANCE);
     attach(1);
     registry().available = {1, 0};
     EXPECT_FALSE(input::recover_shell_controller(&active));
@@ -140,7 +175,7 @@ namespace {
     EXPECT_EQ(registry().devices[0].closes, 0);
     EXPECT_EQ(registry().devices[1].opens, 0);
     EXPECT_EQ(registry().enumerationCalls, 0);
-    SDL_GameControllerClose(active);
+    SDL_CloseGamepad(active);
   }
 
   /**
@@ -149,7 +184,7 @@ namespace {
   TEST_F(ShellControllerTest, ReplacesARemovedPrimaryWithAnAlreadyConnectedPad) {
     attach(0);
     attach(1);
-    auto *active = SDL_GameControllerOpen(0);
+    auto *active = SDL_OpenGamepad(FIRST_INSTANCE);
     detach(0);
     EXPECT_TRUE(input::recover_shell_controller(&active));
     EXPECT_EQ(active, &registry().handles[1]);
@@ -158,7 +193,7 @@ namespace {
     EXPECT_EQ(registry().devices[1].references, 1);
     EXPECT_FALSE(input::recover_shell_controller(&active));
     EXPECT_EQ(registry().devices[1].opens, 1);
-    SDL_GameControllerClose(active);
+    SDL_CloseGamepad(active);
   }
 
   /**
@@ -167,14 +202,14 @@ namespace {
   TEST_F(ShellControllerTest, AcquiresExistingDevicesAfterTheRemovalHandlerClosesThePrimary) {
     attach(0);
     attach(1);
-    auto *active = SDL_GameControllerOpen(0);
+    auto *active = SDL_OpenGamepad(FIRST_INSTANCE);
     detach(0);
-    SDL_GameControllerClose(active);
+    SDL_CloseGamepad(active);
     active = nullptr;
     EXPECT_TRUE(input::recover_shell_controller(&active));
     EXPECT_EQ(active, &registry().handles[1]);
     EXPECT_EQ(registry().devices[0].closes, 1);
-    SDL_GameControllerClose(active);
+    SDL_CloseGamepad(active);
   }
 
   /**
@@ -182,7 +217,7 @@ namespace {
    */
   TEST_F(ShellControllerTest, RetriesWithoutRenderingOrDeviceAddedEvents) {
     attach(0);
-    auto *active = SDL_GameControllerOpen(0);
+    auto *active = SDL_OpenGamepad(FIRST_INSTANCE);
     detach(0);
     EXPECT_TRUE(input::recover_shell_controller(&active));
     EXPECT_EQ(active, nullptr);
@@ -191,7 +226,7 @@ namespace {
     EXPECT_TRUE(input::recover_shell_controller(&active));
     EXPECT_EQ(active, &registry().handles[1]);
     EXPECT_EQ(registry().devices[0].closes, 1);
-    SDL_GameControllerClose(active);
+    SDL_CloseGamepad(active);
   }
 
   /**
@@ -204,14 +239,14 @@ namespace {
     registry().devices[0].mapped = false;
     registry().devices[1].openable = false;
     registry().devices[2].removedWhileOpening = true;
-    SDL_GameController *active = nullptr;
+    SDL_Gamepad *active = nullptr;
     EXPECT_TRUE(input::recover_shell_controller(&active));
     EXPECT_EQ(active, &registry().handles[3]);
     EXPECT_EQ(registry().devices[0].opens + registry().devices[1].opens, 0);
     EXPECT_EQ(registry().devices[2].closes, 1);
     EXPECT_EQ(registry().devices[2].references, 0);
     EXPECT_EQ(registry().devices[4].opens, 0);
-    SDL_GameControllerClose(active);
+    SDL_CloseGamepad(active);
   }
 
   /**
@@ -220,7 +255,7 @@ namespace {
   TEST_F(ShellControllerTest, HandlesAbsentDevicesAndNullOwnershipSlots) {
     EXPECT_FALSE(input::recover_shell_controller(nullptr));
     EXPECT_EQ(registry().enumerationCalls, 0);
-    SDL_GameController *active = nullptr;
+    SDL_Gamepad *active = nullptr;
     EXPECT_FALSE(input::recover_shell_controller(&active));
     EXPECT_EQ(active, nullptr);
     attach(0);
@@ -229,5 +264,20 @@ namespace {
     EXPECT_EQ(active, nullptr);
     EXPECT_EQ(registry().devices[0].references, 0);
     EXPECT_EQ(registry().devices[0].closes, 1);
+  }
+
+  /**
+   * @brief Recovery retries after SDL fails to allocate its gamepad snapshot.
+   */
+  TEST_F(ShellControllerTest, RecoversAfterAnEnumerationFailure) {
+    attach(2);
+    registry().enumerationFailed = true;
+    SDL_Gamepad *active = nullptr;
+    EXPECT_FALSE(input::recover_shell_controller(&active));
+    EXPECT_EQ(active, nullptr);
+    registry().enumerationFailed = false;
+    EXPECT_TRUE(input::recover_shell_controller(&active));
+    EXPECT_EQ(active, &registry().handles[2]);
+    SDL_CloseGamepad(active);
   }
 }  // namespace

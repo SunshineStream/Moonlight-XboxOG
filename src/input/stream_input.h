@@ -65,21 +65,21 @@ namespace input {
     explicit StreamInput(Sink sink);
     /**
      * @brief Reserve the lowest free controller slot without renumbering connected pads.
-     * @param device SDL instance ID.
+     * @param device Unsigned SDL3 instance ID represented in the signed slot domain.
      * @return Slot index, or -1 when four controllers are already connected.
      */
-    int connect(int device);
+    int connect(std::int64_t device);
     /**
      * @brief Release a disconnected pad and update the host's active mask.
-     * @param device SDL instance ID.
+     * @param device Unsigned SDL3 instance ID represented in the signed slot domain.
      */
-    void disconnect(int device);
+    void disconnect(std::int64_t device);
     /**
      * @brief Forward a controller sample unless local controls own it.
-     * @param device SDL instance ID.
+     * @param device Unsigned SDL3 instance ID represented in the signed slot domain.
      * @param state Sampled state.
      */
-    void controller(int device, ControllerState state);
+    void controller(std::int64_t device, ControllerState state);
     /**
      * @brief Release host input before a menu or focus transition and suppress gameplay.
      * @param captured True while a local menu owns input.
@@ -89,7 +89,7 @@ namespace input {
      * @brief Change the controller that drives virtual mouse input.
      * @param device SDL instance ID, or -1 to disable mouse mode.
      */
-    void set_mouse_device(int device);
+    void set_mouse_device(std::int64_t device);
     /**
      * @brief Integrate stick movement at up to 125 reports/second, preserving fractional motion and immediate clicks.
      * @param milliseconds Elapsed event-thread time.
@@ -142,7 +142,7 @@ namespace input {
      * @brief Stable controller slot state.
      */
     struct Slot {
-      int device = -1;  ///< SDL instance ID, or free.
+      std::int64_t device = -1;  ///< SDL instance ID, or free.
       ControllerState last {};  ///< Last host state.
       ControllerState sampled {};  ///< Latest local state.
       bool blocked = false;  ///< Wait for neutral after capture ends.
@@ -169,7 +169,7 @@ namespace input {
     std::map<int, std::set<int>> keys_;  ///< Sources holding each host key.
     std::map<int, std::set<int>> buttons_;  ///< Sources holding each host mouse button.
     bool captured_ = false;  ///< Local UI currently owns gameplay input.
-    int mouseDevice_ = -1;  ///< Pad controlling the mouse, or disabled.
+    std::int64_t mouseDevice_ = -1;  ///< Pad controlling the mouse, or disabled.
     double mouseX_ = 0;  ///< Fractional horizontal motion.
     double mouseY_ = 0;  ///< Fractional vertical motion.
     unsigned mouseElapsed_ = 0;  ///< Milliseconds accumulated toward the next 8 ms pointer report.

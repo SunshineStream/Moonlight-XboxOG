@@ -16,7 +16,7 @@
 // lib includes
 #include "third-party/moonlight-common-c/src/Limelight.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 // local includes
 #include "src/app/screenshot_library.h"
@@ -264,6 +264,9 @@ namespace streaming {
     bool render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight);
     /**
      * @brief Present the current video and UI through the GPU overlay when available.
+     *
+     * Clear the old startup page once the first GPU frame has taken over the display.
+     *
      * @param destination Output video rectangle.
      * @param newFrame True when a new decoded frame was acquired.
      * @return True when GPU presentation is active and the output is up to date.

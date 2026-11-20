@@ -5,28 +5,30 @@
 // class header include
 #include "src/input/shell_controller.h"
 
+// standard includes
+#include <memory>
+
 namespace input {
-  bool recover_shell_controller(SDL_GameController **controller) {
-    if (controller == nullptr || (*controller != nullptr && SDL_GameControllerGetAttached(*controller) == SDL_TRUE)) {
+  bool recover_shell_controller(SDL_Gamepad **controller) {
+    if (controller == nullptr || (*controller != nullptr && SDL_GamepadConnected(*controller))) {
       return false;
     }
     const bool changed = *controller != nullptr;
     if (*controller != nullptr) {
-      SDL_GameControllerClose(*controller);
+      SDL_CloseGamepad(*controller);
       *controller = nullptr;
     }
-    for (int index = 0; index < SDL_NumJoysticks(); ++index) {
-      if (SDL_IsGameController(index) == SDL_FALSE) {
-        continue;
-      }
-      SDL_GameController *candidate = SDL_GameControllerOpen(index);
+    int count = 0;
+    const std::unique_ptr<SDL_JoystickID, decltype(&SDL_free)> ids(SDL_GetGamepads(&count), SDL_free);
+    for (int index = 0; ids && index < count; ++index) {
+      SDL_Gamepad *candidate = SDL_OpenGamepad(ids.get()[index]);
       if (candidate == nullptr) {
         continue;
       }
       // Removal and enumeration can overlap. Never retain another detached
-      // reference just because SDL still exposed its device index this frame.
-      if (SDL_GameControllerGetAttached(candidate) == SDL_FALSE) {
-        SDL_GameControllerClose(candidate);
+      // reference just because SDL still exposed its instance ID this frame.
+      if (!SDL_GamepadConnected(candidate)) {
+        SDL_CloseGamepad(candidate);
         continue;
       }
       *controller = candidate;

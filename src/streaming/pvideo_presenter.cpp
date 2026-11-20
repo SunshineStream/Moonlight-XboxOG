@@ -17,12 +17,15 @@
   #include <xboxkrnl/xboxkrnl.h>
 
 /**
- * @brief Initialize the adapted pbkit with one color page for the stationary PVIDEO background.
+ * @brief Initialize pbkit without replacing the framebuffer currently on screen.
+ *
+ * @param static_scanout Allocate a single color page to fit the 1080i memory budget.
  * @return Zero on success or a pbkit initialization error.
  */
-extern "C" int moonlight_pb_init_static_scanout(void);
+extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout);
 
 namespace {
+  constexpr std::uint32_t CRTC_START = 0x600800;  ///< Physical address of the scanout background.
   constexpr std::uint32_t VIDEO_BUFFER = 0x8700;  ///< Overlay buffer submission register.
   constexpr std::uint32_t VIDEO_STOP = 0x8704;  ///< Normal overlay stop register.
   constexpr std::array<std::uint8_t, 4> CRTC_REGISTERS {31, 82, 32, 27};  ///< VGA controls changed by pb_init but not restored by pb_kill.
@@ -140,7 +143,7 @@ namespace streaming {
     savedCrtcConfig_ = VIDEOREG(0x600804);
     scanoutStateSaved_ = true;
     pb_set_color_format(mode.bpp == 16 ? NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5 : NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8, false);
-    const int status = mode.height >= 1080 ? moonlight_pb_init_static_scanout() : pb_init();
+    const int status = moonlight_pb_init_pvideo_scanout(mode.height >= 1080);
     if (status != 0) {
       *error = "GPU scanout initialization failed (pbkit " + std::to_string(status) + ")";
       return false;
@@ -157,7 +160,6 @@ namespace streaming {
       *error = "Timed out preparing the GPU scanout surface";
       return false;
     }
-    VIDEOREG(0x600800) = static_cast<std::uint32_t>(MmGetPhysicalAddress(pb_back_buffer()));
     return true;
 #else
     *error = "GPU scanout is unavailable on this platform";
@@ -254,7 +256,6 @@ namespace streaming {
           std::memset(buffer, 0, required);
         }
         if (failure.empty()) {
-          active_ = true;
           bufferSize_ = required;
           pitch_ = pitch;
           // xemu reads the descriptor concurrently with MMIO writes. Keep a
@@ -267,14 +268,13 @@ namespace streaming {
           VIDEOREG(0x8100) = 0x11;
           VIDEOREG(0x8088) = (VIDEOREG(0x8088) & 0xf43ff43fU) | 0x04000400U;
           VIDEOREG(0x808c) = (VIDEOREG(0x808c) & 0xf40ff40fU) | 0x04000400U;
-          bufferReuseVblank_ = pb_get_vbl_counter();
         }
       }
     }
     if (failure.empty()) {
       // The previous submission must cross a vblank before we reuse its old
       // scanout buffer. That vblank may already have passed since submission.
-      if (!wait_for_scanout_after(bufferReuseVblank_)) {
+      if (active_ && !wait_for_scanout_after(bufferReuseVblank_)) {
         failure = "Timed out waiting for GPU scanout; using software presentation";
       } else if (!pack_overlay_yuy2(frame, buffers_[nextBuffer_], bufferSize_, pitch_)) {
         failure = "Failed to pack the GPU overlay frame";
@@ -303,13 +303,24 @@ namespace streaming {
       if (VIDEOREG(0x8958 + offset) != format || VIDEOREG(0x8920 + offset) != physical) {
         failure = "GPU overlay register verification failed";
       } else {
+        const bool firstSubmission = !active_;
         VIDEOREG(VIDEO_STOP) = 0;
         VIDEOREG(VIDEO_BUFFER) = 1U;
+        active_ = true;
         // Sample after the request so a blank during register setup cannot
         // retire the old buffer prematurely.
         bufferReuseVblank_ = pb_get_vbl_counter();
-        nextBuffer_ ^= 1U;
-        return true;
+        if (firstSubmission && !wait_for_scanout_after(bufferReuseVblank_)) {
+          failure = "Timed out waiting for the first GPU frame; using software presentation";
+        } else {
+          if (firstSubmission) {
+            // The overlay can now cover the startup dialog. Switch the background
+            // at the blank so letterbox bars become black with video already ready.
+            VIDEOREG(CRTC_START) = static_cast<std::uint32_t>(MmGetPhysicalAddress(pb_back_buffer()));
+          }
+          nextBuffer_ ^= 1U;
+          return true;
+        }
       }
     }
 #else

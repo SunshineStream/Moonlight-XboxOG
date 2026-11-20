@@ -98,6 +98,36 @@ namespace ui {
     return {(width - w) / 2, (height - h) / 2, w, h};
   }
 
+  StreamStartupLayout calculate_stream_startup_layout(int width, int height, int titleLineHeight, int bodyLineHeight) {
+    if (width <= 0 || height <= 0 || titleLineHeight <= 0 || bodyLineHeight <= 0) {
+      return {};
+    }
+
+    const int padding = std::max(20, height / 40);
+    constexpr int titleTop = 28;
+    constexpr int gap = 12;
+    constexpr int progressHeight = 8;
+    const int hintHeight = 2 * bodyLineHeight;
+    const int fixedHeight = titleTop + titleLineHeight + 3 * gap + progressHeight + hintHeight + padding;
+    const auto card = calculate_shell_dialog(width, height, std::min(760, width * 3 / 4), fixedHeight + 3 * bodyLineHeight);
+    const int innerWidth = card.w - 2 * padding;
+    const int bodyHeight = card.h - fixedHeight;
+    if (innerWidth <= 0 || bodyHeight < bodyLineHeight) {
+      return {};
+    }
+
+    const int left = card.x + padding;
+    const int bodyY = card.y + titleTop + titleLineHeight + gap;
+    const int progressY = bodyY + bodyHeight + gap;
+    return {
+      card,
+      {left, card.y + titleTop, innerWidth, titleLineHeight},
+      {left, bodyY, innerWidth, bodyHeight},
+      {left, progressY, innerWidth, progressHeight},
+      {left, progressY + progressHeight + gap, innerWidth, hintHeight},
+    };
+  }
+
   double shell_spinner_angle(std::uint32_t elapsedMilliseconds) {
     constexpr std::uint32_t periodMilliseconds = 1200U;
     return static_cast<double>(elapsedMilliseconds % periodMilliseconds) * 360.0 / periodMilliseconds;

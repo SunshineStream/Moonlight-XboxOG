@@ -52,7 +52,7 @@ namespace streaming {
      * @param sampling Optional crop used by the standalone prediction experiment.
      * @param overlay Optional cached UI or statistics, composited using the frame's color matrix before GPU scanout.
      *
-     * @return True after the overlay registers have accepted the new buffer.
+     * @return True after the first overlay frame has latched or a subsequent frame has been submitted.
      */
     bool present(const Yuv420FrameView &frame, const VideoRectangle &destination, std::string *error, const OverlaySamplingRegion &sampling = {}, VideoOverlay *overlay = nullptr);
 
@@ -64,14 +64,14 @@ namespace streaming {
     bool reset();
 
     /**
-     * @brief Return whether the overlay currently owns presentation resources.
-     * @return True after successful initialization until reset.
+     * @brief Return whether the overlay is presenting video.
+     * @return True after the first successful presentation until reset.
      */
     bool active() const;
 
   private:
     /**
-     * @brief Select a GPU-rendered scanout surface while retaining SDL's separate CPU framebuffer.
+     * @brief Prepare a black GPU background while the current CPU framebuffer remains visible.
      *
      * @param error Receives an initialization or GPU completion failure.
      * @return True after the background clear has completed.
@@ -87,7 +87,7 @@ namespace streaming {
     int pitch_ = 0;  ///< Packed source stride.
     std::uint32_t bufferReuseVblank_ = 0;  ///< Vblank counter that must advance before the next buffer can be written.
     unsigned int nextBuffer_ = 0;  ///< Buffer not currently being scanned out.
-    bool active_ = false;  ///< Registers and buffers are owned by this presenter.
+    bool active_ = false;  ///< An overlay request is active and must be retired before freeing buffers.
     bool surfaceActive_ = false;  ///< pbkit owns the GPU context and vblank counter for the scanout surface.
   };
 }  // namespace streaming

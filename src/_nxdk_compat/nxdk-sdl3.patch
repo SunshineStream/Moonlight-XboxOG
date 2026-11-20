@@ -1,0 +1,364 @@
+--- a/nxdk_glue/audio/SDL_xboxaudio.c
++++ b/nxdk_glue/audio/SDL_xboxaudio.c
+@@ -11,7 +11,7 @@
+ #include <xboxkrnl/xboxkrnl.h>
+ 
+ #ifndef SDL_XBOXAUDIO_BUFFER_COUNT
+-#define SDL_XBOXAUDIO_BUFFER_COUNT 3
++#define SDL_XBOXAUDIO_BUFFER_COUNT 2
+ #endif
+ 
+ #if (SDL_XBOXAUDIO_BUFFER_COUNT < 2)
+@@ -23,27 +23,55 @@
+     void *buffers[SDL_XBOXAUDIO_BUFFER_COUNT];
+     int buffer_size;
+     int next_buffer;
+-    KSEMAPHORE playsem; // Use KSEMAPHORE because we need to post from DPC
++    bool started;
+ } SDL_PrivateAudioData;
+ 
+-static void xbox_audio_callback(void *pac97device, void *data)
++enum {
++    AC97_CURRENT_BUFFER = 4,
++    AC97_LAST_VALID_BUFFER = 5,
++    AC97_STATUS = 6,
++    AC97_CONTROL = 11,
++    AC97_DMA_HALTED = 1,
++    AC97_RUN_DMA = 1,
++    AC97_DESCRIPTOR_COUNT = 32,
++};
++
++/**
++ * @brief Check whether the AC97 engine can still read a queued audio buffer.
++ * @param engine Bus-master registers for PCM or S/PDIF.
++ * @param index Buffer descriptor being checked.
++ * @return True while DMA owns the buffer.
++ */
++static bool XBOXAUDIO_DmaUsesBuffer(const volatile Uint8 *engine, Uint8 index)
+ {
+-    (void)pac97device;
+-    struct SDL_PrivateAudioData *audio_data = (struct SDL_PrivateAudioData *)data;
+-    KeReleaseSemaphore(&audio_data->playsem, IO_SOUND_INCREMENT, 1, FALSE);
+-    return;
++    return (engine[AC97_STATUS] & AC97_DMA_HALTED) == 0 &&
++           engine[AC97_CURRENT_BUFFER] % AC97_DESCRIPTOR_COUNT == index;
+ }
+ 
+ static bool XBOXAUDIO_WaitDevice(SDL_AudioDevice *device)
+ {
+-    LARGE_INTEGER timeout;
+-    timeout.QuadPart = -5000 * 100;
++    const volatile Uint8 *pcm = (const volatile Uint8 *)0xfec00110;
++    volatile Uint8 *spdif = (volatile Uint8 *)0xfec00170;
++    const Uint8 oldest = (pcm[AC97_LAST_VALID_BUFFER] + AC97_DESCRIPTOR_COUNT - (SDL_XBOXAUDIO_BUFFER_COUNT - 1)) % AC97_DESCRIPTOR_COUNT;
++    const Uint64 deadline = SDL_GetTicksNS() + SDL_MS_TO_NS(100);
+ 
+-    struct SDL_PrivateAudioData *audio_data = (struct SDL_PrivateAudioData *)device->hidden;
+-    if (KeWaitForSingleObject(&audio_data->playsem, Executive, KernelMode, FALSE, &timeout) == STATUS_TIMEOUT) {
+-        DbgPrint("XBOXAUDIO_WaitDevice: Timeout waiting for audio buffer\n");
+-        //assert(0);
+-        SDL_memset(audio_data->buffers[audio_data->next_buffer], 0, audio_data->buffer_size);
++    // nxdk's shared completion interrupt can be missed. Check that both DMA
++    // engines have finished the oldest buffer before SDL writes to it again.
++    while (!SDL_GetAtomicInt(&device->shutdown) &&
++           (XBOXAUDIO_DmaUsesBuffer(pcm, oldest) || XBOXAUDIO_DmaUsesBuffer(spdif, oldest))) {
++        if (SDL_GetTicksNS() >= deadline) {
++            // xemu advances PCM but does not service S/PDIF DMA. If both
++            // engines ran, stop a stalled optical engine before reusing its buffer.
++            if (!XBOXAUDIO_DmaUsesBuffer(pcm, oldest)) {
++                spdif[AC97_CONTROL] &= ~AC97_RUN_DMA;
++                if (!XBOXAUDIO_DmaUsesBuffer(spdif, oldest)) {
++                    return true;
++                }
++            }
++            DbgPrint("Xbox AC97 playback stalled\n");
++            return SDL_SetError("Xbox AC97 playback stalled");
++        }
++        SDL_Delay(1);
+     }
+     return true;
+ }
+@@ -75,23 +103,30 @@
+                 }
+             }
+             SDL_free(audio_data);
++            device->hidden = NULL;
+             return false;
+         }
+         SDL_memset(audio_data->buffers[i], 0, audio_data->buffer_size);
+     }
+ 
+-    KeInitializeSemaphore(&audio_data->playsem, 1, SDL_XBOXAUDIO_BUFFER_COUNT);
+-    XAudioInit(16, 2, xbox_audio_callback, (void *)audio_data);
+-    XAudioProvideSamples(audio_data->buffers[audio_data->next_buffer++], audio_data->buffer_size, 0);
+-    XAudioPlay();
++    XAudioInit(16, 2, NULL, NULL);
++    for (int i = 0; i < SDL_XBOXAUDIO_BUFFER_COUNT - 1; i++) {
++        XAudioProvideSamples(audio_data->buffers[audio_data->next_buffer++], audio_data->buffer_size, 0);
++    }
++    // Let the SDL playback thread fill the final slot before starting DMA.
++    // Starting here can underrun while SDL is creating and binding its stream.
+     return true;
+ }
+ 
+ static void XBOXAUDIO_CloseDevice(SDL_AudioDevice *device)
+ {
+     SDL_PrivateAudioData *audio_data = (SDL_PrivateAudioData *)device->hidden;
++    if (!audio_data) {
++        return;
++    }
++    // Stop DMA before freeing its buffers. The next open resets both engines
++    // before queuing new descriptors.
+     XAudioPause();
+-    XAudioInit(16, 2, NULL, NULL);
+ 
+     for (int i = 0; i < SDL_XBOXAUDIO_BUFFER_COUNT; i++) {
+         if (audio_data->buffers[i]) {
+@@ -114,6 +149,10 @@
+     struct SDL_PrivateAudioData *audio_data = (struct SDL_PrivateAudioData *)device->hidden;
+     XAudioProvideSamples((unsigned char *)buffer, buflen, 0);
+     audio_data->next_buffer = (audio_data->next_buffer + 1) % SDL_XBOXAUDIO_BUFFER_COUNT;
++    if (!audio_data->started) {
++        XAudioPlay();
++        audio_data->started = true;
++    }
+     return true;
+ }
+ 
+--- a/nxdk_glue/joystick/SDL_xboxjoystick.c
++++ b/nxdk_glue/joystick/SDL_xboxjoystick.c
+@@ -240,6 +240,8 @@
+     if (!core_has_init) {
+         usbh_core_init();
+         usbh_xid_init();
++        extern void moonlight_usb_input_initialize(void);
++        moonlight_usb_input_initialize();
+         core_has_init = true;
+     }
+     usbh_install_xid_conn_callback(connection_callback, disconnect_callback);
+@@ -404,6 +406,9 @@
+         ret.data[5] = (xid_dev->idVendor >> 8) & 0xFF;
+         ret.data[8] = xid_dev->idProduct & 0xFF;
+         ret.data[9] = (xid_dev->idProduct >> 8) & 0xFF;
++        // Keep native XID layouts distinct from desktop USB layouts with the same VID/PID.
++        ret.data[14] = 'X';
++        ret.data[15] = xid_dev->xid_desc.bType;
+     }
+     return ret;
+ }
+@@ -658,9 +663,33 @@
+ 
+ static bool SDL_XBOX_JoystickGetGamepadMapping(int device_index, SDL_GamepadMapping *out)
+ {
+-    (void)device_index;
+-    (void)out;
+-    return false;
++    const xid_dev_t *xid_dev = xid_from_device_index(device_index);
++    if (!xid_dev || xid_dev->xid_desc.bType != XID_TYPE_GAMECONTROLLER) {
++        return false;
++    }
++
++    // The XID driver reports buttons and axes in SDL gamepad order and uses a hat for the D-pad.
++    out->a = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_SOUTH };
++    out->b = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_EAST };
++    out->x = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_WEST };
++    out->y = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_NORTH };
++    out->back = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_BACK };
++    out->start = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_START };
++    out->leftstick = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_LEFT_STICK };
++    out->rightstick = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_RIGHT_STICK };
++    out->leftshoulder = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER };
++    out->rightshoulder = (SDL_InputMapping){ EMappingKind_Button, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER };
++    out->dpup = (SDL_InputMapping){ EMappingKind_Hat, SDL_HAT_UP };
++    out->dpdown = (SDL_InputMapping){ EMappingKind_Hat, SDL_HAT_DOWN };
++    out->dpleft = (SDL_InputMapping){ EMappingKind_Hat, SDL_HAT_LEFT };
++    out->dpright = (SDL_InputMapping){ EMappingKind_Hat, SDL_HAT_RIGHT };
++    out->leftx = (SDL_InputMapping){ EMappingKind_Axis, SDL_GAMEPAD_AXIS_LEFTX };
++    out->lefty = (SDL_InputMapping){ EMappingKind_Axis, SDL_GAMEPAD_AXIS_LEFTY };
++    out->rightx = (SDL_InputMapping){ EMappingKind_Axis, SDL_GAMEPAD_AXIS_RIGHTX };
++    out->righty = (SDL_InputMapping){ EMappingKind_Axis, SDL_GAMEPAD_AXIS_RIGHTY };
++    out->lefttrigger = (SDL_InputMapping){ EMappingKind_Axis, SDL_GAMEPAD_AXIS_LEFT_TRIGGER };
++    out->righttrigger = (SDL_InputMapping){ EMappingKind_Axis, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER };
++    return true;
+ }
+ 
+ SDL_JoystickDriver SDL_XBOX_JoystickDriver = {
+--- a/nxdk_glue/render/SDL_render_xgu.c
++++ b/nxdk_glue/render/SDL_render_xgu.c
+@@ -1260,6 +1260,7 @@
+             Sleep(0);
+         }
+         pb_kill();
++        XVideoSetVideoEnable(true);
+         if (render_data->vertex_data) {
+             MmFreeContiguousMemory(render_data->vertex_data);
+         }
+@@ -1315,9 +1316,13 @@
+         pb_set_color_format(NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8, false);
+     }
+ 
+-    while (pb_init() < 0) {
+-        DbgPrint("[nxdk renderer] pbkit initialization failed, retrying...\n");
+-        Sleep(10);
++    if (pb_init() < 0) {
++        MmFreeContiguousMemory(render_data->vertex_data);
++        SDL_free(render_data);
++        renderer->internal = NULL;
++        renderer->vertex_data = NULL;
++        XVideoSetVideoEnable(true);
++        return SDL_SetError("pbkit initialization failed");
+     }
+ 
+     XVideoSetVideoEnable(true);
+@@ -1403,11 +1408,13 @@
+     render_data->active_surface_format = pb_ColorFmt;
+     render_data->gpu_epoch = 1;
+ 
+-    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_RGB565);
++    // SDL uses the first format's pixel size when no exact match exists.
++    // Prefer 32-bit textures to preserve gradients in RGB24 and indexed artwork.
+     SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_ARGB8888);
+     SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_XRGB8888);
+     SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_RGBA8888);
+     SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_ABGR8888);
++    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_RGB565);
+     SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_ARGB4444);
+     SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_ARGB1555);
+     SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_XRGB1555);
+--- a/nxdk_glue/thread/SDL_systhread.c
++++ b/nxdk_glue/thread/SDL_systhread.c
+@@ -34,7 +34,8 @@
+     (void)vpfnBeginThread;
+     (void)vpfnEndThread;
+ 
+-    const SIZE_T stack_size = (thread->stacksize > PAGE_SIZE) ? ROUND_TO_PAGES(thread->stacksize) : PAGE_SIZE;
++    // Zero requests nxdk's default stack. One page is too small for stream setup and decoding.
++    const SIZE_T stack_size = thread->stacksize ? ROUND_TO_PAGES(thread->stacksize) : 0;
+ 
+     thread->handle = CreateThread(NULL, stack_size, sdl_thread, thread, 0, NULL);
+     if (thread->handle == NULL) {
+--- a/nxdk_glue/video/SDL_xboxvideo.c
++++ b/nxdk_glue/video/SDL_xboxvideo.c
+@@ -21,27 +21,7 @@
+         return false;
+     }
+ 
+-    SDL_PixelFormat format = SDL_GetWindowPixelFormat(window);
+-    int bpp = SDL_BYTESPERPIXEL(format) * 8;
+-
+-    // Unless it looks like we are request HD modes, fall back to 640x480
+-    if (window->w * window->h < 1280 * 720) {
+-        window->w = 640;
+-        window->h = 480;
+-    } else {
+-        // Anything else attempt 720p
+-        window->w = 1280;
+-        window->h = 720;
+-    }
+-
+-    if (!XVideoSetMode(window->w, window->h, bpp, REFRESH_DEFAULT)) {
+-        window->w = 640;
+-        window->h = 480;
+-        if (!XVideoSetMode(window->w, window->h, bpp, REFRESH_DEFAULT)) {
+-            return SDL_SetError("Failed to set video mode to %dx%dx%d", window->w, window->h, bpp);
+-        }
+-    }
+-
++    // Moonlight selects the encoder mode, including SD widescreen and 1080i.
+     VIDEO_MODE vm = XVideoGetMode();
+     window->x = 0;
+     window->y = 0;
+@@ -63,6 +43,15 @@
+     return true;
+ }
+ 
++/* Synchronize SDL after Moonlight has switched the encoder mode. */
++static void XBOX_SetWindowSize(SDL_VideoDevice *device, SDL_Window *window)
++{
++    (void)device;
++    const VIDEO_MODE mode = XVideoGetMode();
++    SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, mode.width, mode.height);
++    SDL_OnWindowResized(window);
++}
++
+ static void XBOX_DeleteDevice(SDL_VideoDevice *device)
+ {
+     SDL_free(device);
+@@ -71,7 +60,8 @@
+ static void XBOX_PumpEvents(SDL_VideoDevice *device)
+ {
+     (void)device;
+-    // Do nothing
++    extern void moonlight_usb_input_pump(void);
++    moonlight_usb_input_pump();
+ }
+ 
+ static inline SDL_PixelFormat pixelFormatSelector(int bpp)
+@@ -109,7 +99,9 @@
+     }
+ 
+     // Save the info and return!
+-    SDL_SetSurfaceProperty(SDL_GetWindowProperties(window), XBOX_SURFACE, surface);
++    if (!SDL_SetSurfaceProperty(SDL_GetWindowProperties(window), XBOX_SURFACE, surface)) {
++        return false;
++    }
+     *format = surface_format;
+     *pixels = surface->pixels;
+     *pitch = surface->pitch;
+@@ -172,31 +164,14 @@
+ static bool XBOX_VideoInit(SDL_VideoDevice *_this)
+ {
+     (void)_this;
++    const VIDEO_MODE current = XVideoGetMode();
+     SDL_DisplayMode mode;
+-    VIDEO_MODE xmode;
+-    void *p = NULL;
+-    while (XVideoListModes(&xmode, 0, 0, &p)) {
+-        // Due to 1.6 bugs, lets just limit ourself to 32bpp modes
+-        if (xmode.bpp != 32) {
+-            continue;
+-        }
+-
+-        // pbkit doesnt like 720 widths. FIXME?
+-        if (xmode.width == 720) {
+-            continue;
+-        }
+-
+-        SDL_zero(mode);
+-        mode.format = pixelFormatSelector(xmode.bpp);
+-        mode.w = xmode.width;
+-        mode.h = xmode.height;
+-
+-        if (SDL_AddBasicVideoDisplay(&mode) < 0) {
+-            return false;
+-        }
+-    }
+-
+-    return true;
++    SDL_zero(mode);
++    mode.format = pixelFormatSelector(current.bpp);
++    mode.w = current.width;
++    mode.h = current.height;
++    mode.refresh_rate = (float)current.refresh;
++    return SDL_AddBasicVideoDisplay(&mode) != 0;
+ }
+ 
+ static bool XBOX_SetDisplayMode(SDL_VideoDevice *_this, SDL_VideoDisplay *display, SDL_DisplayMode *mode)
+@@ -204,8 +179,7 @@
+     (void)_this;
+     (void)display;
+     (void)mode;
+-    DbgPrint("XBOX_SetDisplayMode: %dx%d@%dHz\n", mode->w, mode->h, mode->refresh_rate);
+-    return 0;
++    return true;
+ }
+ 
+ static void XBOX_VideoQuit(SDL_VideoDevice *_this)
+@@ -229,6 +203,7 @@
+     device->VideoInit = XBOX_VideoInit;
+     device->VideoQuit = XBOX_VideoQuit;
+     device->SetDisplayMode = XBOX_SetDisplayMode;
++    device->SetWindowSize = XBOX_SetWindowSize;
+     device->PumpEvents = XBOX_PumpEvents;
+     device->CreateWindowFramebuffer = SDL_XBOX_CreateWindowFramebuffer;
+     device->UpdateWindowFramebuffer = SDL_XBOX_UpdateWindowFramebuffer;

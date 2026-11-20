@@ -10,7 +10,7 @@
 // lib includes
 #include <hal/debug.h>
 #include <hal/video.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <xboxkrnl/xboxkrnl.h>
 
 // local includes
@@ -111,8 +111,8 @@ namespace {
    * @return True if the queue reached the limit before the timeout.
    */
   bool wait_for_queue(const streaming::AudioPlayer &player, Uint32 limit) {
-    const Uint32 deadline = SDL_GetTicks() + 2000;
-    while (player.pending_bytes() > limit && !SDL_TICKS_PASSED(SDL_GetTicks(), deadline)) {
+    const Uint64 deadline = SDL_GetTicks() + 2000;
+    while (player.pending_bytes() > limit && SDL_GetTicks() < deadline) {
       SDL_Delay(10);
     }
     if (const auto pending = player.pending_bytes(); pending > limit) {

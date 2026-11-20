@@ -15,8 +15,8 @@
 #include <vector>
 
 // lib includes
-#include <SDL.h>
-#include <SDL_ttf.h>
+#include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 // local includes
 #include "src/app/screenshot_library.h"
@@ -59,7 +59,7 @@ namespace streaming {
      * @brief Adopt a controller and discover other devices.
      * @param controller Owned SDL controller reference.
      */
-    void reset(SDL_GameController *controller);
+    void reset(SDL_Gamepad *controller);
     /**
      * @brief Apply persisted local-control preferences for this session.
      * @param screenshotDirectory Screenshot folder, or empty for the title-scoped default.
@@ -88,14 +88,16 @@ namespace streaming {
     void invalidate_panel(FfmpegStreamBackend &backend);
     /**
      * @brief Open a controller in the lowest free local slot.
-     * @param deviceIndex SDL joystick index.
+     * @param instance SDL gamepad instance ID.
      */
-    void open_if_needed(int deviceIndex);
+    void open_if_needed(SDL_JoystickID instance);
+    /** @brief Fill empty slots from SDL's current gamepad instance IDs. */
+    void open_connected_gamepads();
     /**
      * @brief Remove a controller while preserving all other slot numbers.
      * @param instance SDL joystick instance ID.
      */
-    void close_if_removed(int instance);
+    void close_if_removed(SDL_JoystickID instance);
     /**
      * @brief Sample the state of all connected controllers.
      * @return True when any controller has the menu chord pressed.
@@ -105,7 +107,7 @@ namespace streaming {
      * @brief Transfer a connected controller to the shell.
      * @return Owned reference, or nullptr.
      */
-    SDL_GameController *take_controller_for_shell();
+    SDL_Gamepad *take_controller_for_shell();
     /**
      * @brief Describe controller connectivity for diagnostic builds.
      * @return One line for each occupied local slot.
@@ -165,7 +167,8 @@ namespace streaming {
      * @brief Independent controller state and shortcut latch.
      */
     struct Device {
-      SDL_GameController *handle = nullptr;  ///< Owned SDL reference.
+      SDL_Gamepad *handle = nullptr;  ///< Owned SDL reference.
+      std::vector<std::pair<int, int>> shortcuts;  ///< Raw button indices and mapped chord flags.
       input::StreamExitChord chord;  ///< Event-order chord detection.
       input::ControllerState sample {};  ///< Latest sampled state.
       bool chordDown = false;  ///< Chord edge latch.
@@ -333,7 +336,7 @@ namespace streaming {
        * @brief Apply trigger edges while the keyboard owns this controller.
        * @param axis Queued controller axis transition.
        */
-      void keyboard_trigger(const SDL_ControllerAxisEvent &axis) const;
+      void keyboard_trigger(const SDL_GamepadAxisEvent &axis) const;
       /**
        * @brief Recognize the original Xbox raw-button shortcut.
        * @param button Queued joystick button transition.
@@ -344,7 +347,7 @@ namespace streaming {
        * @param button Queued controller button transition.
        * @param active Transport readiness.
        */
-      void route_controller_button(const SDL_ControllerButtonEvent &button, bool active) const;
+      void route_controller_button(const SDL_GamepadButtonEvent &button, bool active) const;
       /**
        * @brief Navigate from the current sample of the controller owning the local menu.
        */
@@ -357,7 +360,7 @@ namespace streaming {
        * @param statisticsEnabled Session statistics setting.
        * @return True on a confirmed stream exit.
        */
-      bool controller_button(const SDL_ControllerButtonEvent &button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const;
+      bool controller_button(const SDL_GamepadButtonEvent &button, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const;
       /**
        * @brief Apply one local controller button action.
        * @param button SDL controller button.
@@ -371,7 +374,7 @@ namespace streaming {
        * @brief Apply queued stick movement before the next sampled state.
        * @param axis Queued controller axis transition.
        */
-      void controller_axis(const SDL_ControllerAxisEvent &axis) const;
+      void controller_axis(const SDL_GamepadAxisEvent &axis) const;
       /**
        * @brief Route physical keyboard input to local controls or the host.
        * @param key Queued keyboard transition.
@@ -401,7 +404,7 @@ namespace streaming {
        * @brief Open the wheels from gameplay or any local page and release host inputs.
        * @param device Controller instance ID, or -1 for keyboard control.
        */
-      void open_menu(int device) const;
+      void open_menu(std::int64_t device) const;
       /**
        * @brief Apply direct cancel, disconnect or quit-app input on the exit confirmation page.
        * @param key SDL key code.
@@ -450,7 +453,7 @@ namespace streaming {
     input::StreamInput router_;  ///< Ordered event-thread host input.
     input::StreamMenu menu_;  ///< Local menu state.
     bool focused_ = true;  ///< Window focus state.
-    int mouseDevice_ = -1;  ///< Virtual mouse controller, or disabled.
+    std::int64_t mouseDevice_ = -1;  ///< Virtual mouse controller, or disabled.
     Uint32 lastTick_ = 0;  ///< Pointer integration clock.
     int pulseSlot_ = -1;  ///< Controller with a pending guide/share release.
     Uint32 pulseUntil_ = 0;  ///< Guide/share pulse deadline.
@@ -463,7 +466,7 @@ namespace streaming {
     /**
      * @brief Content dependencies other than the focused key or wheel sector.
      */
-    using PanelContent = std::tuple<TTF_Font *, input::UiInputDevice, input::StreamMenuPage, int, int, bool, bool, bool, int, bool, std::string>;
+    using PanelContent = std::tuple<TTF_Font *, input::UiInputDevice, input::StreamMenuPage, int, int, bool, bool, bool, std::int64_t, bool, std::string>;
 
     /**
      * @brief Input ownership, release gates and local navigation timing.

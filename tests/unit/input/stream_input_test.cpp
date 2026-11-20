@@ -52,6 +52,19 @@ TEST_F(StreamInputTest, MaintainsFourStableSlotsAndRemovalMask) {
 }
 
 /**
+ * @brief SDL3 IDs use the full unsigned 32-bit range even though the router reserves a negative sentinel.
+ */
+TEST_F(StreamInputTest, RoutesTheLargestSdlGamepadId) {
+  constexpr std::uint32_t instance = 0xffffffffU;
+  ASSERT_EQ(router.connect(instance), 0);
+  router.controller(instance, {A_FLAG});
+  EXPECT_EQ(packets.back().controller.buttonFlags, A_FLAG);
+  router.disconnect(instance);
+  EXPECT_EQ(router.active_mask(), 0);
+  EXPECT_EQ(packets.back().controller.buttonFlags, 0);
+}
+
+/**
  * @brief Full analog state and quick digital press/release transitions reach each pad's own slot.
  */
 TEST_F(StreamInputTest, PreservesAxesTriggersAndQuickTransitions) {
