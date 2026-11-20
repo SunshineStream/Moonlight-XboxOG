@@ -119,7 +119,7 @@ extern "C" {
     }
     snapshot[*count] = 0;
     auto *ids = snapshot.data();
-    registry().enumerations.emplace(ids, std::move(snapshot));
+    registry().enumerations.try_emplace(ids, std::move(snapshot));
     return ids;
   }
 
