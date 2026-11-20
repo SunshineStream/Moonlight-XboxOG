@@ -49,6 +49,7 @@ namespace {
     VIDEO_MODE mode {640, 480, 32, 60};  ///< Active output mode.
     DWORD ticks = 0;  ///< Deterministic clock.
     DWORD vblanks = 0;  ///< Deterministic scanout clock.
+    DWORD gpuVblankResumeTick = 0;  ///< First tick at which the fake GPU may signal vblank.
     int initResult = 0;  ///< Injected pbkit initialization result.
     int allocationsUntilFailure = -1;  ///< Negative disables allocation failure injection.
     int initializations = 0;  ///< Number of GPU context acquisitions.
@@ -79,6 +80,7 @@ namespace {
       hardware.crtcIndex = 0;
       hardware.mode = {640, 480, 32, 60};
       hardware.ticks = hardware.vblanks = 0;
+      hardware.gpuVblankResumeTick = 0;
       hardware.initResult = 0;
       hardware.allocationsUntilFailure = -1;
       hardware.initializations = hardware.shutdowns = 0;
@@ -139,7 +141,9 @@ DWORD GetTickCount() {
 
 void Sleep(DWORD milliseconds) {
   hardware.ticks += milliseconds;
-  ++hardware.vblanks;
+  if (hardware.ticks >= hardware.gpuVblankResumeTick) {
+    ++hardware.vblanks;
+  }
   if (hardware.softwareDisplay.pollVblank && hardware.softwareDisplay.signalVblank) {
     hardware.softwareDisplay.displayedScanout = VIDEOREG(CRTC_START);
     hardware.softwareDisplay.primaryPixelAtVblank = hardware.framebuffer[0];
@@ -428,6 +432,37 @@ TEST_F(PvideoPresenterTest, ReleasesGpuResourcesWhenOverlayCompositionFails) {
   EXPECT_FALSE(presenter.active());
 }
 
+/** @brief Reuse a buffer as soon as its submission has crossed vblank. */
+TEST_F(PvideoPresenterTest, SkipsWaitingWhenVblankHasAlreadyRetiredThePreviousBuffer) {
+  streaming::PvideoPresenter presenter;
+  std::string error;
+  ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
+
+  ++hardware.vblanks;
+  const auto readyTick = hardware.ticks;
+  ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
+  EXPECT_EQ(hardware.ticks, readyTick);
+
+  // The newest submission still needs one blank before its old buffer is safe.
+  ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
+  EXPECT_GT(hardware.ticks, readyTick);
+}
+
+/** @brief A stalled scanout fails presentation by the deadline and can still retire cleanly. */
+TEST_F(PvideoPresenterTest, TimesOutWhenVblankCannotRetireThePreviousBuffer) {
+  streaming::PvideoPresenter presenter;
+  std::string error;
+  ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
+
+  hardware.gpuVblankResumeTick = hardware.ticks + 51U;
+  EXPECT_FALSE(presenter.present(frame, destination, &error));
+  EXPECT_NE(error.find("Timed out waiting for GPU scanout"), std::string::npos);
+  EXPECT_EQ(hardware.ticks, hardware.gpuVblankResumeTick);
+  EXPECT_EQ(VIDEOREG(0x8700), 0U);
+  EXPECT_FALSE(presenter.active());
+  EXPECT_TRUE(hardware.allocations.empty());
+}
+
 /** @brief The 16-bit 1080i framebuffer still presents full-resolution YUY2 video. */
 TEST_F(PvideoPresenterTest, UsesRgb565For16BitScanout) {
   hardware.mode = {1920, 1080, 16, 60};
@@ -441,7 +476,7 @@ TEST_F(PvideoPresenterTest, UsesRgb565For16BitScanout) {
 }
 
 /**
- * @brief Repeated sessions restore the CPU scanout, legacy registers and enabled video output.
+ * @brief A fresh blank after stop lets each session restore CPU scanout and legacy registers safely.
  */
 TEST_F(PvideoPresenterTest, RestoresOutputAndRegistersAcrossRepeatedSessions) {
   constexpr std::array<int, 4> crtcRegisters {31, 82, 32, 27};
@@ -456,7 +491,10 @@ TEST_F(PvideoPresenterTest, RestoresOutputAndRegistersAcrossRepeatedSessions) {
   for (int session = 0; session < 2; ++session) {
     std::string error;
     ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
+    ++hardware.vblanks;
+    const auto stopTick = hardware.ticks;
     ASSERT_TRUE(presenter.reset());
+    EXPECT_GT(hardware.ticks, stopTick);
     EXPECT_FALSE(presenter.active());
     EXPECT_EQ(VIDEOREG(0x8700), 0U);
     EXPECT_EQ(VIDEOREG(0x8910), 0x2000U);
