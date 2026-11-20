@@ -18,12 +18,10 @@
 #include <vector>
 
 // lib includes
+#include <Limelight.h>
 #include <lizardbyte/common/testing.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
-
-// third-party includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 // test includes
 #include "tests/support/network_test_constants.h"

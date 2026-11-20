@@ -6,9 +6,11 @@ include("${CMAKE_CURRENT_LIST_DIR}/../msys2.cmake")
 set(MOONLIGHT_OPENSSL_MODE "BUNDLED" CACHE STRING "How to provide OpenSSL for Moonlight: BUNDLED" FORCE)
 set_property(CACHE MOONLIGHT_OPENSSL_MODE PROPERTY STRINGS BUNDLED)
 
-set(OPENSSL_VERSION 1.1.1w)
-set(OPENSSL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third-party/openssl")
-set(OPENSSL_BUILD_ROOT "${CMAKE_BINARY_DIR}/third-party/openssl")
+CPMGetPackage(openssl)
+string(REGEX REPLACE "^(OpenSSL_|openssl-)" "" OPENSSL_VERSION "${OPENSSL_TAG}")
+string(REPLACE "_" "." OPENSSL_VERSION "${OPENSSL_VERSION}")
+set(OPENSSL_SOURCE_DIR "${openssl_SOURCE_DIR}")
+set(OPENSSL_BUILD_ROOT "${CMAKE_BINARY_DIR}/third-party/openssl/${OPENSSL_VERSION}")
 set(OPENSSL_BUILD_DIR "${OPENSSL_BUILD_ROOT}/build")
 set(OPENSSL_INSTALL_DIR "${OPENSSL_BUILD_ROOT}/install")
 
@@ -59,8 +61,7 @@ file(MAKE_DIRECTORY "${OPENSSL_INSTALL_DIR}/include")
 file(MAKE_DIRECTORY "${OPENSSL_INSTALL_DIR}/lib")
 
 if(NOT EXISTS "${OPENSSL_SOURCE_DIR}/Configure")
-    message(FATAL_ERROR
-            "OpenSSL submodule not found at ${OPENSSL_SOURCE_DIR}. Run: git submodule update --init --recursive")
+    message(FATAL_ERROR "OpenSSL Configure script not found in ${OPENSSL_SOURCE_DIR}")
 endif()
 
 find_program(PERL_EXECUTABLE perl REQUIRED)
@@ -273,6 +274,7 @@ if(NOT DEFINED OPENSSL_CONFIGURE_COMMAND)
 endif()
 
 ExternalProject_Add(${MOONLIGHT_OPENSSL_EXTERNAL_TARGET}
+        PREFIX "${OPENSSL_BUILD_ROOT}"
         SOURCE_DIR "${OPENSSL_SOURCE_DIR}"
         BINARY_DIR "${OPENSSL_BUILD_DIR}"
         CONFIGURE_COMMAND
@@ -315,6 +317,12 @@ set(OPENSSL_INCLUDE_DIR "${OPENSSL_INSTALL_DIR}/include")
 set(OPENSSL_CRYPTO_LIBRARY "${OPENSSL_INSTALL_DIR}/lib/libcrypto.a")
 set(OPENSSL_SSL_LIBRARY "${OPENSSL_INSTALL_DIR}/lib/libssl.a")
 set(OPENSSL_LIBRARIES OpenSSL::Crypto OpenSSL::SSL)
+
+# FindOpenSSL on Windows resolves these names when moonlight-common-c requests OpenSSL.
+if(WIN32)
+    set(LIB_EAY "${OPENSSL_CRYPTO_LIBRARY}")
+    set(SSL_EAY "${OPENSSL_SSL_LIBRARY}")
+endif()
 
 if(NOT TARGET OpenSSL::Crypto)
     add_library(OpenSSL::Crypto STATIC IMPORTED GLOBAL)

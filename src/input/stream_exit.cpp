@@ -6,7 +6,7 @@
 #include "src/input/stream_exit.h"
 
 // lib includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
+#include <Limelight.h>
 
 namespace input {
   bool is_stream_exit_requested(std::uint32_t buttons, bool controllerPresent) {

@@ -218,6 +218,7 @@ nxdk_dependencies=(
   "mingw-w64-x86_64-nasm"
 )
 moonlight_dependencies=(
+  "patch"
   "mingw-w64-x86_64-doxygen"
   "mingw-w64-x86_64-graphviz"
   "mingw-w64-ucrt-x86_64-nodejs"
@@ -241,6 +242,7 @@ nxdk_dependencies=(
   "nasm"
 )
 moonlight_dependencies=(
+  "patch"
   "doxygen"
   "graphviz"
   "nodejs"

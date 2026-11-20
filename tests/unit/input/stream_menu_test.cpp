@@ -10,8 +10,7 @@
 #include <set>
 
 // lib includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
-
+#include <Limelight.h>
 #include <lizardbyte/common/testing.h>
 
 /**

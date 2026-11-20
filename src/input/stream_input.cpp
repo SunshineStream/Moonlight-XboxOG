@@ -11,7 +11,7 @@
 #include <utility>
 
 // lib includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
+#include <Limelight.h>
 
 namespace {
   constexpr int VIRTUAL_MOUSE_SOURCE = -2;  ///< Reserved source for controller pointer buttons.

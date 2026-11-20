@@ -13,7 +13,7 @@
 #include <utility>
 
 // lib includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
+#include <Limelight.h>
 
 // local includes
 #include "src/logging/log_file.h"

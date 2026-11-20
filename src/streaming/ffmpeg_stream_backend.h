@@ -14,8 +14,7 @@
 #include <vector>
 
 // lib includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
-
+#include <Limelight.h>
 #include <SDL3/SDL.h>
 
 // local includes

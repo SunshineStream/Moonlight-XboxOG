@@ -11,7 +11,7 @@
 #include <cstring>
 
 // lib includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
+#include <Limelight.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>

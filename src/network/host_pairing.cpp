@@ -22,8 +22,7 @@
 #include <vector>
 
 // lib includes
-#include "third-party/moonlight-common-c/src/Limelight.h"
-
+#include <Limelight.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>

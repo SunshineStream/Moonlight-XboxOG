@@ -10,13 +10,13 @@
 // lib includes
 #include <hal/debug.h>
 #include <hal/video.h>
+#include <Limelight.h>
 #include <SDL3/SDL.h>
 #include <xboxkrnl/xboxkrnl.h>
 
 // local includes
 #include "src/logging/logger.h"
 #include "src/streaming/audio_player.h"
-#include "third-party/moonlight-common-c/src/Limelight.h"
 
 // The staged SDL library references Moonlight's USB hooks even when only audio is initialized.
 /** @brief Satisfy the SDL joystick initializer's USB hook for this input-free probe. */

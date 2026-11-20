@@ -80,6 +80,7 @@ jobs:
             "nasm"
           )
           moonlight_dependencies=(
+            "patch"
           )
           dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
           sudo apt-get update
@@ -111,6 +112,7 @@ jobs:
             flex
             git
             make
+            patch
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-gcc

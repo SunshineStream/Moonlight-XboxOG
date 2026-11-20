@@ -1,4 +1,4 @@
-Adapt FFmpeg's thread wrapper to the Xbox runtime in a build-directory copy:
+Adapt FFmpeg's thread wrapper to the Xbox runtime:
 
 - nxdk condition variables own kernel events and require explicit destruction.
 - Desktop Windows thread naming APIs are unavailable on Xbox.

@@ -61,8 +61,8 @@ MOONLIGHT_PREPARE_COMMON_DEPENDENCIES()
 # Use nanors' scalar backend on the Xbox CPU, which lacks SSSE3 and newer SIMD
 # instructions and cannot link the compiler runtime helpers used for x86 dispatch.
 set_property(SOURCE
-        "${CMAKE_SOURCE_DIR}/third-party/moonlight-common-c/nanors/deps/obl/oblas_lite.c"
-        DIRECTORY "${CMAKE_SOURCE_DIR}/third-party/moonlight-common-c"
+        "${moonlight-common-c_SOURCE_DIR}/nanors/deps/obl/oblas_lite.c"
+        TARGET_DIRECTORY moonlight-common-c
         APPEND PROPERTY COMPILE_OPTIONS
         -include "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/nanors_compat.h"
 )
@@ -80,7 +80,7 @@ target_include_directories(${CMAKE_PROJECT_NAME}
         SYSTEM PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${MOONLIGHT_FFMPEG_INCLUDE_DIR}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/third-party/tomlplusplus/include"
+        "${tomlplusplus_SOURCE_DIR}/include"
         "${MOONLIGHT_NXDK_NET_INCLUDE_DIR}"
         "${MOONLIGHT_NXDK_LIBC_EXTENSIONS_DIR}"
         "${MOONLIGHT_NXDK_LWIP_POSIX_COMPAT_DIR}"
@@ -163,7 +163,7 @@ if(MOONLIGHT_BUILD_AUDIO_EXPERIMENTS)
     target_link_options(audio_playback_probe PRIVATE /safeseh:no)
     target_link_libraries(audio_playback_probe PRIVATE
             ${MOONLIGHT_FFMPEG_LIBRARIES}
-            NXDK::NXDK NXDK::NXDK_CXX SDL3::SDL3 moonlight_nxdk_compat)
+            NXDK::NXDK NXDK::NXDK_CXX SDL3::SDL3 moonlight_nxdk_compat moonlight-common-c)
     set(_audio_playback_probe_xbe_dir "${CMAKE_CURRENT_BINARY_DIR}/audio-playback-probe")
     file(MAKE_DIRECTORY "${_audio_playback_probe_xbe_dir}")
     add_custom_target(audio_playback_probe_iso ALL
