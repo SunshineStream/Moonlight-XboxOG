@@ -7,6 +7,7 @@
 
 // standard includes
 #include <array>
+#include <numeric>
 #include <utility>
 
 // lib includes
@@ -27,6 +28,43 @@ TEST(VideoAccelerationTest, PacksStridedPlanesWithoutOverwritingPadding) {
   output.fill(0xcc);
   ASSERT_TRUE(streaming::pack_overlay_yuy2(frame, output.data(), output.size(), 6));
   EXPECT_EQ(output, (std::array<std::uint8_t, 18> {10, 70, 20, 90, 0xcc, 0xcc, 30, 70, 40, 90, 0xcc, 0xcc, 50, 80, 60, 100, 0xcc, 0xcc}));
+}
+
+/**
+ * @brief Wide packing handles unaligned planes, a partial block and exact last-row bounds.
+ */
+TEST(VideoAccelerationTest, PacksWideRowsAndTailWithUnalignedStorage) {
+  constexpr int width = 34;
+  constexpr int height = 3;
+  constexpr int lumaPitch = 37;
+  constexpr int chromaPitch = 19;
+  constexpr int outputPitch = 73;
+  constexpr std::size_t outputBytes = (height - 1) * outputPitch + width * 2;
+  std::array<std::uint8_t, 1 + (height - 1) * lumaPitch + width> y;
+  std::array<std::uint8_t, 1 + chromaPitch + width / 2> u, v;
+  std::iota(y.begin(), y.end(), 0);
+  std::iota(u.begin(), u.end(), 120);
+  std::iota(v.begin(), v.end(), 170);
+  const streaming::Yuv420FrameView frame {
+    width,
+    height,
+    {y.data() + 1, u.data() + 1, v.data() + 1},
+    {y.size() - 1, u.size() - 1, v.size() - 1},
+    {lumaPitch, chromaPitch, chromaPitch},
+  };
+  std::array<std::uint8_t, outputBytes + 2> output;
+  output.fill(0xcc);
+  auto expected = output;
+  for (int row = 0; row < height; ++row) {
+    for (int column = 0; column < width; ++column) {
+      const auto index = 1 + row * outputPitch + column * 2;
+      const auto &chroma = column % 2 == 0 ? u : v;
+      expected[index] = y[1 + row * lumaPitch + column];
+      expected[index + 1] = chroma[1 + (row / 2) * chromaPitch + column / 2];
+    }
+  }
+  ASSERT_TRUE(streaming::pack_overlay_yuy2(frame, output.data() + 1, outputBytes, outputPitch));
+  EXPECT_EQ(output, expected);
 }
 
 /**

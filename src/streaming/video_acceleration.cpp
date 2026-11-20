@@ -4,6 +4,48 @@
  */
 #include "src/streaming/video_acceleration.h"
 
+#if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
+namespace {
+  constexpr int PACK_BLOCK_PIXELS = 16;  ///< Luma pixels packed by one MMX block.
+
+  /**
+   * @brief Interleave sixteen luma samples and eight U/V pairs into YUY2.
+   *
+   * Wide stores reduce the CPU time spent writing PVIDEO's write-combined
+   * buffers. These instructions need only MMX and allow unaligned rows.
+   *
+   * @param y Sixteen accessible luma bytes.
+   * @param u Eight accessible blue chroma bytes.
+   * @param v Eight accessible red chroma bytes.
+   * @param output Thirty-two accessible destination bytes.
+   */
+  inline void pack_yuy2_block(const std::uint8_t *y, const std::uint8_t *u, const std::uint8_t *v, std::uint8_t *output) {
+    asm volatile(
+      "movq (%[u]), %%mm2\n\t"
+      "movq (%[v]), %%mm3\n\t"
+      "movq %%mm2, %%mm4\n\t"
+      "punpcklbw %%mm3, %%mm2\n\t"
+      "punpckhbw %%mm3, %%mm4\n\t"
+      "movq (%[y]), %%mm0\n\t"
+      "movq 8(%[y]), %%mm1\n\t"
+      "movq %%mm0, %%mm3\n\t"
+      "movq %%mm1, %%mm5\n\t"
+      "punpcklbw %%mm2, %%mm0\n\t"
+      "punpckhbw %%mm2, %%mm3\n\t"
+      "punpcklbw %%mm4, %%mm1\n\t"
+      "punpckhbw %%mm4, %%mm5\n\t"
+      "movq %%mm0, (%[out])\n\t"
+      "movq %%mm3, 8(%[out])\n\t"
+      "movq %%mm1, 16(%[out])\n\t"
+      "movq %%mm5, 24(%[out])"
+      :
+      : [y] "r"(y), [u] "r"(u), [v] "r"(v), [out] "r"(output)
+      : "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "memory"
+    );
+  }
+}  // namespace
+#endif
+
 namespace streaming {
   std::string overlay_frame_error(const Yuv420FrameView &frame) {
     if (frame.width < 2 || frame.width > 2046 || frame.height < 2 || frame.height > 2047 || (frame.width & 1) != 0) {
@@ -37,13 +79,25 @@ namespace streaming {
       const auto *u = blueChroma + static_cast<std::size_t>(row / 2) * frame.pitches[1];
       const auto *v = redChroma + static_cast<std::size_t>(row / 2) * frame.pitches[2];
       auto *output = destination + static_cast<std::size_t>(row) * pitch;
-      for (int column = 0; column < frame.width; column += 2) {
+      int column = 0;
+#if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
+      for (; column <= frame.width - PACK_BLOCK_PIXELS; column += PACK_BLOCK_PIXELS) {
+        pack_yuy2_block(y + column, u + column / 2, v + column / 2, output + column * 2);
+      }
+#endif
+      for (; column < frame.width; column += 2) {
         output[column * 2] = y[column];
         output[column * 2 + 1] = u[column / 2];
         output[column * 2 + 2] = y[column + 1];
         output[column * 2 + 3] = v[column / 2];
       }
     }
+#if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
+    if (frame.width >= PACK_BLOCK_PIXELS) {
+      // MMX aliases the x87 stack. Mark its registers empty before returning.
+      asm volatile("emms");
+    }
+#endif
     return true;
   }
 
