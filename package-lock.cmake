@@ -3,10 +3,11 @@
 # Renovate reads the metadata comments through the configured CMake regex managers.
 # Keep tracked VERSION/TAG/COMMIT values immediately below their Renovate metadata.
 
-# FFmpeg is cross-compiled with its upstream configure script.
+# FFmpeg, cross-compiled with its upstream configure script.
 # renovate: datasource=github-tags depName=FFmpeg/FFmpeg versioning=semver-coerced
 # extractVersion=^n(?<version>\d+\.\d+(?:\.\d+)?)$
 set(FFMPEG_VERSION 9.0.2)
+set(FFMPEG_NXDK_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch")
 CPMDeclarePackage(ffmpeg
         NAME ffmpeg
         VERSION ${FFMPEG_VERSION}
@@ -14,6 +15,9 @@ CPMDeclarePackage(ffmpeg
         GIT_TAG n${FFMPEG_VERSION}
         # Preserve LF endings in the upstream shell scripts on Windows.
         GIT_CONFIG core.autocrlf=false
+        UPDATE_DISCONNECTED YES
+        PATCHES "${FFMPEG_NXDK_PATCH}"
+        NO_CACHE YES
         DOWNLOAD_ONLY YES
 )
 
@@ -32,14 +36,31 @@ CPMDeclarePackage(lucide
 # renovate: datasource=git-refs depName=Ryzee119/nxdk-sdl3 packageName=https://github.com/Ryzee119/nxdk-sdl3.git
 # ref=master
 set(NXDK_SDL3_COMMIT 62455b72ac80d318961c05c1230ffcb471e9f2d4)
+set(NXDK_SDL3_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/nxdk-sdl3.patch")
 CPMDeclarePackage(nxdk_sdl3
         NAME nxdk_sdl3
         GIT_REPOSITORY https://github.com/Ryzee119/nxdk-sdl3.git
         GIT_TAG ${NXDK_SDL3_COMMIT}
+        GIT_CONFIG core.autocrlf=false
+        UPDATE_DISCONNECTED YES
+        PATCHES "${NXDK_SDL3_PATCH}"
+        NO_CACHE YES
         DOWNLOAD_ONLY YES
 )
 
-# SDL3_image uses its built-in image decoders on Xbox.
+# OpenSSL
+# renovate: datasource=github-tags depName=openssl/openssl
+# versioning=regex:^(?:OpenSSL_|openssl-)(?<major>\d+)[._](?<minor>\d+)[._](?<patch>\d+)[a-z]*$
+set(OPENSSL_TAG OpenSSL_1_1_1w)
+CPMDeclarePackage(openssl
+        NAME openssl
+        TLS_VERIFY TRUE
+        # The source snapshot omits the upstream test submodules.
+        URL https://github.com/openssl/openssl/archive/refs/tags/${OPENSSL_TAG}.tar.gz
+        DOWNLOAD_ONLY YES
+)
+
+# SDL3_image
 # renovate: datasource=github-tags depName=libsdl-org/SDL_image versioning=semver
 # extractVersion=^release-(?<version>\d+\.\d+\.\d+)$
 set(SDL3_IMAGE_VERSION 3.2.6)
@@ -48,12 +69,11 @@ CPMDeclarePackage(sdl3_image
         VERSION ${SDL3_IMAGE_VERSION}
         GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
         GIT_TAG release-${SDL3_IMAGE_VERSION}
-        # Leave the unused vendored codecs uninitialized.
-        GIT_CONFIG "submodule.active=:(exclude)external"
+        GIT_CONFIG "submodule.active=:(exclude)external"  # Leave the unused vendored codecs uninitialized.
         DOWNLOAD_ONLY YES
 )
 
-# SDL3_ttf uses its vendored FreeType without desktop text-shaping dependencies.
+# SDL3_ttf
 # renovate: datasource=github-tags depName=libsdl-org/SDL_ttf versioning=semver
 # extractVersion=^release-(?<version>\d+\.\d+\.\d+)$
 set(SDL3_TTF_VERSION 3.2.2)
@@ -64,4 +84,30 @@ CPMDeclarePackage(sdl3_ttf
         GIT_TAG release-${SDL3_TTF_VERSION}
         GIT_SUBMODULES external/freetype
         DOWNLOAD_ONLY YES
+)
+
+# toml++
+# renovate: datasource=git-refs depName=marzer/tomlplusplus packageName=https://github.com/marzer/tomlplusplus.git
+# ref=master
+set(TOMLPLUSPLUS_COMMIT c38c9b922a68fc9772b25d7f606133d3ec4decfd)
+CPMDeclarePackage(tomlplusplus
+        NAME tomlplusplus
+        GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+        GIT_TAG ${TOMLPLUSPLUS_COMMIT}
+        # nxdk's compiler wrappers do not report CMake compile features.
+        DOWNLOAD_ONLY YES
+)
+
+# moonlight-common-c
+# cmake-lint: disable=C0301
+# renovate: datasource=git-refs depName=moonlight-stream/moonlight-common-c packageName=https://github.com/moonlight-stream/moonlight-common-c.git
+# ref=master
+set(MOONLIGHT_COMMON_C_COMMIT 94c65fd364d17b223f00a8763c9a5d94a66cb8dd)
+CPMDeclarePackage(moonlight-common-c
+        NAME moonlight-common-c
+        GIT_REPOSITORY https://github.com/moonlight-stream/moonlight-common-c.git
+        GIT_TAG ${MOONLIGHT_COMMON_C_COMMIT}
+        GIT_SUBMODULES enet nanors
+        EXCLUDE_FROM_ALL YES
+        OPTIONS "BUILD_SHARED_LIBS OFF"
 )

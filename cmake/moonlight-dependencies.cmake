@@ -1,7 +1,5 @@
 include_guard(GLOBAL)
 
-include("${CMAKE_CURRENT_LIST_DIR}/patch.cmake")
-
 # Disable nxdk's unimplemented math entry points; aligned allocation uses private adapters.
 function(_moonlight_patch_ffmpeg_config_header ffmpeg_config_header)
     if(NOT EXISTS "${ffmpeg_config_header}")
@@ -77,10 +75,6 @@ function(_moonlight_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
         list(APPEND compat_hashes "${input}=${input_hash}")
     endforeach()
     file(SHA256 "${CMAKE_SOURCE_DIR}/cmake/moonlight-dependencies.cmake" ffmpeg_dependency_manifest_hash)
-    file(SHA256 "${CMAKE_SOURCE_DIR}/cmake/patch.cmake" ffmpeg_patch_helper_hash)
-    set(ffmpeg_patch "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch")
-    file(SHA256 "${ffmpeg_patch}" ffmpeg_patch_hash)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ffmpeg_patch}")
 
     set(signature_inputs
             "FFMPEG_REVISION=${ffmpeg_revision}"
@@ -94,8 +88,6 @@ function(_moonlight_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
             "FFMPEG_CC_WRAPPER_SHA256=${ffmpeg_cc_wrapper_hash}"
             "FFMPEG_CXX_WRAPPER_SHA256=${ffmpeg_cxx_wrapper_hash}"
             "FFMPEG_NASM_WRAPPER_SHA256=${ffmpeg_nasm_wrapper_hash}"
-            "FFMPEG_PATCH_SHA256=${ffmpeg_patch_hash}"
-            "FFMPEG_PATCH_HELPER_SHA256=${ffmpeg_patch_helper_hash}"
             "FFMPEG_DEPENDENCY_MANIFEST_SHA256=${ffmpeg_dependency_manifest_hash}")
     list(JOIN signature_inputs "\n" signature_text)
     string(SHA256 signature "${signature_text}")
@@ -258,9 +250,6 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
 
     file(REMOVE_RECURSE "${ffmpeg_build_dir}" "${ffmpeg_install_dir}")
     file(MAKE_DIRECTORY "${ffmpeg_build_dir}")
-    moonlight_patch_sources("${ffmpeg_source_dir}" "${ffmpeg_build_dir}"
-            "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch"
-            compat/w32pthreads.h)
 
     _moonlight_get_ffmpeg_shell_paths(
             ffmpeg_shell_paths
@@ -411,26 +400,8 @@ macro(MOONLIGHT_PREPARE_COMMON_DEPENDENCIES)
 
     set(ENET_NO_INSTALL ON CACHE BOOL "Do not install libraries built for enet" FORCE)
 
-    set(_moonlight_restore_build_shared_libs FALSE)
-    if(DEFINED BUILD_SHARED_LIBS)
-        set(_moonlight_restore_build_shared_libs TRUE)
-        set(_moonlight_saved_build_shared_libs "${BUILD_SHARED_LIBS}")
-    endif()
-
-    set(BUILD_SHARED_LIBS OFF)
-
-    if(NOT TARGET moonlight-common-c)
-        add_subdirectory(
-                "${CMAKE_SOURCE_DIR}/third-party/moonlight-common-c"
-                "${CMAKE_BINARY_DIR}/third-party/moonlight-common-c"
-        )
-    endif()
-
-    if(_moonlight_restore_build_shared_libs)
-        set(BUILD_SHARED_LIBS "${_moonlight_saved_build_shared_libs}")
-    else()
-        unset(BUILD_SHARED_LIBS)
-    endif()
+    CPMGetPackage(moonlight-common-c)
+    CPMGetPackage(tomlplusplus)
 
     if(TARGET moonlight-common-c AND DEFINED MOONLIGHT_OPENSSL_EXTERNAL_TARGET)
         if(TARGET ${MOONLIGHT_OPENSSL_EXTERNAL_TARGET})

@@ -7,23 +7,8 @@
 	url = https://github.com/LizardByte/lizardbyte-common.git
 	branch = master
 	shallow = true
-[submodule "third-party/moonlight-common-c"]
-	path = third-party/moonlight-common-c
-	url = https://github.com/moonlight-stream/moonlight-common-c.git
-	branch = master
-	shallow = true
 [submodule "third-party/nxdk"]
 	path = third-party/nxdk
 	url = https://github.com/XboxDev/nxdk.git
-	branch = master
-	shallow = true
-[submodule "third-party/openssl"]
-	path = third-party/openssl
-	url = https://github.com/openssl/openssl.git
-	branch = OpenSSL_1_1_1-stable
-	shallow = true
-[submodule "third-party/tomlplusplus"]
-	path = third-party/tomlplusplus
-	url = https://github.com/marzer/tomlplusplus.git
 	branch = master
 	shallow = true

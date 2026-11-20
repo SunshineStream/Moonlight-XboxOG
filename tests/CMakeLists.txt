@@ -58,14 +58,15 @@ target_include_directories(${PROJECT_NAME}
         PRIVATE
         ${CMAKE_SOURCE_DIR}/tests/support
         ${CMAKE_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/third-party/tomlplusplus/include
+        ${tomlplusplus_SOURCE_DIR}/include
         ${GTEST_SOURCE_DIR}/googletest/include
         ${GTEST_SOURCE_DIR}/googlemock/include)
 target_link_libraries(${PROJECT_NAME}
         PRIVATE
         gtest_main
         Moonlight::OpenSSL
-        lizardbyte::test_support)
+        lizardbyte::test_support
+        moonlight-common-c)
 target_compile_definitions(${PROJECT_NAME}
         PRIVATE
         TOML_EXCEPTIONS=0
@@ -80,7 +81,7 @@ target_link_options(${PROJECT_NAME}
         PRIVATE
         ${TEST_COVERAGE_LINK_OPTIONS})
 
-add_dependencies(${PROJECT_NAME} gtest gtest_main gmock gmock_main moonlight-common-c)
+add_dependencies(${PROJECT_NAME} gtest gtest_main gmock gmock_main)
 
 include(GoogleTest)
 set(TEST_RUNTIME_PROPERTIES)
