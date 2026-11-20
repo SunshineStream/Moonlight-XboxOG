@@ -3,6 +3,20 @@
 # Renovate reads the metadata comments through the configured CMake regex managers.
 # Keep tracked VERSION/TAG/COMMIT values immediately below their Renovate metadata.
 
+# FFmpeg is cross-compiled with its upstream configure script.
+# renovate: datasource=github-tags depName=FFmpeg/FFmpeg versioning=semver-coerced
+# extractVersion=^n(?<version>\d+\.\d+(?:\.\d+)?)$
+set(FFMPEG_VERSION 9.0.2)
+CPMDeclarePackage(ffmpeg
+        NAME ffmpeg
+        VERSION ${FFMPEG_VERSION}
+        GIT_REPOSITORY https://github.com/FFmpeg/FFmpeg.git
+        GIT_TAG n${FFMPEG_VERSION}
+        # Preserve LF endings in the upstream shell scripts on Windows.
+        GIT_CONFIG core.autocrlf=false
+        DOWNLOAD_ONLY YES
+)
+
 # Lucide SVG icons
 # renovate: datasource=github-tags depName=lucide-icons/lucide
 set(LUCIDE_VERSION 1.76.0)

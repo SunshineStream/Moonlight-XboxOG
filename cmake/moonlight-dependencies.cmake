@@ -33,9 +33,7 @@ endfunction()
 # Validate FFmpeg source and support files before attempting a configure.
 function(_moonlight_validate_xbox_ffmpeg_inputs ffmpeg_source_dir)
     if(NOT EXISTS "${ffmpeg_source_dir}/configure")
-        message(FATAL_ERROR
-                "FFmpeg source directory not found: ${ffmpeg_source_dir}\n"
-                "Run: git submodule update --init --recursive")
+        message(FATAL_ERROR "FFmpeg configure script not found in ${ffmpeg_source_dir}")
     endif()
 
     foreach(ffmpeg_support_file IN LISTS ARGN)
@@ -86,6 +84,7 @@ function(_moonlight_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
 
     set(signature_inputs
             "FFMPEG_REVISION=${ffmpeg_revision}"
+            "FFMPEG_SOURCE_DIR=${ffmpeg_source_dir}"
             "NXDK_DIR=${nxdk_dir}"
             "NXDK_REVISION=${nxdk_revision}"
             "COMPAT_SHA256=${compat_hashes}"
@@ -324,11 +323,11 @@ endfunction()
 
 # Prepare the static FFmpeg libraries used by the Xbox streaming runtime.
 function(moonlight_prepare_xbox_ffmpeg nxdk_dir)
-    set(ffmpeg_source_dir "${CMAKE_SOURCE_DIR}/third-party/ffmpeg")
+    CPMGetPackage(ffmpeg)
     set(ffmpeg_cc_wrapper "${CMAKE_SOURCE_DIR}/scripts/ffmpeg-nxdk-cc.sh")
     set(ffmpeg_cxx_wrapper "${CMAKE_SOURCE_DIR}/scripts/ffmpeg-nxdk-cxx.sh")
     _moonlight_validate_xbox_ffmpeg_inputs(
-            "${ffmpeg_source_dir}"
+            "${ffmpeg_SOURCE_DIR}"
             "${ffmpeg_cc_wrapper}"
             "${ffmpeg_cxx_wrapper}"
             "${CMAKE_SOURCE_DIR}/scripts/ffmpeg-nxdk-nasm.sh")
@@ -348,7 +347,7 @@ function(moonlight_prepare_xbox_ffmpeg nxdk_dir)
     _moonlight_compute_ffmpeg_signature(
             signature
             "${nxdk_dir}"
-            "${ffmpeg_source_dir}"
+            "${ffmpeg_SOURCE_DIR}"
             "${ffmpeg_cc_wrapper}"
             "${ffmpeg_cxx_wrapper}")
     _moonlight_should_rebuild_ffmpeg(
@@ -361,7 +360,7 @@ function(moonlight_prepare_xbox_ffmpeg nxdk_dir)
         message(STATUS "Preparing FFmpeg for Xbox at ${ffmpeg_build_dir}")
         _moonlight_rebuild_xbox_ffmpeg(
                 "${nxdk_dir}"
-                "${ffmpeg_source_dir}"
+                "${ffmpeg_SOURCE_DIR}"
                 "${ffmpeg_build_dir}"
                 "${ffmpeg_install_dir}"
                 "${ffmpeg_cc_wrapper}"

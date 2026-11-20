@@ -2,11 +2,6 @@
 	path = third-party/dockle
 	url = https://github.com/LizardByte/dockle.git
 	branch = master
-[submodule "third-party/ffmpeg"]
-	path = third-party/ffmpeg
-	url = https://github.com/FFmpeg/FFmpeg.git
-	branch = release/9.0
-	shallow = true
 [submodule "third-party/lizardbyte-common"]
 	path = third-party/lizardbyte-common
 	url = https://github.com/LizardByte/lizardbyte-common.git
