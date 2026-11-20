@@ -41,7 +41,8 @@ TEST(VideoAccelerationTest, PacksWideRowsAndTailWithUnalignedStorage) {
   constexpr int outputPitch = 73;
   constexpr std::size_t outputBytes = (height - 1) * outputPitch + width * 2;
   std::array<std::uint8_t, 1 + (height - 1) * lumaPitch + width> y;
-  std::array<std::uint8_t, 1 + chromaPitch + width / 2> u, v;
+  std::array<std::uint8_t, 1 + chromaPitch + width / 2> u;
+  std::array<std::uint8_t, 1 + chromaPitch + width / 2> v;
   std::iota(y.begin(), y.end(), 0);
   std::iota(u.begin(), u.end(), 120);
   std::iota(v.begin(), v.end(), 170);
