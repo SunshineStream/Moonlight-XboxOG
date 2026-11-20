@@ -85,6 +85,7 @@ namespace streaming {
     bool scanoutStateSaved_ = false;  ///< Legacy scanout and overlay state must be restored, including initialization failures.
     std::size_t bufferSize_ = 0;  ///< Allocated size of each DMA buffer.
     int pitch_ = 0;  ///< Packed source stride.
+    std::uint32_t bufferReuseVblank_ = 0;  ///< Vblank counter that must advance before the next buffer can be written.
     unsigned int nextBuffer_ = 0;  ///< Buffer not currently being scanned out.
     bool active_ = false;  ///< Registers and buffers are owned by this presenter.
     bool surfaceActive_ = false;  ///< pbkit owns the GPU context and vblank counter for the scanout surface.

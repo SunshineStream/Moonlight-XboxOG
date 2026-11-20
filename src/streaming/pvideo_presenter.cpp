@@ -30,23 +30,23 @@ namespace {
   std::array<std::uint8_t *, 2> quarantinedBuffers {};  ///< Keep uncertain DMA references resident instead of freeing memory still in use.
 
   /**
-   * @brief Wait for pbkit's vblank counter without an unbounded event wait or a synthetic raster register.
+   * @brief Wait for a vblank after the supplied pbkit counter value.
    *
    * xemu's raster register increments on reads rather than reporting scanlines,
    * so a raster-wrap poll cannot reliably synchronize buffer reuse there.
    *
-   * @return True on a new vblank, or false after 50 milliseconds.
+   * @param previous Counter snapshot taken after initialization, submission or stop.
+   * @return True if the counter has advanced, or false after 50 milliseconds.
    */
-  bool wait_for_scanout() {
+  bool wait_for_scanout_after(std::uint32_t previous) {
     const DWORD started = GetTickCount();
-    const DWORD previous = pb_get_vbl_counter();
-    while (GetTickCount() - started < 50U) {
-      Sleep(1);
-      if (pb_get_vbl_counter() != previous) {
-        return true;
+    while (pb_get_vbl_counter() == previous) {
+      if (GetTickCount() - started >= 50U) {
+        return false;
       }
+      Sleep(1);
     }
-    return false;
+    return true;
   }
 
   /**
@@ -171,7 +171,7 @@ namespace streaming {
     if (active_) {
       VIDEOREG(VIDEO_STOP) = 1;
       VIDEOREG(VIDEO_BUFFER) = 0;
-      synchronized = wait_for_scanout();
+      synchronized = wait_for_scanout_after(pb_get_vbl_counter());
       if (!synchronized) {
         overlayQuarantined = true;
         for (std::size_t index = 0; index < buffers_.size(); ++index) {
@@ -214,6 +214,7 @@ namespace streaming {
 #endif
     active_ = false;
     bufferSize_ = 0;
+    bufferReuseVblank_ = 0;
     nextBuffer_ = 0;
     return synchronized;
   }
@@ -266,13 +267,14 @@ namespace streaming {
           VIDEOREG(0x8100) = 0x11;
           VIDEOREG(0x8088) = (VIDEOREG(0x8088) & 0xf43ff43fU) | 0x04000400U;
           VIDEOREG(0x808c) = (VIDEOREG(0x808c) & 0xf40ff40fU) | 0x04000400U;
+          bufferReuseVblank_ = pb_get_vbl_counter();
         }
       }
     }
     if (failure.empty()) {
-      // The previous submission may latch at this blank. Wait before writing
-      // the retired buffer, rather than overwriting it while scanout still uses it.
-      if (!wait_for_scanout()) {
+      // The previous submission must cross a vblank before we reuse its old
+      // scanout buffer. That vblank may already have passed since submission.
+      if (!wait_for_scanout_after(bufferReuseVblank_)) {
         failure = "Timed out waiting for GPU scanout; using software presentation";
       } else if (!pack_overlay_yuy2(frame, buffers_[nextBuffer_], bufferSize_, pitch_)) {
         failure = "Failed to pack the GPU overlay frame";
@@ -303,6 +305,9 @@ namespace streaming {
       } else {
         VIDEOREG(VIDEO_STOP) = 0;
         VIDEOREG(VIDEO_BUFFER) = 1U;
+        // Sample after the request so a blank during register setup cannot
+        // retire the old buffer prematurely.
+        bufferReuseVblank_ = pb_get_vbl_counter();
         nextBuffer_ ^= 1U;
         return true;
       }

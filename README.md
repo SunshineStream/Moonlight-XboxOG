@@ -415,47 +415,5 @@ scripts\setup-xemu.cmd --skip-support-files
 
 ## 📋 Todo
 
-- Build
-   - [x] Build in GitHub CI
-   - [x] Build with CMake instead of Make, see https://github.com/Ryzee119/Xenium-Tools/blob/master/CMakeLists.txt and https://github.com/abaire/nxdk_pgraph_tests/blob/4b7934e6d612a6d17f9ec229a2d72601a5caefc4/CMakeLists.txt
-   - [x] Get build environment working with CLion directly instead of using external terminal
-      - [ ] debugger, see https://github.com/abaire/xbdm_gdb_bridge
-   - [x] Add a run config for CLion, see https://github.com/Subtixx/XSampleProject
-   - [x] Automatically run built xiso in Xemu
-   - [x] Add unit testing framework
-      - [x] Separate main build and unit test builds, due to cross compiling, see https://stackoverflow.com/a/64335131/11214013
-      - [x] Get tests to properly compile
-      - [x] Enable codecov
-   - [x] Enable sonarcloud
-   - [x] Build moonlight-common-c
-      - [x] Build custom enet
-   - [x] Docs via doxygen
-- Menus / Screens
-   - [x] Loading/splash screen
-      - [x] Initial loading screen, see https://github.com/XboxDev/nxdk/blob/master/samples/sdl_image/main.c
-      - [x] Set video mode based on the best available mode
-      - [x] dynamic splash screen (size based on current resolution)
-      - [x] simplify (draw background color and overlay logo) to reduce total size
-   - [x] Main/Home
-   - [x] Settings
-   - [x] Add Host
-   - [x] Game/App Selection
-   - [x] Host Details
-   - [x] App Details
-   - [x] Pause/Hotkey overlay
-- Streaming
-   - [x] Video - https://www.xbmc4xbox.org.uk/wiki/XBMC_Features_and_Supported_Formats#Xbox_supported_video_formats_and_resolutions
-   - [ ] Audio
-      - [x] Mono
-      - [x] Stereo
-      - [ ] Dolby Digital 5.1 output over optical S/PDIF
-- Input
-   - [x] Gamepad Input
-   - [x] Keyboard Input
-   - [x] Mouse Input
-   - [x] Mouse Emulation via Gamepad
-- Misc.
-  - [x] Save config and pairing states
-  - [x] Host pairing
-  - [x] Auto host discovery
-  - [ ] Possibly, GPU overclocking, see https://github.com/GXTX/XboxOverclock
+- [ ] Debugger, see https://github.com/abaire/xbdm_gdb_bridge
+- [ ] Dolby Digital 5.1 audio output over optical S/PDIF
