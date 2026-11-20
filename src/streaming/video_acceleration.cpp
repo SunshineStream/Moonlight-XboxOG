@@ -4,50 +4,6 @@
  */
 #include "src/streaming/video_acceleration.h"
 
-#if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
-namespace {
-  constexpr int PACK_BLOCK_PIXELS = 16;  ///< Luma pixels packed by one MMX block.
-
-  /**
-   * @brief Interleave sixteen luma samples and eight U/V pairs into YUY2.
-   *
-   * Wide stores reduce the CPU time spent writing PVIDEO's write-combined
-   * buffers. These instructions need only MMX and allow unaligned rows.
-   * Output operands give the address of each store. The memory clobber
-   * accounts for the full width of the loads and stores.
-   *
-   * @param y Sixteen accessible luma bytes.
-   * @param u Eight accessible blue chroma bytes.
-   * @param v Eight accessible red chroma bytes.
-   * @param output Thirty-two accessible destination bytes.
-   */
-  inline void pack_yuy2_block(const std::uint8_t *y, const std::uint8_t *u, const std::uint8_t *v, std::uint8_t *output) {
-    asm volatile(
-      "movq (%[u]), %%mm2\n\t"
-      "movq (%[v]), %%mm3\n\t"
-      "movq %%mm2, %%mm4\n\t"
-      "punpcklbw %%mm3, %%mm2\n\t"
-      "punpckhbw %%mm3, %%mm4\n\t"
-      "movq (%[y]), %%mm0\n\t"
-      "movq 8(%[y]), %%mm1\n\t"
-      "movq %%mm0, %%mm3\n\t"
-      "movq %%mm1, %%mm5\n\t"
-      "punpcklbw %%mm2, %%mm0\n\t"
-      "punpckhbw %%mm2, %%mm3\n\t"
-      "punpcklbw %%mm4, %%mm1\n\t"
-      "punpckhbw %%mm4, %%mm5\n\t"
-      "movq %%mm0, %[out0]\n\t"
-      "movq %%mm3, %[out1]\n\t"
-      "movq %%mm1, %[out2]\n\t"
-      "movq %%mm5, %[out3]"
-      : [out0] "=m"(output[0]), [out1] "=m"(output[8]), [out2] "=m"(output[16]), [out3] "=m"(output[24])
-      : [y] "r"(y), [u] "r"(u), [v] "r"(v)
-      : "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "memory"
-    );
-  }
-}  // namespace
-#endif
-
 namespace streaming {
   std::string overlay_frame_error(const Yuv420FrameView &frame) {
     if (frame.width < 2 || frame.width > 2046 || frame.height < 2 || frame.height > 2047 || (frame.width & 1) != 0) {
@@ -76,6 +32,9 @@ namespace streaming {
     if (!overlay_frame_error(frame).empty() || destination == nullptr || pitch < frame.width * 2 || capacity < static_cast<std::uint64_t>(frame.height - 1) * static_cast<unsigned int>(pitch) + static_cast<unsigned int>(frame.width * 2)) {
       return false;
     }
+#if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
+    constexpr int PACK_BLOCK_PIXELS = 16;
+#endif
     for (int row = 0; row < frame.height; ++row) {
       const auto *y = luma + static_cast<std::size_t>(row) * frame.pitches[0];
       const auto *u = blueChroma + static_cast<std::size_t>(row / 2) * frame.pitches[1];
@@ -84,7 +43,32 @@ namespace streaming {
       int column = 0;
 #if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
       for (; column <= frame.width - PACK_BLOCK_PIXELS; column += PACK_BLOCK_PIXELS) {
-        pack_yuy2_block(y + column, u + column / 2, v + column / 2, output + column * 2);
+        auto *packed = output + column * 2;
+        // Interleave sixteen luma samples and eight U/V pairs. Wide stores
+        // speed up writes to PVIDEO's write-combined buffers, even on
+        // unaligned rows. The memory clobber covers all accessed bytes.
+        asm volatile(
+          "movq (%[u]), %%mm2\n\t"
+          "movq (%[v]), %%mm3\n\t"
+          "movq %%mm2, %%mm4\n\t"
+          "punpcklbw %%mm3, %%mm2\n\t"
+          "punpckhbw %%mm3, %%mm4\n\t"
+          "movq (%[y]), %%mm0\n\t"
+          "movq 8(%[y]), %%mm1\n\t"
+          "movq %%mm0, %%mm3\n\t"
+          "movq %%mm1, %%mm5\n\t"
+          "punpcklbw %%mm2, %%mm0\n\t"
+          "punpckhbw %%mm2, %%mm3\n\t"
+          "punpcklbw %%mm4, %%mm1\n\t"
+          "punpckhbw %%mm4, %%mm5\n\t"
+          "movq %%mm0, %[out0]\n\t"
+          "movq %%mm3, %[out1]\n\t"
+          "movq %%mm1, %[out2]\n\t"
+          "movq %%mm5, %[out3]"
+          : [out0] "=m"(packed[0]), [out1] "=m"(packed[8]), [out2] "=m"(packed[16]), [out3] "=m"(packed[24])
+          : [y] "r"(y + column), [u] "r"(u + column / 2), [v] "r"(v + column / 2)
+          : "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "memory"
+        );
       }
 #endif
       for (; column < frame.width; column += 2) {
