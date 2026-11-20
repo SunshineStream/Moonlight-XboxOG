@@ -204,10 +204,15 @@ namespace {
     int streamingRemotely = STREAM_CFG_AUTO;
   };
 
+  /** @brief Restore normal render-thread priority when leaving the scope. */
   class ScopedThreadPriority {
   public:
-    explicit ScopedThreadPriority(SDL_ThreadPriority priority) {
-      active_ = SDL_SetCurrentThreadPriority(priority);
+    /**
+     * @brief Set the render thread's priority for the duration of this scope.
+     * @param priority SDL priority to request.
+     */
+    explicit ScopedThreadPriority(SDL_ThreadPriority priority):
+        active_(SDL_SetCurrentThreadPriority(priority)) {
       if (!active_) {
         logging::debug("stream", std::string("SDL_SetCurrentThreadPriority failed for stream render thread: ") + SDL_GetError());
       }
@@ -223,7 +228,7 @@ namespace {
     ScopedThreadPriority &operator=(const ScopedThreadPriority &) = delete;
 
   private:
-    bool active_ = false;
+    bool active_;  ///< True after SDL accepted the priority change.
   };
 
   bool video_modes_match(const VIDEO_MODE &left, const VIDEO_MODE &right) {
@@ -881,8 +886,12 @@ namespace {
     logging::log(connection_log_level(message), "moonlight", message);
   }
 
-  int run_stream_start_thread(void *context) {
-    auto *startContext = static_cast<StreamStartContext *>(context);
+  /**
+   * @brief Start the streaming transport and publish its result to the render thread.
+   * @param startContext Transport configuration and shared connection state.
+   * @return Zero after publishing the result, or -1 if the context is incomplete.
+   */
+  int run_stream_start_thread(StreamStartContext *startContext) {
     if (startContext == nullptr || startContext->connectionState == nullptr) {
       return -1;
     }
@@ -1296,7 +1305,11 @@ namespace {
    * @return True when the worker ran to completion or cancellation.
    */
   bool run_stream_start_attempt(const StreamStartAttemptContext &attempt) {
-    if (SDL_Thread *startThread = SDL_CreateThread(run_stream_start_thread, "start-stream", &attempt.startContext); startThread != nullptr) {
+    const SDL_ThreadFunction startEntry = [](auto context) {
+      return run_stream_start_thread(static_cast<StreamStartContext *>(context));
+    };
+    SDL_Thread *startThread = SDL_CreateThread(startEntry, "start-stream", &attempt.startContext);
+    if (startThread != nullptr) {
       while (!attempt.connectionState.startCompleted.load() && !attempt.connectionState.stopRequested.load()) {
         pump_stream_events(&attempt.resources, &attempt.connectionState);
         if (attempt.connectionState.stopRequested.load()) {

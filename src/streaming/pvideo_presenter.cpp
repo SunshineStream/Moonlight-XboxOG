@@ -302,26 +302,26 @@ namespace streaming {
       VIDEOREG(0x8958 + offset) = format;
       if (VIDEOREG(0x8958 + offset) != format || VIDEOREG(0x8920 + offset) != physical) {
         failure = "GPU overlay register verification failed";
-      } else {
-        const bool firstSubmission = !active_;
-        VIDEOREG(VIDEO_STOP) = 0;
-        VIDEOREG(VIDEO_BUFFER) = 1U;
-        active_ = true;
-        // Sample after the request so a blank during register setup cannot
-        // retire the old buffer prematurely.
-        bufferReuseVblank_ = pb_get_vbl_counter();
-        if (firstSubmission && !wait_for_scanout_after(bufferReuseVblank_)) {
-          failure = "Timed out waiting for the first GPU frame; using software presentation";
-        } else {
-          if (firstSubmission) {
-            // The overlay can now cover the startup dialog. Switch the background
-            // at the blank so letterbox bars become black with video already ready.
-            VIDEOREG(CRTC_START) = static_cast<std::uint32_t>(MmGetPhysicalAddress(pb_back_buffer()));
-          }
-          nextBuffer_ ^= 1U;
-          return true;
-        }
       }
+    }
+    if (failure.empty()) {
+      const bool firstSubmission = !active_;
+      VIDEOREG(VIDEO_STOP) = 0;
+      VIDEOREG(VIDEO_BUFFER) = 1U;
+      active_ = true;
+      // Sample after the request so a blank during register setup cannot
+      // retire the old buffer prematurely.
+      bufferReuseVblank_ = pb_get_vbl_counter();
+      if (!firstSubmission || wait_for_scanout_after(bufferReuseVblank_)) {
+        if (firstSubmission) {
+          // The overlay can now cover the startup dialog. Switch the background
+          // at the blank so letterbox bars become black with video already ready.
+          VIDEOREG(CRTC_START) = static_cast<std::uint32_t>(MmGetPhysicalAddress(pb_back_buffer()));
+        }
+        nextBuffer_ ^= 1U;
+        return true;
+      }
+      failure = "Timed out waiting for the first GPU frame; using software presentation";
     }
 #else
     if (failure.empty()) {

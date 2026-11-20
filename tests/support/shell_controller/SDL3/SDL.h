@@ -25,16 +25,16 @@ extern "C" {
    */
   SDL_Gamepad *SDL_OpenGamepad(SDL_JoystickID instance);
   /**
-   * @brief Release one owned gamepad reference.
-   * @param gamepad Handle being closed.
+   * @brief Release one owned gamepad reference in the test registry.
+   * @param gamepad Stable handle identifying the registry entry.
    */
-  void SDL_CloseGamepad(SDL_Gamepad *gamepad);
+  void SDL_CloseGamepad(const SDL_Gamepad *gamepad);
   /**
    * @brief Check whether an open gamepad still has a connected device.
    * @param gamepad Open gamepad reference.
    * @return True while the device is attached.
    */
-  bool SDL_GamepadConnected(SDL_Gamepad *gamepad);
+  bool SDL_GamepadConnected(const SDL_Gamepad *gamepad);
   /**
    * @brief Free SDL-owned enumeration data.
    * @param memory Allocation returned by SDL, or null.

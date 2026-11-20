@@ -46,6 +46,8 @@ namespace streaming {
     /**
      * @brief Pack and submit one frame, or return an explicit fallback reason.
      *
+     * The startup background stays visible until the first overlay has latched.
+     *
      * @param frame Source YUV420 data.
      * @param destination Letterboxed output rectangle.
      * @param error Receives the reason acceleration could not be used.

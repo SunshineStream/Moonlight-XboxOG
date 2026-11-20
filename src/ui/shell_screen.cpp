@@ -116,19 +116,26 @@ namespace {
 
   /**
    * @brief Start a worker with enough stack for the synchronous TLS handshake.
+   * @tparam Task Type of the worker's userdata.
    * @param function SDL thread entry point.
    * @param name Diagnostic thread name.
    * @param stackSize Requested stack size in bytes.
    * @param context Entry point userdata.
    * @return Owned SDL thread, or null on failure.
    */
-  SDL_Thread *create_pairing_thread(SDL_ThreadFunction function, const char *name, Sint64 stackSize, void *context) {
+  template<typename Task>
+  SDL_Thread *create_pairing_thread(SDL_ThreadFunction function, const char *name, Sint64 stackSize, Task *context) {
     const SDL_PropertiesID properties = SDL_CreateProperties();
     if (properties == 0) {
       return nullptr;
     }
+    // SDL transports the callback address through a pointer property. On Xbox,
+    // function and data pointers have the same representation.
+    void *entry = nullptr;
+    static_assert(sizeof(entry) == sizeof(function));
+    std::memcpy(&entry, &function, sizeof(entry));
     SDL_Thread *thread = nullptr;
-    if (SDL_SetPointerProperty(properties, SDL_PROP_THREAD_CREATE_ENTRY_FUNCTION_POINTER, reinterpret_cast<void *>(function)) && SDL_SetStringProperty(properties, SDL_PROP_THREAD_CREATE_NAME_STRING, name) && SDL_SetNumberProperty(properties, SDL_PROP_THREAD_CREATE_STACKSIZE_NUMBER, stackSize) && SDL_SetPointerProperty(properties, SDL_PROP_THREAD_CREATE_USERDATA_POINTER, context)) {
+    if (SDL_SetPointerProperty(properties, SDL_PROP_THREAD_CREATE_ENTRY_FUNCTION_POINTER, entry) && SDL_SetStringProperty(properties, SDL_PROP_THREAD_CREATE_NAME_STRING, name) && SDL_SetNumberProperty(properties, SDL_PROP_THREAD_CREATE_STACKSIZE_NUMBER, stackSize) && SDL_SetPointerProperty(properties, SDL_PROP_THREAD_CREATE_USERDATA_POINTER, context)) {
       thread = SDL_CreateThreadWithProperties(properties);
     }
     SDL_DestroyProperties(properties);
@@ -1213,8 +1220,8 @@ namespace {
       return false;
     }
 
-    const int textureWidth = static_cast<int>(width);
-    const int textureHeight = static_cast<int>(height);
+    const auto textureWidth = static_cast<int>(width);
+    const auto textureHeight = static_cast<int>(height);
     SDL_Rect source {0, 0, textureWidth, textureHeight};
     if ((textureWidth * rect.h) > (textureHeight * rect.w)) {
       source.w = std::max(1, (textureHeight * rect.w) / rect.h);
@@ -5394,7 +5401,7 @@ namespace {
     join_shell_session_tasks(*runtime);
     // Keep the menu's working controller open while render resources change. The Xbox
     // SDL backend owns a pending USB read that must not be torn down at this boundary.
-    std::unique_ptr<SDL_Gamepad, decltype(&SDL_CloseGamepad)> retainedController(std::exchange(resources->controller, nullptr), SDL_CloseGamepad);
+    std::unique_ptr<SDL_Gamepad, decltype(&SDL_CloseGamepad)> retainedController(std::exchange(resources->controller, nullptr), &SDL_CloseGamepad);
     streaming::StreamSessionReport report;
     logging::info("stream", "Stream startup: menu preparation took " + std::to_string(SDL_GetTicks() - preparationStarted) + " ms");
     const bool streamStarted = streaming::run_stream_session(

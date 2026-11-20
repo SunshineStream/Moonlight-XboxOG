@@ -356,7 +356,7 @@ namespace streaming {
 
   void StreamControls::open_connected_gamepads() {
     int count = 0;
-    const std::unique_ptr<SDL_JoystickID, decltype(&SDL_free)> ids(SDL_GetGamepads(&count), SDL_free);
+    const std::unique_ptr<SDL_JoystickID, decltype(&SDL_free)> ids(SDL_GetGamepads(&count), &SDL_free);
     for (int i = 0; ids && i < count; ++i) {
       open_if_needed(ids.get()[i]);
     }
@@ -379,26 +379,6 @@ namespace streaming {
         return;
       }
     }
-  }
-
-  void StreamControls::close_if_removed(SDL_JoystickID instance) {
-    events_.release_pulse();
-    router_.disconnect(instance);
-    if (mouseDevice_ == instance) {
-      mouseDevice_ = -1;
-    }
-    if (menu_.owner == instance) {
-      menu_.owner = -1;
-      navigation_.armed = true;
-    }
-    for (auto &device : devices_) {
-      if (device.handle != nullptr && SDL_GetGamepadID(device.handle) == instance) {
-        SDL_CloseGamepad(device.handle);
-        device = {};
-      }
-    }
-    // Recover a fifth device that was waiting when the four slots were occupied.
-    open_connected_gamepads();
   }
 
   bool StreamControls::poll() {
@@ -922,6 +902,26 @@ namespace streaming {
     }
   }
 
+  void StreamControls::EventHandler::close_if_removed(SDL_JoystickID instance) const {
+    release_pulse();
+    controls_.router_.disconnect(instance);
+    if (controls_.mouseDevice_ == instance) {
+      controls_.mouseDevice_ = -1;
+    }
+    if (controls_.menu_.owner == instance) {
+      controls_.menu_.owner = -1;
+      controls_.navigation_.armed = true;
+    }
+    for (auto &device : controls_.devices_) {
+      if (device.handle != nullptr && SDL_GetGamepadID(device.handle) == instance) {
+        SDL_CloseGamepad(device.handle);
+        device = {};
+      }
+    }
+    // Recover a fifth device that was waiting when the four slots were occupied.
+    controls_.open_connected_gamepads();
+  }
+
   bool StreamControls::EventHandler::handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
     note_gamepad_activity(event);
     switch (event.type) {
@@ -929,7 +929,7 @@ namespace streaming {
         controls_.open_if_needed(event.gdevice.which);
         break;
       case SDL_EVENT_GAMEPAD_REMOVED:
-        controls_.close_if_removed(event.gdevice.which);
+        close_if_removed(event.gdevice.which);
         break;
       case SDL_EVENT_GAMEPAD_REMAPPED:
         for (auto &device : controls_.devices_) {

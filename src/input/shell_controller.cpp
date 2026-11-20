@@ -19,7 +19,7 @@ namespace input {
       *controller = nullptr;
     }
     int count = 0;
-    const std::unique_ptr<SDL_JoystickID, decltype(&SDL_free)> ids(SDL_GetGamepads(&count), SDL_free);
+    const std::unique_ptr<SDL_JoystickID, decltype(&SDL_free)> ids(SDL_GetGamepads(&count), &SDL_free);
     for (int index = 0; ids && index < count; ++index) {
       SDL_Gamepad *candidate = SDL_OpenGamepad(ids.get()[index]);
       if (candidate == nullptr) {

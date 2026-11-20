@@ -167,15 +167,15 @@ namespace {
     logging::print_startup_console_line(logging::LogLevel::info, "video", messageBuffer.data());
   }
 
-  int run_startup_task(void *context) {
-    auto *task = static_cast<StartupTaskState *>(context);
-    if (task == nullptr) {
-      return -1;
-    }
-
-    task->loadedHosts = startup::load_saved_hosts();
-    task->runtimeNetworkStatus = network::initialize_runtime_networking();
-    task->completed.store(true);
+  /**
+   * @brief Load saved hosts and initialize networking, then publish the startup result.
+   * @param task Startup state owned by the main thread.
+   * @return Zero after publishing the result.
+   */
+  int run_startup_task(StartupTaskState &task) {
+    task.loadedHosts = startup::load_saved_hosts();
+    task.runtimeNetworkStatus = network::initialize_runtime_networking();
+    task.completed.store(true);
     return 0;
   }
 
@@ -289,10 +289,13 @@ int main() {
 
   StartupTaskState startupTask {};
   debug_print_startup_checkpoint("Starting background startup task");
-  startupTask.thread = SDL_CreateThread(run_startup_task, "startup-init", &startupTask);
+  const SDL_ThreadFunction startupEntry = [](auto context) {
+    return run_startup_task(*static_cast<StartupTaskState *>(context));
+  };
+  startupTask.thread = SDL_CreateThread(startupEntry, "startup-init", &startupTask);
   if (startupTask.thread == nullptr) {
     debug_print_startup_checkpoint("SDL_CreateThread failed; running startup task synchronously");
-    run_startup_task(&startupTask);
+    run_startup_task(startupTask);
   } else {
     debug_print_startup_checkpoint("Background startup task created");
   }

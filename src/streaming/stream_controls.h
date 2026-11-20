@@ -94,11 +94,6 @@ namespace streaming {
     /** @brief Fill empty slots from SDL's current gamepad instance IDs. */
     void open_connected_gamepads();
     /**
-     * @brief Remove a controller while preserving all other slot numbers.
-     * @param instance SDL joystick instance ID.
-     */
-    void close_if_removed(SDL_JoystickID instance);
-    /**
      * @brief Sample the state of all connected controllers.
      * @return True when any controller has the menu chord pressed.
      */
@@ -445,6 +440,12 @@ namespace streaming {
       void release_pulse() const;
 
     private:
+      /**
+       * @brief Release a disconnected controller, preserving every other slot.
+       * @param instance SDL joystick instance ID from the removal event.
+       */
+      void close_if_removed(SDL_JoystickID instance) const;
+
       StreamControls &controls_;  ///< Session state updated by this handler's input operations.
     };
 

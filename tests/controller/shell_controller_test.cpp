@@ -8,7 +8,9 @@
 // standard includes
 #include <algorithm>
 #include <array>
-#include <cstdlib>
+#include <memory>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 // lib includes
@@ -46,7 +48,7 @@ namespace {
     std::array<SDL_Gamepad, 5> handles;  ///< Stable objects returned by successful opens.
     std::vector<int> available;  ///< Current enumeration order; removal changes indices, not identities.
     bool enumerationFailed = false;  ///< Simulated failure allocating the next enumeration.
-    int enumerationsOutstanding = 0;  ///< SDL-owned snapshots still needing SDL_free.
+    std::unordered_map<SDL_JoystickID *, std::unique_ptr<SDL_JoystickID[]>> enumerations;  ///< Snapshots owned by SDL until SDL_free.
     int enumerationCalls = 0;  ///< Detect unnecessary rescans while the active pad remains attached.
   };
 
@@ -74,12 +76,12 @@ namespace {
       registry().available.clear();
       registry().enumerationCalls = 0;
       registry().enumerationFailed = false;
-      registry().enumerationsOutstanding = 0;
+      registry().enumerations.clear();
     }
 
     /** @brief Check that all SDL enumeration snapshots were released. */
     void TearDown() override {
-      EXPECT_EQ(registry().enumerationsOutstanding, 0);
+      EXPECT_TRUE(registry().enumerations.empty());
       BaseTest::TearDown();
     }
 
@@ -110,24 +112,21 @@ extern "C" {
     if (registry().enumerationFailed) {
       return nullptr;
     }
-    auto *ids = static_cast<SDL_JoystickID *>(std::malloc((registry().available.size() + 1) * sizeof(SDL_JoystickID)));
-    if (ids == nullptr) {
-      return nullptr;
-    }
-    ++registry().enumerationsOutstanding;
+    auto snapshot = std::make_unique<SDL_JoystickID[]>(registry().available.size() + 1);
     for (const int slot : registry().available) {
       if (registry().devices[slot].mapped) {
-        ids[(*count)++] = FIRST_INSTANCE + slot;
+        snapshot[(*count)++] = FIRST_INSTANCE + slot;
       }
     }
-    ids[*count] = 0;
+    snapshot[*count] = 0;
+    auto *ids = snapshot.get();
+    registry().enumerations.emplace(ids, std::move(snapshot));
     return ids;
   }
 
   void SDL_free(void *memory) {
     if (memory != nullptr) {
-      --registry().enumerationsOutstanding;
-      std::free(memory);
+      EXPECT_EQ(registry().enumerations.erase(static_cast<SDL_JoystickID *>(memory)), 1U);
     }
   }
 
@@ -148,14 +147,14 @@ extern "C" {
     return &registry().handles[id];
   }
 
-  void SDL_CloseGamepad(SDL_Gamepad *controller) {
+  void SDL_CloseGamepad(const SDL_Gamepad *controller) {
     auto &device = registry().devices[controller->slot];
     EXPECT_GT(device.references, 0);
     --device.references;
     ++device.closes;
   }
 
-  bool SDL_GamepadConnected(SDL_Gamepad *controller) {
+  bool SDL_GamepadConnected(const SDL_Gamepad *controller) {
     return registry().devices[controller->slot].attached;
   }
 }
