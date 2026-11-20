@@ -7,7 +7,6 @@
 // standard includes
 #include <atomic>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -22,8 +21,7 @@
 #include "src/streaming/aligned_media_buffer.h"
 #include "src/streaming/audio_player.h"
 #include "src/streaming/ffmpeg_video_frame.h"
-#include "src/streaming/pvideo_presenter.h"
-#include "src/streaming/software_scanout.h"
+#include "src/streaming/ffmpeg_video_presenter.h"
 #include "src/streaming/stats_overlay.h"
 
 struct AVCodecContext;
@@ -75,10 +73,16 @@ namespace streaming {
     AudioPlayer &audio_player();
 
     /**
-     * @brief Select the preferred presentation path before starting the session.
-     * @param enabled True to try NV2A with automatic software fallback.
+     * @brief Access the render-thread presentation state.
+     * @return Presenter for frames, overlays, and display settings.
      */
-    void set_gpu_presentation_enabled(bool enabled);
+    FfmpegVideoPresenter &presentation();
+
+    /**
+     * @brief Read the current presentation state.
+     * @return Presenter owned by the backend.
+     */
+    const FfmpegVideoPresenter &presentation() const;
 
     /**
      * @brief Drain any pending screenshot and release FFmpeg, SDL, and cached frame resources.
@@ -97,56 +101,6 @@ namespace streaming {
      * @return Concurrent video counter snapshot.
      */
     VideoStatisticsCounters performance_counters() const;
-    /**
-     * @brief Describe the active presentation path.
-     *
-     * @return GPU, Software or Waiting.
-     */
-    std::string presentation_path() const;
-    /**
-     * @brief Replace the shared GPU/software statistics bitmap on the render thread.
-     * @param width Bitmap width.
-     * @param height Bitmap height.
-     * @param grayscale Packed, unpremultiplied grayscale pixels.
-     * @param placement Panel anchor shared by GPU and software paths.
-     * @param opacity Optional per-pixel coverage; empty for opaque statistics.
-     */
-    void set_statistics_bitmap(int width, int height, std::vector<std::uint8_t> grayscale, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left, std::vector<std::uint8_t> opacity = {});
-    /**
-     * @brief Replace the same shared overlay with colored UI pixels on the render thread.
-     * @param width Bitmap width.
-     * @param height Bitmap height.
-     * @param pixels Straight ARGB bytes preserving the bundled assets' colors and opacity.
-     * @param placement Panel anchor shared by GPU and software paths.
-     */
-    void set_color_overlay(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement = VideoOverlayPlacement::top_left);
-    /**
-     * @brief Retain the SDL panel for compositing without duplicating its color storage.
-     * @param surface Premultiplied ARGB8888 surface owned by the controls.
-     * @param placement Shared GPU/software panel anchor.
-     * @param opaqueBackground Source was rendered onto an opaque panel.
-     * @param scale Output pixels per raster sample.
-     */
-    void set_color_overlay_surface(const std::shared_ptr<SDL_Surface> &surface, VideoOverlayPlacement placement, bool opaqueBackground = false, int scale = 1);
-    /**
-     * @brief Submit a small focus repaint while retaining the rest of the panel and its conversion caches.
-     * @param region Updated rectangle in panel pixels.
-     */
-    void update_color_overlay(const VideoRectangle &region);
-
-    /**
-     * @brief Check whether an overlay change requires presenting an otherwise idle frame.
-     * @return True when the shared bitmap changed since the last presentation.
-     */
-    bool has_pending_overlay() const;
-
-    /**
-     * @brief Draw local controls before a stream has produced its first video frame.
-     * @param renderer SDL renderer.
-     * @param width Output width.
-     * @param height Output height.
-     */
-    void render_local_overlay(SDL_Renderer *renderer, int width, int height);
 
     /**
      * @brief Snapshot the displayed host frame and save it on a bounded background worker.
@@ -168,13 +122,6 @@ namespace streaming {
     int screenshot_progress() const;
 
     /**
-     * @brief Resolve the video rectangle available to shared GPU/software controls.
-     * @param width Output width, replaced with the fitted video width.
-     * @param height Output height, replaced with the fitted video height.
-     */
-    void local_overlay_size(int &width, int &height) const;
-
-    /**
      * @brief Render the latest decoded video frame to the supplied renderer.
      *
      * @param renderer SDL renderer used by the stream session.
@@ -183,11 +130,6 @@ namespace streaming {
      * @return True when decoded video is displayed on any presentation path.
      */
     bool render_latest_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight);
-
-    /**
-     * @brief Restore CPU framebuffer output before drawing shutdown or summary UI on the render thread.
-     */
-    void stop_video_presentation();
 
     /**
      * @brief Report whether at least one decoded video frame is available.
@@ -254,42 +196,6 @@ namespace streaming {
 
   private:
     /**
-     * @brief Present a frame while the public wrapper records submission time.
-     * @param renderer SDL video renderer.
-     * @param screenWidth Output width.
-     * @param screenHeight Output height.
-     * @return True after successful presentation.
-     */
-    bool render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight);
-    /**
-     * @brief Present the current video and UI through the GPU overlay when available.
-     *
-     * Clear the old startup page once the first GPU frame has taken over the display.
-     *
-     * @param destination Output video rectangle.
-     * @param newFrame True when a new decoded frame was acquired.
-     * @return True when GPU presentation is active and the output is up to date.
-     */
-    bool render_gpu_video_frame(const SDL_Rect &destination, bool newFrame);
-    /**
-     * @brief Upload and present the current video and UI through SDL.
-     * @param renderer SDL video renderer.
-     * @param destination Output video rectangle.
-     * @param textureNeedsUpload True when a new decoded frame was acquired.
-     * @return True after successful SDL presentation.
-     */
-    bool render_sdl_video_frame(SDL_Renderer *renderer, const SDL_Rect &destination, bool textureNeedsUpload);
-    /**
-     * @brief Draw the cached panel when the SDL presentation fallback is used.
-     * @param renderer SDL video renderer.
-     * @param destination Output video rectangle.
-     */
-    void render_sdl_statistics(SDL_Renderer *renderer, const SDL_Rect &destination);
-    /**
-     * @brief Mark pixels changed, retaining the SDL texture when its dimensions still match.
-     */
-    void invalidate_overlay_texture();
-    /**
      * @brief Record a retrieved frame before any client discard.
      *
      * @param unit Completed network frame.
@@ -352,15 +258,6 @@ namespace streaming {
     bool publish_video_frame(AVFrame &frameToPresent);
 
     /**
-     * @brief Present the latest decoded frame through a platform-specific direct framebuffer path.
-     *
-     * @param screenWidth Current framebuffer width.
-     * @param screenHeight Current framebuffer height.
-     * @return True when the frame was presented without SDL renderer involvement.
-     */
-    bool render_latest_video_frame_to_framebuffer(int screenWidth, int screenHeight);
-
-    /**
      * @brief Own one bounded screenshot job independently of live rendering and decoding.
      */
     struct ScreenshotTask {
@@ -393,15 +290,11 @@ namespace streaming {
     struct VideoState {  // NOSONAR(cpp:S1820) Owned video pipeline state intentionally groups FFmpeg, SDL, queue, and metric lifetimes.
       AVCodecContext *codecContext = nullptr;
       SwsContext *scaleContext = nullptr;
-      SwsContext *presentScaleContext = nullptr;
       AVFrame *decodedFrame = nullptr;
       AVFrame *convertedFrame = nullptr;
       AVPacket *packet = nullptr;
       const char *codecName = "video";  ///< Human-readable active video decoder name.
-      SDL_Texture *texture = nullptr;
       SDL_Thread *decoderThread = nullptr;
-      int textureWidth = 0;
-      int textureHeight = 0;
       std::uint64_t latestFrameVersion = 0;
       std::uint64_t renderedFrameVersion = 0;
       std::vector<std::uint8_t> packetBuffer;
@@ -421,7 +314,6 @@ namespace streaming {
     public:
       FfmpegVideoFrame latestFrame;  ///< Mailbox slot exchanged under frameMutex_.
       FfmpegVideoFrame decodeFrame;  ///< Decoder-owned slot reused to publish each new reference.
-      FfmpegVideoFrame renderFrame;  ///< Render-thread reference retained for presentation and UI redraws.
       std::atomic<bool> decoderStopRequested = false;
       std::atomic<bool> hasFrame = false;
       std::atomic<std::uint64_t> publishedFrameVersion = 0;
@@ -437,18 +329,9 @@ namespace streaming {
     VideoState video_ {};
     AudioPlayer audio_;  ///< Session Opus decoder and SDL playback device.
     ScreenshotTask screenshot_ {};  ///< Single capture slot, bounded to one additional YUV frame.
-    PvideoPresenter presenter_;  ///< Main-thread GPU presentation resources.
-    SoftwareScanout softwareScanout_;  ///< Main-thread software scanout pages.
-    VideoOverlay statisticsOverlay_;  ///< Shared cached panel for all presentation paths.
     VideoStatistics statistics_;  ///< Cumulative decode and presentation telemetry.
-    SDL_Texture *statisticsTexture_ = nullptr;  ///< Cached panel texture for SDL's final fallback.
-    bool statisticsBitmapChanged_ = false;  ///< A panel update requires refreshing a paused video frame.
-    bool statisticsTextureChanged_ = false;  ///< SDL texture requires the current bitmap.
-    VideoRectangle statisticsTextureDamage_ {};  ///< Pending SDL texture upload, accumulated until software presentation.
     VideoAccelerationReport acceleration_;  ///< Session diagnostics survive decoder cleanup.
-    bool gpuPresentationEnabled_ = false;  ///< Session preference applied before decoder setup.
-    bool overlayFailed_ = false;  ///< Avoid repeating a known failing hardware path this session.
-    bool softwareScanoutFailed_ = false;  ///< Use the SDL fallback after software scanout fails.
+    FfmpegVideoPresenter presentation_ {acceleration_};  ///< Render-thread state and platform presentation paths.
   };
 
 }  // namespace streaming

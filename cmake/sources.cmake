@@ -20,6 +20,7 @@ set(MOONLIGHT_TEST_EXCLUDED_SOURCES
         "${MOONLIGHT_SOURCE_ROOT}/src/splash/splash_screen.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/ffmpeg_stream_backend.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/ffmpeg_video_frame.cpp"
+        "${MOONLIGHT_SOURCE_ROOT}/src/streaming/ffmpeg_video_presenter.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/startup/memory_stats.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/session.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/stream_controls.cpp"

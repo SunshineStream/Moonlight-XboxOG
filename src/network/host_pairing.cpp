@@ -924,18 +924,16 @@ namespace {
     return {memory->data, memory->length};
   }
 
-  std::string x509_to_pem(X509 *certificate) {
+  /**
+   * @brief Serialize a certificate or key using the OpenSSL writer supplied by the caller.
+   * @tparam Writer Callable that writes a PEM object to a memory BIO.
+   * @param writePem PEM writer using the signature provided by the linked OpenSSL version.
+   * @return PEM text or an empty string if allocation or serialization fails.
+   */
+  template<class Writer>
+  std::string serialize_pem(Writer writePem) {
     std::unique_ptr<BIO, BioDeleter> bio(BIO_new(BIO_s_mem()));
-    if (bio == nullptr || PEM_write_bio_X509(bio.get(), certificate) != 1) {
-      return {};
-    }
-
-    return extract_pem(bio.get());
-  }
-
-  std::string private_key_to_pem(EVP_PKEY *key) {
-    std::unique_ptr<BIO, BioDeleter> bio(BIO_new(BIO_s_mem()));
-    if (bio == nullptr || PEM_write_bio_PrivateKey(bio.get(), key, nullptr, nullptr, 0, nullptr, nullptr) != 1) {
+    if (bio == nullptr || writePem(bio.get()) != 1) {
       return {};
     }
 
@@ -1073,8 +1071,12 @@ namespace {
       return append_openssl_error(errorMessage, "Failed to sign the client certificate used for pairing");
     }
 
-    identity->certificatePem = x509_to_pem(certificate.get());
-    identity->privateKeyPem = private_key_to_pem(key.get());
+    identity->certificatePem = serialize_pem([&certificate](BIO *bio) {
+      return PEM_write_bio_X509(bio, certificate.get());
+    });
+    identity->privateKeyPem = serialize_pem([&key](BIO *bio) {
+      return PEM_write_bio_PrivateKey(bio, key.get(), nullptr, nullptr, 0, nullptr, nullptr);
+    });
     if (identity->certificatePem.empty() || identity->privateKeyPem.empty()) {
       return append_openssl_error(errorMessage, "Failed to serialize the client pairing certificate or private key");
     }
@@ -1549,7 +1551,11 @@ namespace {
     }
 
     trace_pairing_detail("connecting to " + address + ":" + std::to_string(port));
-    if (const int connectResult = connect(socketGuard->handle, reinterpret_cast<const sockaddr *>(&socketAddress), sizeof(socketAddress)); connectResult == SOCKET_ERROR) {
+    alignas(sockaddr_in) sockaddr connectAddress {};
+    static_assert(sizeof(connectAddress) == sizeof(socketAddress), "The socket API address must hold the full IPv4 address");
+    // Preserve the complete IPv4 socket address in the type accepted by connect().
+    std::memcpy(&connectAddress, &socketAddress, sizeof(connectAddress));
+    if (const int connectResult = connect(socketGuard->handle, &connectAddress, sizeof(connectAddress)); connectResult == SOCKET_ERROR) {
       if (const int connectError = last_socket_error(); !is_connect_in_progress_error(connectError)) {
         return append_error(errorMessage, "Failed to connect to the host pairing endpoint at " + address + ":" + std::to_string(port) + " (socket error " + std::to_string(connectError) + ")");
       }

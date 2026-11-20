@@ -673,6 +673,21 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Create the CPU renderer for the startup dialog and fallback presentation.
+   * @param window Stream window after the shell renderer has been released.
+   * @param errorMessage Receives the SDL failure detail if creation fails.
+   * @return Owned renderer, or nullptr on error.
+   */
+  SDL_Renderer *create_stream_renderer(SDL_Window *window, std::string &errorMessage) {
+    // PVIDEO owns pbkit while streaming, including when the CPU draws the startup dialog.
+    auto *renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
+    if (renderer == nullptr) {
+      errorMessage = std::string("SDL_CreateRenderer failed for the streaming session: ") + SDL_GetError();
+    }
+    return renderer;
+  }
+
   bool fill_random_bytes(unsigned char *buffer, std::size_t size, std::string *errorMessage) {
 #ifdef NXDK
     if (buffer == nullptr) {
@@ -1046,7 +1061,7 @@ namespace {
     snapshot.videoPacketsReceived = static_cast<int>(videoStats.packetCountVideo);
     snapshot.videoPacketsRecovered = static_cast<int>(videoStats.packetCountFecRecovered);
     snapshot.videoPacketsLost = static_cast<int>(videoStats.packetCountFecFailed);
-    snapshot.presentationPath = mediaBackend.presentation_path();
+    snapshot.presentationPath = mediaBackend.presentation().presentation_path();
     snapshot.decoderFeatures = mediaBackend.acceleration_report().cpuFeatures;
     return snapshot;
   }
@@ -1105,7 +1120,7 @@ namespace {
         grayscale[static_cast<std::size_t>(row) * width + column] = static_cast<const std::uint8_t *>(panel->pixels)[static_cast<std::size_t>(row) * panel->pitch + column * 4];
       }
     }
-    resources->mediaBackend.set_statistics_bitmap(width, height, std::move(grayscale));
+    resources->mediaBackend.presentation().set_statistics_bitmap(width, height, std::move(grayscale));
     return true;
   }
 
@@ -1272,7 +1287,7 @@ namespace {
     draw_stream_start_dialog(resources->renderer, *resources, dialog, screenWidth, screenHeight, input::STREAM_EXIT_HINT);
 
     if (resources->controller.has_overlay() && mediaBackend != nullptr) {
-      mediaBackend->render_local_overlay(resources->renderer, screenWidth, screenHeight);
+      mediaBackend->presentation().render_local_overlay(resources->renderer, screenWidth, screenHeight);
     }
     SDL_RenderPresent(resources->renderer);
     render_stream_input_diagnostics(resources);
@@ -1413,7 +1428,7 @@ namespace {
       newOutputHeight = activate_pending_stream_video_mode(loopContext);
     }
     const bool statisticsChanged = update_stream_statistics_overlay(loopContext.startContext, loopContext.connectionState, &loopContext.resources);
-    if (const bool shouldRenderFrame = !hasDecodedVideo || statisticsChanged || loopContext.resources.mediaBackend.has_pending_overlay() || loopContext.resources.mediaBackend.has_unrendered_video_frame(); shouldRenderFrame) {
+    if (const bool shouldRenderFrame = !hasDecodedVideo || statisticsChanged || loopContext.resources.mediaBackend.presentation().has_pending_overlay() || loopContext.resources.mediaBackend.has_unrendered_video_frame(); shouldRenderFrame) {
       render_stream_frame(
         loopContext.host,
         loopContext.app,
@@ -1570,13 +1585,7 @@ namespace streaming {
 
     ScopedStreamVideoMode scopedStreamVideoMode(window, videoMode, startupVideoMode);
     const auto &activeStreamVideoMode = scopedStreamVideoMode.active_video_mode();
-    // PVIDEO owns pbkit while streaming. Keep the startup dialog and the SDL fallback on the CPU.
-    if (fontsReady) {
-      resources.renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
-      if (resources.renderer == nullptr) {
-        initializationError = std::string("SDL_CreateRenderer failed for the streaming session: ") + SDL_GetError();
-      }
-    }
+    resources.renderer = fontsReady ? create_stream_renderer(window, initializationError) : nullptr;
     if (resources.renderer == nullptr) {
       close_stream_ui_resources(&resources);
       report.message = initializationError;
@@ -1653,7 +1662,7 @@ namespace streaming {
       std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps" + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
     );
     resources.mediaBackend.audio_player().configure(settings.audio.mode, settings.audio.playOnXbox);
-    resources.mediaBackend.set_gpu_presentation_enabled(settings.presentation.gpuPresentation);
+    resources.mediaBackend.presentation().set_gpu_presentation_enabled(settings.presentation.gpuPresentation);
     logging::info("stream", std::string("Xbox audio mode: ") + (settings.audio.playOnXbox ? audio_mode_label(settings.audio.mode) : "Disabled"));
     logging::debug(
       "stream",
