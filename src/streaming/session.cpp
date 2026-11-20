@@ -10,10 +10,13 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -460,19 +463,28 @@ namespace {
       return std::string(appVersion);
     }
 
-    int major = 7;
-    int minor = 1;
-    int patch = 431;
-    int build = 0;
-    if (const int parsedFields = std::sscanf(std::string(appVersion).c_str(), "%d.%d.%d.%d", &major, &minor, &patch, &build); parsedFields < 3) {
-      return "7.1.431.-1";
+    const std::string version(appVersion);
+    const char *cursor = version.c_str();
+    std::array<int, 3> components {};
+    for (auto &component : components) {
+      char *end = nullptr;
+      errno = 0;
+      const long value = std::strtol(cursor, &end, 10);
+      if (end == cursor || errno == ERANGE || value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) {
+        return "7.1.431.-1";
+      }
+      component = static_cast<int>(value);
+      // Sunshine's fourth component is replaced, so only separators between the first three are required.
+      if (&component != &components.back()) {
+        if (*end != '.') {
+          return "7.1.431.-1";
+        }
+        cursor = end + 1;
+      }
     }
 
-    if (major < 7 || (major == 7 && minor < 1) || (major == 7 && minor == 1 && patch < 431)) {
-      major = 7;
-      minor = 1;
-      patch = 431;
-    }
+    constexpr std::array minimumVersion {7, 1, 431};
+    const auto &[major, minor, patch] = std::max(components, minimumVersion);
 
     return std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch) + ".-1";
   }
@@ -1467,6 +1479,60 @@ namespace {
     return std::string("Streaming session ended for ") + std::string(appName);
   }
 
+  /**
+   * @brief Stop transport, collect the final report and return the controller to the shell.
+   * @param target Active host, application and credentials.
+   * @param settings Receives changes to keyboard placement.
+   * @param startContext Negotiated connection parameters.
+   * @param connectionState Recorded termination state.
+   * @param resources Active stream resources, released before returning.
+   * @param report Receives the final status, metrics and retained controller.
+   */
+  void finish_stream_session(const streaming::StreamSessionTarget &target, app::SettingsState &settings, const StreamStartContext &startContext, const StreamConnectionState &connectionState, StreamUiResources &resources, streaming::StreamSessionReport &report) {
+    const auto &[host, app, clientIdentity] = target;
+    streaming::StreamStatisticsSnapshot finalStatistics = sample_stream_statistics(startContext, connectionState, resources.mediaBackend);
+    resources.statisticsSampler.apply(&finalStatistics);
+    if (finalStatistics.interval.decodeTimeMs >= 0) {
+      finalStatistics.decoderLatencyMs = static_cast<int>(finalStatistics.interval.decodeTimeMs + 0.5);
+    }
+    if (finalStatistics.interval.hostProcessingMs >= 0) {
+      finalStatistics.hostLatencyMs = static_cast<int>(finalStatistics.interval.hostProcessingMs + 0.5);
+    }
+    logging::info("stream", "Stopping stream transport");
+    LiStopConnection();
+    logging::info("stream", "Stopped stream transport");
+    active_connection_state() = nullptr;
+    const streaming::VideoAccelerationReport acceleration = resources.mediaBackend.acceleration_report();
+    finalStatistics.accelerationSummary = acceleration.summary_lines();
+    finalStatistics.showPerformanceMetrics = resources.statisticsEnabled;
+
+    std::string finalMessage = describe_session_end(connectionState, app.name);
+    if (resources.controller.quit_app_requested()) {
+      std::string quitError;
+      if (network::quit_host_app(host.address, host.port, clientIdentity, app.id, &quitError)) {
+        finalMessage = "Quit " + app.name + " on " + host.displayName;
+      } else {
+        finalMessage += " | Couldn't quit app: " + quitError;
+      }
+    }
+    if (!acceleration.fallbackReason.empty()) {
+      finalMessage += " | SOFTWARE FALLBACK USED";
+    }
+    logging::info("stream", finalMessage);
+    for (const auto &line : finalStatistics.accelerationSummary) {
+      logging::info("stream", line);
+    }
+    startup::log_memory_statistics();
+    if (settings.controls.keyboardDockTop != resources.controller.keyboard_docked_top()) {
+      settings.controls.keyboardDockTop = resources.controller.keyboard_docked_top();
+      settings.dirty = true;
+    }
+    report.summaryLines = build_stream_summary_lines(host, app, startContext, finalStatistics, finalMessage);
+    report.controller = resources.controller.take_controller_for_shell();
+    close_stream_ui_resources(&resources);
+    report.message = std::move(finalMessage);
+  }
+
 }  // namespace
 
 namespace streaming {
@@ -1475,13 +1541,12 @@ namespace streaming {
     SDL_Window *window,
     const VIDEO_MODE &videoMode,
     app::SettingsState &settings,
-    const app::HostRecord &host,
-    const app::HostAppRecord &app,
-    const network::PairingIdentity &clientIdentity,
+    const StreamSessionTarget &target,
     SDL_Gamepad *preferredController,
     const std::function<void()> &releaseShell,
     StreamSessionReport &report
   ) {
+    const auto &[host, app, clientIdentity] = target;
     const Uint64 sessionStarted = SDL_GetTicks();
     report = {};
     const ResolvedStreamParameters streamParameters = resolve_stream_parameters(videoMode, settings);
@@ -1627,47 +1692,7 @@ namespace streaming {
     logging::info("stream", std::string(launchResult.resumedSession ? "Resumed stream for " : "Launched stream for ") + app.name + " on " + host.displayName);
     run_active_stream_loop({host, app, startContext, connectionState, resources, scopedStreamVideoMode});
 
-    streaming::StreamStatisticsSnapshot finalStatistics = sample_stream_statistics(startContext, connectionState, resources.mediaBackend);
-    resources.statisticsSampler.apply(&finalStatistics);
-    if (finalStatistics.decodeTimeMs >= 0) {
-      finalStatistics.decoderLatencyMs = static_cast<int>(finalStatistics.decodeTimeMs + 0.5);
-    }
-    if (finalStatistics.hostProcessingMs >= 0) {
-      finalStatistics.hostLatencyMs = static_cast<int>(finalStatistics.hostProcessingMs + 0.5);
-    }
-    logging::info("stream", "Stopping stream transport");
-    LiStopConnection();
-    logging::info("stream", "Stopped stream transport");
-    active_connection_state() = nullptr;
-    const streaming::VideoAccelerationReport acceleration = resources.mediaBackend.acceleration_report();
-    finalStatistics.accelerationSummary = acceleration.summary_lines();
-    finalStatistics.showPerformanceMetrics = resources.statisticsEnabled;
-
-    std::string finalMessage = describe_session_end(connectionState, app.name);
-    if (resources.controller.quit_app_requested()) {
-      std::string quitError;
-      if (network::quit_host_app(host.address, host.port, clientIdentity, app.id, &quitError)) {
-        finalMessage = "Quit " + app.name + " on " + host.displayName;
-      } else {
-        finalMessage += " | Couldn't quit app: " + quitError;
-      }
-    }
-    if (!acceleration.fallbackReason.empty()) {
-      finalMessage += " | SOFTWARE FALLBACK USED";
-    }
-    logging::info("stream", finalMessage);
-    for (const auto &line : finalStatistics.accelerationSummary) {
-      logging::info("stream", line);
-    }
-    startup::log_memory_statistics();
-    if (settings.controls.keyboardDockTop != resources.controller.keyboard_docked_top()) {
-      settings.controls.keyboardDockTop = resources.controller.keyboard_docked_top();
-      settings.dirty = true;
-    }
-    report.summaryLines = build_stream_summary_lines(host, app, startContext, finalStatistics, finalMessage);
-    report.controller = resources.controller.take_controller_for_shell();
-    close_stream_ui_resources(&resources);
-    report.message = std::move(finalMessage);
+    finish_stream_session(target, settings, startContext, connectionState, resources, report);
     return true;
   }
 

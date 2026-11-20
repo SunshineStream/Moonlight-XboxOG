@@ -233,8 +233,7 @@ namespace {
    * @param state Current client state containing the preferred frame rate.
    */
   void cycle_stream_framerate(app::ClientState &state) {
-    const auto current = std::find(STREAM_FRAMERATE_OPTIONS.begin(), STREAM_FRAMERATE_OPTIONS.end(), state.settings.streamFramerate);
-    if (current == STREAM_FRAMERATE_OPTIONS.end()) {
+    if (const auto current = std::find(STREAM_FRAMERATE_OPTIONS.begin(), STREAM_FRAMERATE_OPTIONS.end(), state.settings.streamFramerate); current == STREAM_FRAMERATE_OPTIONS.end()) {
       state.settings.streamFramerate = app::DEFAULT_STREAM_FRAMERATE;
     } else {
       const std::size_t nextIndex = (static_cast<std::size_t>(std::distance(STREAM_FRAMERATE_OPTIONS.begin(), current)) + 1U) % STREAM_FRAMERATE_OPTIONS.size();
@@ -926,7 +925,7 @@ namespace {
    */
   void synchronize_address_draft(app::AddHostKeypadState &keypad) {
     keypad.stagedInput.clear();
-    if (std::all_of(keypad.addressOctets.begin(), keypad.addressOctets.end(), [](const std::string &octet) {
+    if (std::all_of(keypad.addressOctets.begin(), keypad.addressOctets.end(), [](std::string_view octet) {
           return octet.empty();
         })) {
       return;
@@ -950,7 +949,8 @@ namespace {
       return;
     }
     auto &keypad = state.addHostDraft.keypad;
-    const std::size_t nextOctet = direction < 0 ? (keypad.activeOctet == 0U ? 0U : keypad.activeOctet - 1U) : std::min(keypad.activeOctet + 1U, keypad.addressOctets.size() - 1U);
+    const auto previousOctet = std::max(keypad.activeOctet, std::size_t {1}) - 1U;
+    const auto nextOctet = direction < 0 ? previousOctet : std::min(keypad.activeOctet + 1U, keypad.addressOctets.size() - 1U);
     if (nextOctet != keypad.activeOctet) {
       keypad.activeOctet = nextOctet;
       keypad.replaceOctet = true;
@@ -996,8 +996,7 @@ namespace {
       if (keypad.addressOctets[keypad.activeOctet].empty() && keypad.activeOctet > 0U) {
         --keypad.activeOctet;
       }
-      auto &octet = keypad.addressOctets[keypad.activeOctet];
-      if (!octet.empty()) {
+      if (auto &octet = keypad.addressOctets[keypad.activeOctet]; !octet.empty()) {
         octet.pop_back();
       }
       keypad.replaceOctet = false;
@@ -1868,10 +1867,9 @@ namespace app {
     if (message.empty()) {
       return;
     }
-    const auto duplicate = std::find_if(state.shell.notifications.begin(), state.shell.notifications.end(), [&](const NotificationState &notification) {
-      return notification.kind == kind && notification.title == title && notification.message == message;
-    });
-    if (duplicate != state.shell.notifications.end()) {
+    if (std::any_of(state.shell.notifications.begin(), state.shell.notifications.end(), [&](const NotificationState &notification) {
+          return notification.kind == kind && notification.title == title && notification.message == message;
+        })) {
       return;
     }
     state.shell.notifications.push_back({kind, std::move(title), std::move(message), autoDismissMilliseconds == 0U, autoDismissMilliseconds});
@@ -3045,6 +3043,28 @@ namespace app {
     open_modal(state, ModalId::stream_summary);
   }
 
+  namespace {
+    /**
+     * @brief Return from a secondary menu to the host list when it supports back navigation.
+     * @param state Current menu and screen state.
+     * @param update Navigation result and any pairing cancellation request.
+     */
+    void handle_menu_back(ClientState &state, AppUpdate &update) {
+      switch (state.shell.activeScreen) {
+        case ScreenId::pair_host:
+          update.requests.pairingCancelledRequested = true;
+          [[fallthrough]];
+        case ScreenId::settings:
+        case ScreenId::add_host:
+          set_screen(state, ScreenId::hosts);
+          update.navigation.screenChanged = true;
+          break;
+        default:
+          break;
+      }
+    }
+  }  // namespace
+
   AppUpdate handle_command(ClientState &state, input::UiCommand command) {
     AppUpdate update {};
 
@@ -3090,14 +3110,7 @@ namespace app {
     }
 
     if (menuUpdate.backRequested) {
-      if (state.shell.activeScreen == ScreenId::settings || state.shell.activeScreen == ScreenId::add_host || state.shell.activeScreen == ScreenId::pair_host) {
-        if (state.shell.activeScreen == ScreenId::pair_host) {
-          update.requests.pairingCancelledRequested = true;
-        }
-        state.shell.statusMessage = state.shell.activeScreen == ScreenId::apps ? std::string {} : state.shell.statusMessage;
-        set_screen(state, ScreenId::hosts);
-        update.navigation.screenChanged = true;
-      }
+      handle_menu_back(state, update);
       return update;
     }
 

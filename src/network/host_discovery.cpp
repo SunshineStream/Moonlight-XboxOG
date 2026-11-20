@@ -8,6 +8,7 @@
 // standard includes
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -198,7 +199,13 @@ namespace {
     std::unordered_map<std::string, std::string> ipv4ByDomain_;  ///< Resolved IPv4 addresses keyed by target host domain.
   };
 
-  std::string encoded_domain_to_string(const char *encodedDomain, std::size_t encodedLength) {
+  /**
+   * @brief Decode the length-prefixed DNS labels supplied by the lwIP mDNS parser.
+   * @param encodedDomain DNS wire-format name bytes.
+   * @param encodedLength Available bytes.
+   * @return Dotted name or an empty string for an absent or truncated name.
+   */
+  std::string encoded_domain_to_string(const std::byte *encodedDomain, std::size_t encodedLength) {
     if (encodedDomain == nullptr || encodedLength == 0U) {
       return {};
     }
@@ -206,7 +213,7 @@ namespace {
     std::string domainText;
     std::size_t offset = 0U;
     while (offset < encodedLength) {
-      const auto labelLength = static_cast<std::size_t>(static_cast<unsigned char>(encodedDomain[offset]));
+      const auto labelLength = std::to_integer<std::size_t>(encodedDomain[offset]);
       if (labelLength == 0U) {
         break;
       }
@@ -217,15 +224,20 @@ namespace {
       if (!domainText.empty()) {
         domainText.push_back('.');
       }
-      domainText.append(encodedDomain + offset, labelLength);
+      domainText.append(static_cast<const char *>(static_cast<const void *>(encodedDomain + offset)), labelLength);
       offset += labelLength;
     }
 
     return domainText;
   }
 
+  /**
+   * @brief Extract a dotted DNS name from the parsed lwIP record.
+   * @param domain Name supplied by lwIP.
+   * @return Dotted name or an empty string for an invalid record.
+   */
   std::string mdns_domain_to_string(const mdns_domain &domain) {
-    return encoded_domain_to_string(reinterpret_cast<const char *>(domain.name), domain.length);
+    return encoded_domain_to_string(static_cast<const std::byte *>(static_cast<const void *>(domain.name)), domain.length);
   }
 
   std::string ipv4_address_from_rdata(const char *rdata, int rdataLength) {
@@ -297,7 +309,7 @@ namespace {
     switch (answer->info.type) {
       case DNS_RRTYPE_PTR:
         {
-          const std::string instanceDomain = encoded_domain_to_string(varpart, static_cast<std::size_t>(std::max(varlen, 0)));
+          const std::string instanceDomain = encoded_domain_to_string(static_cast<const std::byte *>(static_cast<const void *>(varpart)), static_cast<std::size_t>(std::max(varlen, 0)));
           remember_ptr_service_instance(collector, instanceDomain);
           return;
         }
@@ -307,7 +319,7 @@ namespace {
             return;
           }
           const std::string instanceDomain = mdns_domain_to_string(answer->info.domain);
-          const std::string targetDomain = encoded_domain_to_string(varpart + 6, static_cast<std::size_t>(varlen - 6));
+          const std::string targetDomain = encoded_domain_to_string(static_cast<const std::byte *>(static_cast<const void *>(varpart + 6)), static_cast<std::size_t>(varlen - 6));
           remember_srv_service_target(collector, instanceDomain, targetDomain, read_u16_be(varpart + 4));
           return;
         }

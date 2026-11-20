@@ -8,7 +8,7 @@
 #include <limits.h>
 #include <stdint.h>
 #include <string.h>
-#include <windows.h>
+#include <synchapi.h>
 #include <xboxkrnl/xboxkrnl.h>
 
 int gettimeofday(struct timeval *value, void *timezone) {

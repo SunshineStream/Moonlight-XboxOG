@@ -13,7 +13,8 @@
   // nxdk includes
   #include <hal/video.h>
   #include <pbkit/pbkit.h>
-  #include <windows.h>
+  #include <synchapi.h>
+  #include <sysinfoapi.h>
   #include <xboxkrnl/xboxkrnl.h>
 
 /**
@@ -29,8 +30,21 @@ namespace {
   constexpr std::uint32_t VIDEO_BUFFER = 0x8700;  ///< Overlay buffer submission register.
   constexpr std::uint32_t VIDEO_STOP = 0x8704;  ///< Normal overlay stop register.
   constexpr std::array<std::uint8_t, 4> CRTC_REGISTERS {31, 82, 32, 27};  ///< VGA controls changed by pb_init but not restored by pb_kill.
-  bool overlayQuarantined = false;  ///< A synchronization failure disables overlays until process exit.
-  std::array<std::uint8_t *, 2> quarantinedBuffers {};  ///< Keep uncertain DMA references resident instead of freeing memory still in use.
+
+  /** @brief Keep DMA storage resident and disable overlays after synchronization fails. */
+  struct OverlayQuarantine {
+    bool disabled = false;  ///< Whether a timeout prevents future overlays.
+    std::array<std::uint8_t *, 2> buffers {};  ///< Allocations the display may still read.
+  };
+
+  /**
+   * @brief Share quarantine state across presenter instances for the process lifetime.
+   * @return State accessed by the presentation thread.
+   */
+  OverlayQuarantine &overlay_quarantine() {
+    static OverlayQuarantine quarantine;
+    return quarantine;
+  }
 
   /**
    * @brief Wait for a vblank after the supplied pbkit counter value.
@@ -42,7 +56,7 @@ namespace {
    * @return True if the counter has advanced, or false after 50 milliseconds.
    */
   bool wait_for_scanout_after(std::uint32_t previous) {
-    const DWORD started = GetTickCount();
+    const auto started = GetTickCount();
     while (pb_get_vbl_counter() == previous) {
       if (GetTickCount() - started >= 50U) {
         return false;
@@ -58,7 +72,7 @@ namespace {
    * @return True when the command processor is idle, or false after 100 milliseconds.
    */
   bool wait_for_gpu_idle() {
-    const DWORD started = GetTickCount();
+    const auto started = GetTickCount();
     while (pb_busy()) {
       if (GetTickCount() - started >= 100U) {
         return false;
@@ -125,7 +139,7 @@ namespace streaming {
   bool PvideoPresenter::initialize_scanout_surface(std::string *error) {
 #ifdef NXDK
     const VIDEO_MODE mode = XVideoGetMode();
-    void *framebuffer = XVideoGetFB();
+    const auto *framebuffer = XVideoGetFB();
     const int pitch = mode.width * (mode.bpp / 8);
     if (framebuffer == nullptr || (mode.bpp != 16 && mode.bpp != 32) || mode.width <= 0 || mode.height <= 0 || (pitch & 63) != 0) {
       *error = "GPU scanout requires a 16-bit or 32-bit framebuffer with a 64-byte aligned pitch";
@@ -143,8 +157,7 @@ namespace streaming {
     savedCrtcConfig_ = VIDEOREG(0x600804);
     scanoutStateSaved_ = true;
     pb_set_color_format(mode.bpp == 16 ? NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5 : NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8, false);
-    const int status = moonlight_pb_init_pvideo_scanout(mode.height >= 1080);
-    if (status != 0) {
+    if (const int status = moonlight_pb_init_pvideo_scanout(mode.height >= 1080); status != 0) {
       *error = "GPU scanout initialization failed (pbkit " + std::to_string(status) + ")";
       return false;
     }
@@ -175,11 +188,10 @@ namespace streaming {
       VIDEOREG(VIDEO_BUFFER) = 0;
       synchronized = wait_for_scanout_after(pb_get_vbl_counter());
       if (!synchronized) {
-        overlayQuarantined = true;
-        for (std::size_t index = 0; index < buffers_.size(); ++index) {
-          quarantinedBuffers[index] = buffers_[index];
-          buffers_[index] = nullptr;
-        }
+        auto &quarantine = overlay_quarantine();
+        quarantine.disabled = true;
+        quarantine.buffers = buffers_;
+        buffers_.fill(nullptr);
       }
     }
     for (auto *&buffer : buffers_) {
@@ -192,7 +204,7 @@ namespace streaming {
       if (wait_for_gpu_idle()) {
         pb_kill();
       } else {
-        overlayQuarantined = true;
+        overlay_quarantine().disabled = true;
         synchronized = false;
       }
       surfaceActive_ = false;
@@ -210,7 +222,7 @@ namespace streaming {
       VIDEOREG(0x600804) = savedCrtcConfig_;
       // pb_kill disables the TV encoder; the CPU framebuffer needs output
       // explicitly re-enabled even when the video mode has not changed.
-      XVideoSetVideoEnable(TRUE);
+      XVideoSetVideoEnable(true);
       scanoutStateSaved_ = false;
     }
 #endif
@@ -221,104 +233,123 @@ namespace streaming {
     return synchronized;
   }
 
+#ifdef NXDK
+  void PvideoPresenter::configure_overlay_buffers(std::size_t required, int pitch, std::string &failure) {
+    if (!reset()) {
+      failure = "GPU overlay teardown timed out";
+      return;
+    }
+    if ((VIDEOREG(VIDEO_BUFFER) & 0x11U) != 0) {
+      failure = "Another owner is using the GPU overlay";
+      return;
+    }
+    if (!initialize_scanout_surface(&failure)) {
+      return;
+    }
+    for (auto *&buffer : buffers_) {
+      buffer = static_cast<std::uint8_t *>(MmAllocateContiguousMemoryEx(required, 0, 0x03ffffff, 64, PAGE_READWRITE | PAGE_WRITECOMBINE));
+      if (buffer == nullptr) {
+        failure = "Not enough contiguous memory for GPU presentation";
+        return;
+      }
+      std::memset(buffer, 0, required);
+    }
+    bufferSize_ = required;
+    pitch_ = pitch;
+    // xemu reads the descriptor concurrently with MMIO writes. Keep a
+    // single DMA window for both buffers so a new address paired with
+    // the previous frame's limit is still within bounds.
+    const auto highestAddress = std::max(MmGetPhysicalAddress(buffers_[0]), MmGetPhysicalAddress(buffers_[1]));
+    VIDEOREG(0x8900) = 0;
+    VIDEOREG(0x8908) = static_cast<std::uint32_t>(highestAddress + bufferSize_ - 1U);
+    VIDEOREG(0x8140) = 0;
+    VIDEOREG(0x8100) = 0x11;
+    VIDEOREG(0x8088) = (VIDEOREG(0x8088) & 0xf43ff43fU) | 0x04000400U;
+    VIDEOREG(0x808c) = (VIDEOREG(0x808c) & 0xf40ff40fU) | 0x04000400U;
+  }
+
+  void PvideoPresenter::prepare_overlay_frame(const Yuv420FrameView &frame, const VideoRectangle &destination, VideoOverlay *overlay, std::string &failure) {
+    // The previous submission must cross a vblank before we reuse its old
+    // scanout buffer. That vblank may already have passed since submission.
+    if (active_ && !wait_for_scanout_after(bufferReuseVblank_)) {
+      failure = "Timed out waiting for GPU scanout; using software presentation";
+    } else if (!pack_overlay_yuy2(frame, buffers_[nextBuffer_], bufferSize_, pitch_)) {
+      failure = "Failed to pack the GPU overlay frame";
+    } else if (overlay != nullptr && !overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination, frame.matrix)) {
+      failure = "Could not compose stream controls with GPU presentation";
+    }
+  }
+
+  bool PvideoPresenter::program_overlay_registers(const Yuv420FrameView &frame, const VideoRectangle &destination, const OverlaySamplingRegion &sampling) const {
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    // Rotate memory buffers through overlay bank zero. xemu composes bank
+    // zero only; alternating hardware overlay banks hides every other frame.
+    constexpr std::uint32_t offset = 0;
+    const auto physical = static_cast<std::uint32_t>(MmGetPhysicalAddress(buffers_[nextBuffer_]));
+    VIDEOREG(0x8910 + offset) = 0x1000;
+    VIDEOREG(0x8918 + offset) = 0x1000;
+    VIDEOREG(0x8920 + offset) = physical;
+    // SIZE_IN uses luma pixels; YUY2's two-pixel packing affects byte pitch only.
+    VIDEOREG(0x8928 + offset) = static_cast<std::uint32_t>(frame.width) | (static_cast<std::uint32_t>(frame.height) << 16U);
+    VIDEOREG(0x8930 + offset) = static_cast<std::uint32_t>(sampling.xHalfPel * 8) | (static_cast<std::uint32_t>(sampling.yHalfPel * 4) << 17U);
+    VIDEOREG(0x8938 + offset) = scaling_increment(sampling.width, destination.width);
+    VIDEOREG(0x8940 + offset) = scaling_increment(sampling.height, destination.height);
+    VIDEOREG(0x8948 + offset) = static_cast<std::uint32_t>(destination.x) | (static_cast<std::uint32_t>(destination.y) << 16U);
+    VIDEOREG(0x8950 + offset) = static_cast<std::uint32_t>(destination.width) | (static_cast<std::uint32_t>(destination.height) << 16U);
+    const std::uint32_t format = static_cast<std::uint32_t>(pitch_) | (1U << 16U) | (frame.matrix == VideoColorMatrix::bt709 ? 1U << 24U : 0U);
+    VIDEOREG(0x8958 + offset) = format;
+    return VIDEOREG(0x8958 + offset) == format && VIDEOREG(0x8920 + offset) == physical;
+  }
+
+  bool PvideoPresenter::submit_overlay() {
+    const bool firstSubmission = !active_;
+    VIDEOREG(VIDEO_STOP) = 0;
+    VIDEOREG(VIDEO_BUFFER) = 1U;
+    active_ = true;
+    // Sample after the request so a blank during register setup cannot
+    // retire the old buffer prematurely.
+    bufferReuseVblank_ = pb_get_vbl_counter();
+    if (firstSubmission) {
+      if (!wait_for_scanout_after(bufferReuseVblank_)) {
+        return false;
+      }
+      // Switch the background at the blank so letterbox bars become black with video already ready.
+      VIDEOREG(CRTC_START) = static_cast<std::uint32_t>(MmGetPhysicalAddress(pb_back_buffer()));
+    }
+    nextBuffer_ ^= 1U;
+    return true;
+  }
+#endif
+
   bool PvideoPresenter::present(const Yuv420FrameView &frame, const VideoRectangle &destination, std::string *error, const OverlaySamplingRegion &sampling, VideoOverlay *overlay) {
     std::string failure = overlay_frame_error(frame);
-    const int sourceWidth = sampling.width == 0 ? frame.width : sampling.width;
-    const int sourceHeight = sampling.height == 0 ? frame.height : sampling.height;
+    auto source = sampling;
+    source.width = sampling.width == 0 ? frame.width : sampling.width;
+    source.height = sampling.height == 0 ? frame.height : sampling.height;
     if (failure.empty() && (destination.x < 0 || destination.y < 0 || destination.width < 2 || destination.height < 2 || destination.width > 4095 || destination.height > 4095 || destination.x > 4095 - destination.width || destination.y > 4095 - destination.height)) {
       failure = "Output rectangle is outside the GPU overlay limits";
     }
-    if (failure.empty() && (sourceWidth < 2 || sourceHeight < 2 || sampling.xHalfPel < 0 || sampling.yHalfPel < 0 || static_cast<std::int64_t>(sampling.xHalfPel) + 2LL * (sourceWidth - 1) + (sampling.xHalfPel & 1) > 2LL * (frame.width - 1) || static_cast<std::int64_t>(sampling.yHalfPel) + 2LL * (sourceHeight - 1) + (sampling.yHalfPel & 1) > 2LL * (frame.height - 1))) {
+    if (failure.empty() && (source.width < 2 || source.height < 2 || sampling.xHalfPel < 0 || sampling.yHalfPel < 0 || static_cast<std::int64_t>(sampling.xHalfPel) + 2LL * (source.width - 1) + (sampling.xHalfPel & 1) > 2LL * (frame.width - 1) || static_cast<std::int64_t>(sampling.yHalfPel) + 2LL * (source.height - 1) + (sampling.yHalfPel & 1) > 2LL * (frame.height - 1))) {
       failure = "Source sampling region exceeds the GPU input buffer";
     }
 #ifdef NXDK
-    if (failure.empty() && overlayQuarantined) {
+    if (failure.empty() && overlay_quarantine().disabled) {
       failure = "GPU overlay disabled after a scanout timeout";
     }
     const int pitch = failure.empty() ? (frame.width * 2 + 63) & ~63 : 0;
     // Retain one cache line beyond the visible rows for fetch padding and an
     // inclusive DMA limit that also satisfies xemu's exclusive-end check.
-    const std::size_t required = failure.empty() ? static_cast<std::size_t>(pitch) * static_cast<std::size_t>(frame.height) + 64U : 0;
-    if (failure.empty() && (!active_ || required != bufferSize_ || pitch != pitch_)) {
-      if (!reset()) {
-        failure = "GPU overlay teardown timed out";
-      } else if ((VIDEOREG(VIDEO_BUFFER) & 0x11U) != 0) {
-        failure = "Another owner is using the GPU overlay";
-      } else if (!initialize_scanout_surface(&failure)) {
-        // The explicit initialization reason is retained below.
-      } else {
-        for (auto *&buffer : buffers_) {
-          buffer = static_cast<std::uint8_t *>(MmAllocateContiguousMemoryEx(required, 0, 0x03ffffff, 64, PAGE_READWRITE | PAGE_WRITECOMBINE));
-          if (buffer == nullptr) {
-            failure = "Not enough contiguous memory for GPU presentation";
-            break;
-          }
-          std::memset(buffer, 0, required);
-        }
-        if (failure.empty()) {
-          bufferSize_ = required;
-          pitch_ = pitch;
-          // xemu reads the descriptor concurrently with MMIO writes. Keep a
-          // single DMA window for both buffers so a new address paired with
-          // the previous frame's limit is still within bounds.
-          const auto highestAddress = std::max(MmGetPhysicalAddress(buffers_[0]), MmGetPhysicalAddress(buffers_[1]));
-          VIDEOREG(0x8900) = 0;
-          VIDEOREG(0x8908) = static_cast<std::uint32_t>(highestAddress + bufferSize_ - 1U);
-          VIDEOREG(0x8140) = 0;
-          VIDEOREG(0x8100) = 0x11;
-          VIDEOREG(0x8088) = (VIDEOREG(0x8088) & 0xf43ff43fU) | 0x04000400U;
-          VIDEOREG(0x808c) = (VIDEOREG(0x808c) & 0xf40ff40fU) | 0x04000400U;
-        }
-      }
+    if (const std::size_t required = failure.empty() ? static_cast<std::size_t>(pitch) * static_cast<std::size_t>(frame.height) + 64U : 0; failure.empty() && (!active_ || required != bufferSize_ || pitch != pitch_)) {
+      configure_overlay_buffers(required, pitch, failure);
     }
     if (failure.empty()) {
-      // The previous submission must cross a vblank before we reuse its old
-      // scanout buffer. That vblank may already have passed since submission.
-      if (active_ && !wait_for_scanout_after(bufferReuseVblank_)) {
-        failure = "Timed out waiting for GPU scanout; using software presentation";
-      } else if (!pack_overlay_yuy2(frame, buffers_[nextBuffer_], bufferSize_, pitch_)) {
-        failure = "Failed to pack the GPU overlay frame";
-      } else if (overlay != nullptr && !overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination, frame.matrix)) {
-        failure = "Could not compose stream controls with GPU presentation";
-      }
+      prepare_overlay_frame(frame, destination, overlay, failure);
+    }
+    if (failure.empty() && !program_overlay_registers(frame, destination, source)) {
+      failure = "GPU overlay register verification failed";
     }
     if (failure.empty()) {
-      __atomic_thread_fence(__ATOMIC_SEQ_CST);
-      // Rotate memory buffers through overlay bank zero. xemu composes bank
-      // zero only; alternating hardware overlay banks hides every other frame.
-      constexpr std::uint32_t offset = 0;
-      const auto physical = static_cast<std::uint32_t>(MmGetPhysicalAddress(buffers_[nextBuffer_]));
-      VIDEOREG(0x8910 + offset) = 0x1000;
-      VIDEOREG(0x8918 + offset) = 0x1000;
-      VIDEOREG(0x8920 + offset) = physical;
-      // SIZE_IN uses luma pixels; YUY2's two-pixel packing affects byte pitch only.
-      VIDEOREG(0x8928 + offset) = static_cast<std::uint32_t>(frame.width) | (static_cast<std::uint32_t>(frame.height) << 16U);
-      VIDEOREG(0x8930 + offset) = static_cast<std::uint32_t>(sampling.xHalfPel * 8) | (static_cast<std::uint32_t>(sampling.yHalfPel * 4) << 17U);
-      VIDEOREG(0x8938 + offset) = scaling_increment(sourceWidth, destination.width);
-      VIDEOREG(0x8940 + offset) = scaling_increment(sourceHeight, destination.height);
-      VIDEOREG(0x8948 + offset) = static_cast<std::uint32_t>(destination.x) | (static_cast<std::uint32_t>(destination.y) << 16U);
-      VIDEOREG(0x8950 + offset) = static_cast<std::uint32_t>(destination.width) | (static_cast<std::uint32_t>(destination.height) << 16U);
-      const std::uint32_t format = static_cast<std::uint32_t>(pitch_) | (1U << 16U) | (frame.matrix == VideoColorMatrix::bt709 ? 1U << 24U : 0U);
-      VIDEOREG(0x8958 + offset) = format;
-      if (VIDEOREG(0x8958 + offset) != format || VIDEOREG(0x8920 + offset) != physical) {
-        failure = "GPU overlay register verification failed";
-      }
-    }
-    if (failure.empty()) {
-      const bool firstSubmission = !active_;
-      VIDEOREG(VIDEO_STOP) = 0;
-      VIDEOREG(VIDEO_BUFFER) = 1U;
-      active_ = true;
-      // Sample after the request so a blank during register setup cannot
-      // retire the old buffer prematurely.
-      bufferReuseVblank_ = pb_get_vbl_counter();
-      if (!firstSubmission || wait_for_scanout_after(bufferReuseVblank_)) {
-        if (firstSubmission) {
-          // The overlay can now cover the startup dialog. Switch the background
-          // at the blank so letterbox bars become black with video already ready.
-          VIDEOREG(CRTC_START) = static_cast<std::uint32_t>(MmGetPhysicalAddress(pb_back_buffer()));
-        }
-        nextBuffer_ ^= 1U;
+      if (submit_overlay()) {
         return true;
       }
       failure = "Timed out waiting for the first GPU frame; using software presentation";

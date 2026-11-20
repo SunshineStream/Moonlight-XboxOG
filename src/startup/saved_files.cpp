@@ -193,7 +193,7 @@ namespace {
       return true;
     }
 
-    if (const std::vector<std::string> pairingFiles = {
+    if (const std::vector pairingFiles = {
           join_path(config.pairingDirectory, PAIRING_UNIQUE_ID_FILE_NAME),
           join_path(config.pairingDirectory, PAIRING_CERTIFICATE_FILE_NAME),
           join_path(config.pairingDirectory, PAIRING_PRIVATE_KEY_FILE_NAME),

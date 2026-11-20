@@ -80,6 +80,40 @@ namespace streaming {
      */
     bool initialize_scanout_surface(std::string *error);
 
+#ifdef NXDK
+    /**
+     * @brief Replace the scanout surface and allocate the two overlay buffers.
+     * @param required Bytes per buffer including DMA padding.
+     * @param pitch Packed bytes per row.
+     * @param failure Receives the reason setup failed, if any.
+     */
+    void configure_overlay_buffers(std::size_t required, int pitch, std::string &failure);
+
+    /**
+     * @brief Wait for reusable storage, pack the picture and composite the optional UI.
+     * @param frame Decoded video to pack.
+     * @param destination Visible output rectangle used for UI placement.
+     * @param overlay Optional UI to composite into the packed video.
+     * @param failure Receives an explicit fallback reason if preparation fails.
+     */
+    void prepare_overlay_frame(const Yuv420FrameView &frame, const VideoRectangle &destination, VideoOverlay *overlay, std::string &failure);
+
+    /**
+     * @brief Program and verify the registers for the next packed picture.
+     * @param frame Video frame whose pixels are stored in the DMA buffer.
+     * @param destination Visible output rectangle.
+     * @param sampling Validated source region with explicit width and height.
+     * @return True if the selected address and format can be read back.
+     */
+    bool program_overlay_registers(const Yuv420FrameView &frame, const VideoRectangle &destination, const OverlaySamplingRegion &sampling) const;
+
+    /**
+     * @brief Submit the prepared overlay and switch the startup background when the first frame latches.
+     * @return True if the submission succeeded or false if the first latch timed out.
+     */
+    bool submit_overlay();
+#endif
+
     std::array<std::uint8_t *, 2> buffers_ {};  ///< Contiguous write-combined YUY2 storage.
     std::array<std::uint32_t, 28> savedRegisters_ {};  ///< Overlay state restored on teardown.
     std::array<std::uint8_t, 4> savedCrtcRegisters_ {};  ///< Legacy scanout controls changed by pbkit.

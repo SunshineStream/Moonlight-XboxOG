@@ -20,6 +20,13 @@ struct SDL_Gamepad;  ///< SDL controller handle shared with the shell without in
 
 namespace streaming {
 
+  /** @brief Paired host and app selected for an authenticated streaming session. */
+  struct StreamSessionTarget {
+    const app::HostRecord &host;  ///< Selected paired host.
+    const app::HostAppRecord &app;  ///< Selected host app.
+    const network::PairingIdentity &clientIdentity;  ///< Client credentials used for authenticated requests.
+  };
+
   /**
    * @brief Result returned to the shell after the stream resources are released.
    */
@@ -45,9 +52,7 @@ namespace streaming {
    * @param window Shared SDL window reused from the shell.
    * @param videoMode Active Xbox video mode.
    * @param settings Active stream preferences; receives OSK placement changes for persistence on return to the shell.
-   * @param host Selected paired host.
-   * @param app Selected host app.
-   * @param clientIdentity Paired client identity used for authenticated launch requests.
+   * @param target Selected stream and credentials.
    * @param preferredController Controller retained by the shell throughout the session, or nullptr to use the first available device.
    * @param releaseShell Called once to release the shell renderer after staging the startup screen.
    * @param report Output receiving the final status, summary and an owned controller reference when available.
@@ -57,9 +62,7 @@ namespace streaming {
     SDL_Window *window,
     const VIDEO_MODE &videoMode,
     app::SettingsState &settings,
-    const app::HostRecord &host,
-    const app::HostAppRecord &app,
-    const network::PairingIdentity &clientIdentity,
+    const StreamSessionTarget &target,
     SDL_Gamepad *preferredController,
     const std::function<void()> &releaseShell,
     StreamSessionReport &report

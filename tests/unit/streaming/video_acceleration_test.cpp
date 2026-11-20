@@ -2,15 +2,18 @@
  * @file tests/unit/streaming/video_acceleration_test.cpp
  * @brief Covers overlay buffer boundaries and persistent fallback diagnostics.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/streaming/video_acceleration.h"
 
 // standard includes
 #include <array>
+#include <utility>
+
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 // local includes
 #include "src/streaming/aligned_media_buffer.h"
-#include "src/streaming/video_acceleration.h"
 
 /**
  * @brief Packing respects source strides, odd heights, chroma reuse and destination padding.
@@ -123,8 +126,33 @@ TEST(VideoAccelerationTest, KeepsMediaBuffersAlignedAndPadded) {
     buffer.data()[0] = 42;
   }
   auto moved = std::move(buffer);
-  EXPECT_EQ(buffer.size(), 0U);
+  EXPECT_EQ(buffer.size(), 0U);  // NOSONAR(cpp:S5272) AlignedMediaBuffer guarantees an empty source after a move.
   EXPECT_EQ(buffer.data(), nullptr);
   EXPECT_EQ(moved.data()[0], 42);
   EXPECT_EQ(reinterpret_cast<std::uintptr_t>(moved.data()) % 64U, 0U);
+}
+
+/** @brief Move assignment transfers the aligned address without losing reusable capacity. */
+TEST(VideoAccelerationTest, TransfersAlignedStorageWhenReplacingAnAllocation) {
+  streaming::AlignedMediaBuffer source;
+  source.resize(65);
+  auto *const aligned = source.data();
+  aligned[64] = 42;
+  streaming::AlignedMediaBuffer destination;
+  destination.resize(512);
+
+  destination = std::move(source);
+  const auto &readOnly = destination;
+  EXPECT_EQ(readOnly.data(), aligned);
+  EXPECT_EQ(readOnly.size(), 65U);
+  EXPECT_EQ(readOnly.data()[64], 42);
+  EXPECT_EQ(readOnly.data()[65], 0);
+
+  destination.clear();
+  EXPECT_EQ(destination.data(), nullptr);
+  EXPECT_EQ(destination.size(), 0U);
+  destination.resize(0);
+  EXPECT_EQ(destination.data(), aligned);
+  EXPECT_EQ(destination.size(), 0U);
+  EXPECT_EQ(destination.data()[0], 0);
 }

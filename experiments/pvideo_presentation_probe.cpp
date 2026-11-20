@@ -9,7 +9,7 @@
 #include <cstring>
 #include <hal/debug.h>
 #include <hal/video.h>
-#include <windows.h>
+#include <synchapi.h>
 
 namespace {
   constexpr int WIDTH = 1280;  ///< HD source width exercises full-size DMA buffer rotation.
@@ -55,13 +55,13 @@ int main() {
   statistics.width = 1280;
   statistics.height = 720;
   statistics.fps = 30;
-  statistics.incomingFps = 29.96;
-  statistics.decodingFps = 18.24;
-  statistics.renderingFps = 18.0;
-  statistics.decodeTimeMs = 41.35;
-  statistics.presentationTimeMs = 2.5;
-  statistics.videoBitrateMbps = 4.2;
-  statistics.hostProcessingMs = 6.8;
+  statistics.interval.incomingFps = 29.96;
+  statistics.interval.decodingFps = 18.24;
+  statistics.interval.renderingFps = 18.0;
+  statistics.interval.decodeTimeMs = 41.35;
+  statistics.interval.presentationTimeMs = 2.5;
+  statistics.interval.videoBitrateMbps = 4.2;
+  statistics.interval.hostProcessingMs = 6.8;
   statistics.presentationPath = "GPU";
   statistics.videoCodec = "H.264";
   statistics.decoderFeatures = "MMX/SSE";
@@ -83,8 +83,7 @@ int main() {
   for (int session = 0; session < 2; ++session) {
     for (int number = 0; number < 180; ++number) {
       fill_bars(y, u, v, number / 30);
-      std::string error;
-      if (!presenter.present(frame, {64, 144, 512, 288}, &error)) {
+      if (std::string error; !presenter.present(frame, {64, 144, 512, 288}, &error)) {
         debugResetCursor();
         debugPrint("PVIDEO PROBE FAILED\n%s\n", error.c_str());
         Sleep(20000);

@@ -80,7 +80,7 @@ namespace ui {
     if (bounds.w <= 0 || bounds.h <= 0 || columnCount == 0U || columnCount > static_cast<std::size_t>(bounds.w)) {
       return {};
     }
-    const int columns = static_cast<int>(columnCount);
+    const auto columns = static_cast<int>(columnCount);
     const int spacing = columns == 1 ? 0 : std::clamp(gap, 0, (bounds.w - columns) / (columns - 1));
     const int columnWidth = std::clamp(preferredWidth, 1, (bounds.w - spacing * (columns - 1)) / columns);
     const int groupWidth = columnWidth * columns + spacing * (columns - 1);
@@ -159,7 +159,7 @@ namespace ui {
     grid.gap = std::max(0, gap);
     grid.totalRows = static_cast<int>((itemCount + columns - 1U) / columns);
     grid.visibleRows = std::min(grid.totalRows, std::max(1, (bounds.h + grid.gap) / (std::max(1, preferredHeight) + grid.gap)));
-    const int selectedRow = static_cast<int>(std::min(selectedIndex, itemCount - 1U) / columns);
+    const auto selectedRow = static_cast<int>(std::min(selectedIndex, itemCount - 1U) / columns);
     grid.startRow = std::clamp(selectedRow + 1 - grid.visibleRows, 0, grid.totalRows - grid.visibleRows);
     grid.scrollbarWidth = grid.totalRows > grid.visibleRows ? 4 : 0;
     const int scrollbarSpace = grid.scrollbarWidth > 0 ? grid.scrollbarWidth + grid.gap : 0;
@@ -172,7 +172,7 @@ namespace ui {
     if (grid.columns <= 0 || grid.visibleRows <= 0) {
       return {};
     }
-    const int row = static_cast<int>(index / static_cast<std::size_t>(grid.columns));
+    const auto row = static_cast<int>(index / static_cast<std::size_t>(grid.columns));
     if (row < grid.startRow || row >= grid.startRow + grid.visibleRows || row >= grid.totalRows) {
       return {};
     }

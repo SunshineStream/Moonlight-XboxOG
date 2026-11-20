@@ -47,7 +47,10 @@ extern "C" void _xbox_assert(const char *expression, const char *fileName, const
   #if defined(DEBUG_CONSOLE)
   char buffer[512];
   RtlSnprintf(buffer, sizeof(buffer), "In function '%s': ", functionName);
-  RtlAssert(const_cast<char *>(expression), const_cast<char *>(fileName), line, buffer);
+  // The kernel API takes mutable buffers even when the caller supplies a string literal.
+  std::string assertionText(expression != nullptr ? expression : "<unknown>");
+  std::string sourcePath(fileName != nullptr ? fileName : "<unknown>");
+  RtlAssert(assertionText.data(), sourcePath.data(), line, buffer);
   #else
   // Match nxdk's fatal stop: continuing could use invalid state or corrupt saved data.
   asm volatile(

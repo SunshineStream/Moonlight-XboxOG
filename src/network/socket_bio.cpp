@@ -11,7 +11,7 @@ namespace {
 
   /** @brief State owned by a BIO, referring to a caller-owned transport. */
   struct SocketBioState {
-    network::SocketBioTransport transport;  ///< Socket callbacks and caller-owned context.
+    network::SocketBioTransport &transport;  ///< Caller-owned socket operations.
     bool eof = false;  ///< Whether a successful receive reported EOF.
   };
 
@@ -36,7 +36,7 @@ namespace {
     if (bio == nullptr) {
       return 0;
     }
-    delete static_cast<SocketBioState *>(BIO_get_data(bio));
+    const std::unique_ptr<SocketBioState> state(static_cast<SocketBioState *>(BIO_get_data(bio)));
     BIO_set_data(bio, nullptr);
     BIO_set_init(bio, 0);
     return 1;
@@ -55,8 +55,8 @@ namespace {
     if (state == nullptr || buffer == nullptr || size <= 0) {
       return 0;
     }
-    const int result = state->transport.receive(state->transport.context, buffer, size);
-    if (result < 0 && state->transport.retry(state->transport.context)) {
+    const int result = state->transport.read_bytes(buffer, size);
+    if (result < 0 && state->transport.retryable()) {
       BIO_set_retry_read(bio);
     }
     if (result == 0) {
@@ -78,8 +78,8 @@ namespace {
     if (state == nullptr || buffer == nullptr || size <= 0) {
       return 0;
     }
-    const int result = state->transport.send(state->transport.context, buffer, size);
-    if (result < 0 && state->transport.retry(state->transport.context)) {
+    const int result = state->transport.write_bytes(buffer, size);
+    if (result < 0 && state->transport.retryable()) {
       BIO_set_retry_write(bio);
     }
     return result;
@@ -123,7 +123,7 @@ namespace {
       }
       return result;
     }(),
-                                                                              BIO_meth_free);
+                                                                              &BIO_meth_free);
     return method.get();
   }
 
@@ -131,9 +131,9 @@ namespace {
 
 namespace network {
 
-  BIO *make_socket_bio(SocketBioTransport transport) {
+  BIO *make_socket_bio(SocketBioTransport &transport) {
     const BIO_METHOD *method = socket_bio_method();
-    if (method == nullptr || transport.receive == nullptr || transport.send == nullptr || transport.retry == nullptr) {
+    if (method == nullptr) {
       return nullptr;
     }
     auto state = std::unique_ptr<SocketBioState>(new (std::nothrow) SocketBioState {transport});

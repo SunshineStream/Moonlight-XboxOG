@@ -97,7 +97,7 @@ copy_tree_preserving_existing() {
 }
 
 latest_xemu_tag() {
-    curl -fsSL -A 'Moonlight-XboxOG setup-xemu' \
+    curl -fsSL --proto '=https' --proto-redir '=https' -A 'Moonlight-XboxOG setup-xemu' \
         'https://api.github.com/repos/xemu-project/xemu/releases/latest' |
         sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
         head -n 1

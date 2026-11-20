@@ -334,7 +334,8 @@ namespace streaming {
 
   void VideoOverlay::set_bitmap(int width, int height, std::vector<std::uint8_t> pixels, VideoOverlayPlacement placement, std::vector<std::uint8_t> opacity) {
     if (width <= 0 || height <= 0 || width > 2048 || height > 2048 || pixels.size() != static_cast<std::size_t>(width) * height || (!opacity.empty() && opacity.size() != pixels.size())) {
-      width = height = 0;
+      width = 0;
+      height = 0;
       pixels.clear();
       opacity.clear();
     }
@@ -572,7 +573,8 @@ namespace streaming {
     if (width_ == 0) {
       return true;
     }
-    const int bytes = bpp == 32 ? 4 : (bpp == 15 || bpp == 16 ? 2 : 0);
+    const int packedBytes = bpp == 15 || bpp == 16 ? 2 : 0;
+    const int bytes = bpp == 32 ? 4 : packedBytes;
     if (!valid_storage(pixels, capacity, pitch, width, height, bytes) || destination.x < 0 || destination.y < 0 || destination.width <= MARGIN || destination.height <= MARGIN || destination.x > width - destination.width || destination.y > height - destination.height) {
       return false;
     }

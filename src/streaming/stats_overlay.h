@@ -12,6 +12,20 @@
 
 namespace streaming {
 
+  /** @brief Video rates and timings measured over the latest sampling interval. */
+  struct VideoIntervalStatistics {
+    double incomingFps = -1;  ///< Completed frames delivered by the network per second.
+    double decodingFps = -1;  ///< Decoded pictures published per second.
+    double renderingFps = -1;  ///< New pictures submitted for presentation per second.
+    double hostProcessingMs = -1;  ///< Mean host processing time; absent or zero metadata is excluded.
+    double decodeTimeMs = -1;  ///< Mean CPU decode and frame publication time.
+    double queueTimeMs = -1;  ///< Mean wait between completed frame assembly and starting decode.
+    double presentationTimeMs = -1;  ///< Mean CPU time preparing and submitting a new picture.
+    double videoBitrateMbps = -1;  ///< Received compressed video payload rate, excluding transport headers and FEC.
+    double networkDropPercent = -1;  ///< Missing frame sequence numbers as a percentage of expected frames.
+    double clientDropPercent = -1;  ///< Queue, decode and superseded-picture discards as a percentage of received frames.
+  };
+
   /**
    * @brief Snapshot of stream telemetry shown in diagnostics or stream summaries.
    *
@@ -38,17 +52,8 @@ namespace streaming {
     std::string videoCodec;  ///< Human-readable video codec used for the stream.
     std::vector<std::string> accelerationSummary;  ///< Retained acceleration paths and fallback reasons.
     bool showPerformanceMetrics = true;  ///< Optional detailed telemetry; acceleration diagnostics always remain visible.
-    double incomingFps = -1;  ///< Completed frames delivered by the network per second.
-    double decodingFps = -1;  ///< Decoded pictures published per second.
-    double renderingFps = -1;  ///< New pictures submitted for presentation per second.
+    VideoIntervalStatistics interval {};  ///< Rates and timings derived from successive video counter samples.
     int roundTripVarianceMs = -1;  ///< Estimated variation of network round-trip latency.
-    double hostProcessingMs = -1;  ///< Mean host processing time; absent or zero metadata is excluded.
-    double decodeTimeMs = -1;  ///< Mean CPU decode and frame publication time.
-    double queueTimeMs = -1;  ///< Mean wait between completed frame assembly and starting decode.
-    double presentationTimeMs = -1;  ///< Mean CPU time preparing and submitting a new picture.
-    double videoBitrateMbps = -1;  ///< Received compressed video payload rate, excluding transport headers and FEC.
-    double networkDropPercent = -1;  ///< Missing frame sequence numbers as a percentage of expected frames.
-    double clientDropPercent = -1;  ///< Queue, decode and superseded-picture discards as a percentage of received frames.
     std::string presentationPath;  ///< Active GPU, software or waiting presentation path.
     std::string decoderFeatures;  ///< Enabled FFmpeg CPU optimizations.
   };
@@ -182,7 +187,7 @@ namespace streaming {
 
   private:
     VideoStatisticsCounters previous_ {};  ///< Previous cumulative sample.
-    StreamStatisticsSnapshot measured_ {};  ///< Latest interval measurements.
+    VideoIntervalStatistics measured_ {};  ///< Latest interval measurements.
     std::uint64_t sampledAtUs_ = 0;  ///< Previous monotonic sample time.
     bool initialized_ = false;  ///< An interval baseline has been captured.
   };

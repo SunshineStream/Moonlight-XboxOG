@@ -47,7 +47,7 @@ namespace {
   };
 
   TEST_F(FenvCompatTest, PreservesExceptionMasksAndPrecisionWhenChangingRoundingMode) {
-    const std::uint16_t initialControlWord = static_cast<std::uint16_t>(originalControlWord | 0x003F);
+    const auto initialControlWord = static_cast<std::uint16_t>(originalControlWord | 0x003F);
     asm volatile("fldcw %0" : : "m"(initialControlWord));
 
     for (const int roundingMode : std::array {0x0000, 0x0400, 0x0800, 0x0C00}) {

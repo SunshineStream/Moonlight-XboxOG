@@ -3042,10 +3042,8 @@ namespace {
     );
 
     logging::log(result.success || result.alreadyPaired ? logging::LogLevel::info : logging::LogLevel::warning, "pairing", result.message);
-    if (hostsChanged) {
-      if (!persist_hosts(*state)) {
-        app::show_notification(*state, app::NotificationKind::error, "Pairing not saved", "Pairing succeeded, but the PC could not be saved. Check the available storage.");
-      }
+    if (hostsChanged && !persist_hosts(*state)) {
+      app::show_notification(*state, app::NotificationKind::error, "Pairing not saved", "Pairing succeeded, but the PC could not be saved. Check the available storage.");
     }
   }
 
@@ -3964,7 +3962,7 @@ namespace {
     const int preferredHeight = ((gridRect.w - gap * (columns - 1)) / columns) * 3 / 2 + captionHeight;
     const ui::ShellRect bounds {gridRect.x + 4, gridRect.y + 4, gridRect.w - 8, gridRect.h - 8};
     const auto grid = ui::calculate_shell_grid(bounds, viewModel.content.appTiles.size(), viewModel.content.appColumnCount, selected_app_tile_index(viewModel.content.appTiles), preferredHeight, gap);
-    const std::size_t first = static_cast<std::size_t>(grid.startRow * grid.columns);
+    const auto first = static_cast<std::size_t>(grid.startRow * grid.columns);
     const std::size_t end = std::min(viewModel.content.appTiles.size(), static_cast<std::size_t>((grid.startRow + grid.visibleRows) * grid.columns));
     for (std::size_t index = first; index < end; ++index) {
       const SDL_Rect cell = sdl_rect(ui::shell_grid_cell(bounds, grid, index));
@@ -3998,7 +3996,7 @@ namespace {
     const int preferredHeight = std::min(gridRect.h, gridRect.w / 3);
     const ui::ShellRect bounds {gridRect.x, gridRect.y, gridRect.w, gridRect.h};
     const auto grid = ui::calculate_shell_grid(bounds, viewModel.content.hostTiles.size(), viewModel.content.hostColumnCount, selected_host_tile_index(viewModel.content.hostTiles), preferredHeight, gap);
-    const std::size_t first = static_cast<std::size_t>(grid.startRow * grid.columns);
+    const auto first = static_cast<std::size_t>(grid.startRow * grid.columns);
     const std::size_t end = std::min(viewModel.content.hostTiles.size(), static_cast<std::size_t>((grid.startRow + grid.visibleRows) * grid.columns));
     for (std::size_t index = first; index < end; ++index) {
       const SDL_Rect card = sdl_rect(ui::shell_grid_cell(bounds, grid, index));
@@ -4124,12 +4122,13 @@ namespace {
    * @param smallFont Guidance and action font.
    * @param assetCache Cached button glyphs.
    * @param viewModel Current keypad state.
-   * @param width Logical display width.
-   * @param height Framebuffer height.
+   * @param displayBounds Logical display rectangle.
    * @param cache Reusable keypad text and measurements.
    * @return True when the complete keypad rendered.
    */
-  bool render_keypad_dialog(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, int width, int height, KeypadModalLayoutCache *cache) {
+  bool render_keypad_dialog(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &displayBounds, KeypadModalLayoutCache *cache) {
+    const int width = displayBounds.w;
+    const int height = displayBounds.h;
     const int padding = std::max(18, height / 40);
     const int dialogWidth = std::min(720, width * 4 / 5);
     const int innerWidth = dialogWidth - padding * 2;
@@ -4144,7 +4143,7 @@ namespace {
     const int preferredKeyHeight = std::max(36, TTF_GetFontLineSkip(bodyFont) + 18);
     const int desiredHeight = padding * 2 + 12 + titleHeight + hintHeight + valueHeight + 20 + rows * (preferredKeyHeight + gap) + footerHeight;
     const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, desiredHeight));
-    fill_rect(renderer, {0, 0, width, height}, 0, 0, 0, 0xA0);
+    fill_rect(renderer, displayBounds, 0, 0, 0, 0xA0);
     render_dialog_surface(renderer, bounds);
     if (!ensure_single_line_text_texture(renderer, bodyFont, viewModel.keypad.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, innerWidth, &cache->titleTexture) || !render_cached_text_texture(renderer, cache->titleTexture, bounds.x + padding, bounds.y + 28)) {
       return false;
@@ -4588,7 +4587,7 @@ namespace {
     } else if (viewModel.modal.visible && !render_shell_dialog(renderer, {titleFont, bodyFont, smallFont}, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
       return false;
     }
-    if (viewModel.keypad.visible && !render_keypad_dialog(renderer, bodyFont, smallFont, assetCache, viewModel, screenWidth, screenHeight, keypadModalLayoutCache)) {
+    if (viewModel.keypad.visible && !render_keypad_dialog(renderer, bodyFont, smallFont, assetCache, viewModel, {0, 0, screenWidth, screenHeight}, keypadModalLayoutCache)) {
       return false;
     }
 
@@ -5417,9 +5416,7 @@ namespace {
       window,
       activeVideoMode,
       state.settings,
-      *streamHost,
-      *streamApp,
-      clientIdentity,
+      {*streamHost, *streamApp, clientIdentity},
       retainedController.get(),
       [resources] {
         close_shell_resources(resources);

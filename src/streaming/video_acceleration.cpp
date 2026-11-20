@@ -47,7 +47,7 @@ namespace streaming {
     return true;
   }
 
-  void VideoAccelerationReport::record_fallback(const std::string &reason) {
+  void VideoAccelerationReport::record_fallback(std::string_view reason) {
     if (fallbackReason.empty()) {
       fallbackReason = reason;
     }

@@ -2,15 +2,14 @@
  * @file tests/unit/streaming/live_stats_test.cpp
  * @brief Covers telemetry intervals, network loss accounting and unavailable measurements.
  */
-// test includes
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/streaming/stats_overlay.h"
 
 // standard includes
 #include <limits>
 
-// local includes
-#include "src/streaming/stats_overlay.h"
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 /**
  * @brief Rates derive from elapsed time and counters rather than the requested stream FPS.
@@ -21,29 +20,29 @@ TEST(LiveStatsTest, MeasuresActualRatesAndStageTimes) {
   streaming::StreamStatisticsSnapshot display {};
   display.fps = 60;
   sampler.apply(&display);
-  EXPECT_LT(display.renderingFps, 0);
+  EXPECT_LT(display.interval.renderingFps, 0);
   EXPECT_FALSE(sampler.due(999999));
   streaming::VideoStatisticsCounters counters {30, 2, 500000, 10, 8, 20, 2, 120, 10, 200000, 30000, 24000};
   sampler.sample(1000000, counters);
   sampler.apply(&display);
   EXPECT_EQ(display.fps, 60);
-  EXPECT_DOUBLE_EQ(display.incomingFps, 30);
-  EXPECT_DOUBLE_EQ(display.decodingFps, 10);
-  EXPECT_DOUBLE_EQ(display.renderingFps, 8);
-  EXPECT_DOUBLE_EQ(display.videoBitrateMbps, 4);
-  EXPECT_DOUBLE_EQ(display.hostProcessingMs, 6);
-  EXPECT_DOUBLE_EQ(display.decodeTimeMs, 20);
-  EXPECT_DOUBLE_EQ(display.queueTimeMs, 3);
-  EXPECT_DOUBLE_EQ(display.presentationTimeMs, 3);
-  EXPECT_DOUBLE_EQ(display.networkDropPercent, 6.25);
-  EXPECT_NEAR(display.clientDropPercent, 66.6667, 0.001);
+  EXPECT_DOUBLE_EQ(display.interval.incomingFps, 30);
+  EXPECT_DOUBLE_EQ(display.interval.decodingFps, 10);
+  EXPECT_DOUBLE_EQ(display.interval.renderingFps, 8);
+  EXPECT_DOUBLE_EQ(display.interval.videoBitrateMbps, 4);
+  EXPECT_DOUBLE_EQ(display.interval.hostProcessingMs, 6);
+  EXPECT_DOUBLE_EQ(display.interval.decodeTimeMs, 20);
+  EXPECT_DOUBLE_EQ(display.interval.queueTimeMs, 3);
+  EXPECT_DOUBLE_EQ(display.interval.presentationTimeMs, 3);
+  EXPECT_DOUBLE_EQ(display.interval.networkDropPercent, 6.25);
+  EXPECT_NEAR(display.interval.clientDropPercent, 66.6667, 0.001);
   counters.receivedFrames += 10;
   sampler.sample(2000000, counters);
   sampler.apply(&display);
-  EXPECT_DOUBLE_EQ(display.incomingFps, 10);
-  EXPECT_DOUBLE_EQ(display.renderingFps, 0);
-  EXPECT_LT(display.decodeTimeMs, 0);
-  EXPECT_LT(display.hostProcessingMs, 0);
+  EXPECT_DOUBLE_EQ(display.interval.incomingFps, 10);
+  EXPECT_DOUBLE_EQ(display.interval.renderingFps, 0);
+  EXPECT_LT(display.interval.decodeTimeMs, 0);
+  EXPECT_LT(display.interval.hostProcessingMs, 0);
 }
 
 /**
@@ -57,10 +56,10 @@ TEST(LiveStatsTest, RebaselinesAfterRestartAndClockRegression) {
   sampler.sample(3000000, {});
   streaming::StreamStatisticsSnapshot display {};
   sampler.apply(&display);
-  EXPECT_LT(display.incomingFps, 0);
+  EXPECT_LT(display.interval.incomingFps, 0);
   sampler.sample(1000000, {});
   sampler.apply(&display);
-  EXPECT_LT(display.incomingFps, 0);
+  EXPECT_LT(display.interval.incomingFps, 0);
   EXPECT_FALSE(sampler.due(1500000));
 }
 
@@ -105,7 +104,7 @@ TEST(LiveStatsTest, FormatsBothPresentationPathsWithoutFabricatedTimings) {
   snapshot.decoderFeatures = "MMX/SSE";
   snapshot.roundTripTimeMs = 4;
   snapshot.roundTripVarianceMs = 1;
-  snapshot.renderingFps = 18;
+  snapshot.interval.renderingFps = 18;
   for (const auto *path : {"GPU", "Software"}) {
     snapshot.presentationPath = path;
     const auto lines = streaming::build_live_stats_overlay_lines(snapshot);
@@ -123,11 +122,11 @@ TEST(LiveStatsTest, FormatsBothPresentationPathsWithoutFabricatedTimings) {
  */
 TEST(LiveStatsTest, FormatsNumericUpdatesWithoutFloatingPointPrintf) {
   streaming::StreamStatisticsSnapshot snapshot {};
-  snapshot.incomingFps = 29.96;
-  snapshot.decodingFps = 18.24;
-  snapshot.renderingFps = 0;
-  snapshot.videoBitrateMbps = std::numeric_limits<double>::infinity();
-  snapshot.hostProcessingMs = std::numeric_limits<double>::quiet_NaN();
+  snapshot.interval.incomingFps = 29.96;
+  snapshot.interval.decodingFps = 18.24;
+  snapshot.interval.renderingFps = 0;
+  snapshot.interval.videoBitrateMbps = std::numeric_limits<double>::infinity();
+  snapshot.interval.hostProcessingMs = std::numeric_limits<double>::quiet_NaN();
   const auto lines = streaming::build_live_stats_overlay_lines(snapshot);
   EXPECT_EQ(lines[1], "FPS: incoming 30.0 | decoded 18.2 | rendered 0.0");
   EXPECT_EQ(lines[2], "Video bitrate: N/A | Host processing: N/A");
