@@ -43,7 +43,7 @@ namespace streaming {
       int column = 0;
 #if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
       for (; column <= frame.width - PACK_BLOCK_PIXELS; column += PACK_BLOCK_PIXELS) {
-        auto *packed = output + column * 2;
+        const int packedColumn = column * 2;
         // Interleave sixteen luma samples and eight U/V pairs. Wide stores
         // speed up writes to PVIDEO's write-combined buffers, even on
         // unaligned rows. The memory clobber covers all accessed bytes.
@@ -65,7 +65,7 @@ namespace streaming {
           "movq %%mm3, %[out1]\n\t"
           "movq %%mm1, %[out2]\n\t"
           "movq %%mm5, %[out3]"
-          : [out0] "=m"(packed[0]), [out1] "=m"(packed[8]), [out2] "=m"(packed[16]), [out3] "=m"(packed[24])
+          : [out0] "=m"(output[packedColumn]), [out1] "=m"(output[packedColumn + 8]), [out2] "=m"(output[packedColumn + 16]), [out3] "=m"(output[packedColumn + 24])
           : [y] "r"(y + column), [u] "r"(u + column / 2), [v] "r"(v + column / 2)
           : "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "memory"
         );
