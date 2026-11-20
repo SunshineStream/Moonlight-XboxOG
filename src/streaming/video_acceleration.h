@@ -57,6 +57,10 @@ namespace streaming {
   /**
    * @brief Pack YUV420 into Y0 U Y1 V bytes without color conversion or scaling.
    *
+   * On supported SSE targets, full blocks use wide stores. The remaining pixel
+   * pairs are packed individually. Both paths reuse the same chroma samples for
+   * each pair of rows.
+   *
    * Missing planes or invalid source and destination bounds are rejected before
    * writing to the output buffer.
    *

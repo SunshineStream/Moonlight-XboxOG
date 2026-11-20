@@ -4,6 +4,45 @@
  */
 #include "src/streaming/video_acceleration.h"
 
+#if defined(__SSE__) && (defined(__clang__) || defined(__GNUC__))
+  #include <xmmintrin.h>
+
+namespace {
+  constexpr int PACK_BLOCK_PAIRS = 16;  ///< YUY2 pairs staged for wide stores.
+  constexpr int PACK_BLOCK_PIXELS = PACK_BLOCK_PAIRS * 2;  ///< Luma pixels covered by one block.
+
+  /**
+   * @brief Pack thirty-two pixels into YUY2 and copy them with wide SSE1 stores.
+   *
+   * Assemble the pixel words in cached storage so the writes to PVIDEO's
+   * write-combined buffer can use 16-byte stores. The SSE operations copy
+   * the word bits without floating-point conversion.
+   *
+   * @param y Thirty-two accessible luma bytes.
+   * @param u Sixteen accessible blue chroma bytes.
+   * @param v Sixteen accessible red chroma bytes.
+   * @param output Sixty-four accessible destination bytes, possibly unaligned.
+   */
+  inline void pack_yuy2_block(const std::uint8_t *y, const std::uint8_t *u, const std::uint8_t *v, std::uint8_t *output) {
+    alignas(16) std::array<float, PACK_BLOCK_PAIRS> packed;
+    for (int pair = 0; pair < PACK_BLOCK_PAIRS; ++pair) {
+      std::uint16_t luma;
+      __builtin_memcpy(&luma, y + pair * 2, sizeof(luma));
+      const auto lumaWord = static_cast<std::uint32_t>(luma);
+      const auto lumaBytes = (lumaWord | (lumaWord << 8U)) & 0x00ff00ffU;
+      const auto pixels = lumaBytes | (static_cast<std::uint32_t>(u[pair]) << 8U) | (static_cast<std::uint32_t>(v[pair]) << 24U);
+      __builtin_memcpy(&packed[pair], &pixels, sizeof(pixels));
+    }
+    constexpr int PAIRS_PER_VECTOR = sizeof(__m128) / sizeof(float);
+    for (int pair = 0; pair < PACK_BLOCK_PAIRS; pair += PAIRS_PER_VECTOR) {
+      const auto pixels = _mm_load_ps(packed.data() + pair);
+      // A fixed-size builtin copy allows an unaligned vector store even in nxdk's freestanding build.
+      __builtin_memcpy(output + pair * sizeof(std::uint32_t), &pixels, sizeof(pixels));
+    }
+  }
+}  // namespace
+#endif
+
 namespace streaming {
   std::string overlay_frame_error(const Yuv420FrameView &frame) {
     if (frame.width < 2 || frame.width > 2046 || frame.height < 2 || frame.height > 2047 || (frame.width & 1) != 0) {
@@ -37,7 +76,13 @@ namespace streaming {
       const auto *u = blueChroma + static_cast<std::size_t>(row / 2) * frame.pitches[1];
       const auto *v = redChroma + static_cast<std::size_t>(row / 2) * frame.pitches[2];
       auto *output = destination + static_cast<std::size_t>(row) * pitch;
-      for (int column = 0; column < frame.width; column += 2) {
+      int column = 0;
+#if defined(__SSE__) && (defined(__clang__) || defined(__GNUC__))
+      for (; column <= frame.width - PACK_BLOCK_PIXELS; column += PACK_BLOCK_PIXELS) {
+        pack_yuy2_block(y + column, u + column / 2, v + column / 2, output + column * 2);
+      }
+#endif
+      for (; column < frame.width; column += 2) {
         output[column * 2] = y[column];
         output[column * 2 + 1] = u[column / 2];
         output[column * 2 + 2] = y[column + 1];
