@@ -1,7 +1,36 @@
 # CPM Package Lock
-# This file should be committed to version control.
-# Renovate reads the metadata comments through the configured CMake regex managers.
-# Keep tracked VERSION/TAG/COMMIT values immediately below their Renovate metadata.
+# This file should be committed to version control
+
+# The first argument of CPMDeclarePackage can be freely chosen and is used as argument in CPMGetPackage.
+# The NAME argument should be package name that would also be used in a find_package call.
+# Ideally, both are the same, which might not always be possible: https://github.com/cpm-cmake/CPM.cmake/issues/603
+# This is needed to support CPM_USE_LOCAL_PACKAGES
+
+# Renovate-bot will update the versions and hashes in this file when a new version of a dependency is released.
+# The comments above each dependency are used by renovate to identify the dependencies and extract the version numbers.
+# See https://github.com/LizardByte/.github/blob/master/renovate/cmake.json5 for the configuration of renovate.
+#
+# Expected dependency structure for new entries:
+# - Start each block with the dependency name, for example `# Example dependency`.
+# - Follow it with consecutive renovate metadata comments.
+# - The first metadata line must start with `# renovate:` and include `datasource=` and `depName=`.
+# - Optional metadata keys are `versioning=`, `extractVersion=`, and `registryUrl=`.
+# - Optional metadata may stay on the `# renovate:` line or continue on the next consecutive `#` lines.
+# - Keep metadata keys in this order: `datasource`, `depName`, `versioning`, `extractVersion`, `registryUrl`.
+# - After metadata, declare the tracked value with `set(NAME_VERSION ...)` or `set(NAME_TAG ...)`.
+# - For `git-refs`, add a `# ref=<branch>` line and `set(NAME_COMMIT ...)`. Renovate reads the URL from
+#   the literal `GIT_REPOSITORY` in the following `CPMDeclarePackage(...)`.
+# - If the dependency also tracks a SHA256, keep `set(NAME_SHA256 ...)` immediately after the
+#   matching `NAME_VERSION` or `NAME_TAG` line with no unrelated lines between them.
+# - Keep `CPMDeclarePackage(...)` below the tracked values.
+#
+# Example layout:
+# - `# Example dependency`
+# - `# renovate: datasource=github-tags depName=owner/repo`
+# - `# versioning=regex:^v(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$`
+# - `set(EXAMPLE_TAG v1.2.3)`
+# - `set(EXAMPLE_SHA256 <sha256>)`
+# - `CPMDeclarePackage(...)`
 
 # FFmpeg, cross-compiled with its upstream configure script.
 # renovate: datasource=github-tags depName=FFmpeg/FFmpeg versioning=semver-coerced
