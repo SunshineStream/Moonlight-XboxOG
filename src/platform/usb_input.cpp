@@ -9,7 +9,7 @@
 #include <cstring>
 
 // lib includes
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 // nxdk includes
 #include <xboxkrnl/xboxkrnl.h>
@@ -24,38 +24,39 @@ extern "C" {
 // local includes
 #include "src/input/usb_hid.h"
 
-// These are the vendored SDL2 internal event entrypoints. Calling them on the pump
-// thread updates both SDL state and its queue; SDL_PushEvent alone cannot do that.
+// The pinned SDL3 port exposes these internal entry points to its drivers.
 extern "C" {
   /**
-   * @brief Update SDL keyboard state.
-   *
-   * @param state SDL press/release.
-   * @param scancode USB usage.
-   * @return SDL event result.
+   * @brief Submit a boot-HID key on SDL's event thread and update modifier state.
+   * @param timestamp SDL timestamp in nanoseconds.
+   * @param keyboardID Aggregate keyboard ID.
+   * @param rawcode Raw platform usage code.
+   * @param scancode SDL key position.
+   * @param down Whether the key was pressed.
+   * @return True if an event was posted.
    */
-  int SDL_SendKeyboardKey(Uint8 state, SDL_Scancode scancode);
+  bool SDL_SendKeyboardKey(Uint64 timestamp, SDL_KeyboardID keyboardID, int rawcode, SDL_Scancode scancode, bool down);
+
   /**
-   * @brief Update SDL pointer state.
-   *
-   * @param window Target window.
-   * @param mouseID Pointer ID.
-   * @param relative Relative mode.
-   * @param x X delta.
-   * @param y Y delta.
-   * @return SDL event result.
+   * @brief Apply relative boot-mouse motion to SDL's pointer state.
+   * @param timestamp SDL timestamp in nanoseconds.
+   * @param window Window receiving mouse motion.
+   * @param mouseID Aggregate mouse ID.
+   * @param relative Whether x and y are deltas.
+   * @param x Horizontal motion.
+   * @param y Vertical motion.
    */
-  int SDL_SendMouseMotion(SDL_Window *window, Uint32 mouseID, int relative, int x, int y);
+  void SDL_SendMouseMotion(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, bool relative, float x, float y);
+
   /**
-   * @brief Update SDL mouse buttons.
-   *
-   * @param window Target window.
-   * @param mouseID Pointer ID.
-   * @param state Press/release.
+   * @brief Submit a boot-mouse button transition through SDL's mouse driver.
+   * @param timestamp SDL timestamp in nanoseconds.
+   * @param window Window receiving the click.
+   * @param mouseID Aggregate mouse ID.
    * @param button SDL button.
-   * @return SDL event result.
+   * @param down Whether the button was pressed.
    */
-  int SDL_SendMouseButton(SDL_Window *window, Uint32 mouseID, Uint8 state, Uint8 button);
+  void SDL_SendMouseButton(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, Uint8 button, bool down);
 }
 
 namespace {
@@ -190,13 +191,14 @@ namespace {
    * @param event Validated boot HID input.
    */
   void dispatch(const input::BootHidEvent &event) {
+    const Uint64 timestamp = SDL_GetTicksNS();
     if (event.type == input::BootHidEventType::key) {
-      SDL_SendKeyboardKey(event.pressed ? SDL_PRESSED : SDL_RELEASED, static_cast<SDL_Scancode>(event.code));
+      SDL_SendKeyboardKey(timestamp, 0, event.code, static_cast<SDL_Scancode>(event.code), event.pressed);
     } else if (event.type == input::BootHidEventType::motion) {
-      SDL_SendMouseMotion(SDL_GetKeyboardFocus(), 0, 1, event.x, event.y);
+      SDL_SendMouseMotion(timestamp, SDL_GetKeyboardFocus(), 0, true, event.x, event.y);
     } else {
       const Uint8 button = std::array<Uint8, 3> {SDL_BUTTON_LEFT, SDL_BUTTON_RIGHT, SDL_BUTTON_MIDDLE}.at(event.code - 1);
-      SDL_SendMouseButton(SDL_GetKeyboardFocus(), 0, event.pressed ? SDL_PRESSED : SDL_RELEASED, button);
+      SDL_SendMouseButton(timestamp, SDL_GetKeyboardFocus(), 0, button, event.pressed);
     }
   }
 

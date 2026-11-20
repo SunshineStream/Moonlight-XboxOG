@@ -52,7 +52,7 @@ namespace input {
     return mask;
   }
 
-  int StreamInput::connect(int device) {
+  int StreamInput::connect(std::int64_t device) {
     if (device < 0) {
       return -1;
     }
@@ -79,7 +79,7 @@ namespace input {
     slots_[slot].last = state;
   }
 
-  void StreamInput::disconnect(int device) {
+  void StreamInput::disconnect(std::int64_t device) {
     for (int i = 0; i < 4; ++i) {
       if (slots_[i].device == device) {
         if (mouseDevice_ == device) {
@@ -91,7 +91,7 @@ namespace input {
     }
   }
 
-  void StreamInput::controller(int device, ControllerState state) {
+  void StreamInput::controller(std::int64_t device, ControllerState state) {
     for (int i = 0; i < 4; ++i) {
       auto &slot = slots_[i];
       if (slot.device != device) {
@@ -129,9 +129,9 @@ namespace input {
     }
   }
 
-  void StreamInput::set_mouse_device(int device) {
+  void StreamInput::set_mouse_device(std::int64_t device) {
     release_source(VIRTUAL_MOUSE_SOURCE);
-    const int previous = mouseDevice_;
+    const auto previous = mouseDevice_;
     mouseDevice_ = device;
     mouseX_ = 0;
     mouseY_ = 0;

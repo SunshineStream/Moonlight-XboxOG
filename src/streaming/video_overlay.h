@@ -36,9 +36,6 @@ namespace streaming {
   /**
    * @brief Fit or crop centered text without changing SDL renderer clipping state.
    *
-   * Standalone clip commands can crash nxdk's SDL 2.0.9 software renderer after
-   * a texture flush. An explicit source crop also works on current native SDL.
-   *
    * @param width Text surface width.
    * @param height Text surface height.
    * @param bounds Available label rectangle.

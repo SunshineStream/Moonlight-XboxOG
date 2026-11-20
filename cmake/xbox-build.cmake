@@ -23,9 +23,8 @@ find_package(NXDK REQUIRED)
 include("${CMAKE_SOURCE_DIR}/cmake/nxdk-compat.cmake")
 moonlight_prepare_nxdk_compat()
 
-find_package(NXDK_SDL2 REQUIRED)
-find_package(NXDK_SDL2_Image REQUIRED)
-find_package(NXDK_SDL2_TTF REQUIRED)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdl3.cmake")
+moonlight_prepare_sdl3()
 
 # add the automount_d_drive symbol to the linker flags, this is automatic with nxdk when using the Makefile option
 # if this is not used, we must add some code to the main function to automount the D drive
@@ -75,6 +74,7 @@ target_sources(${CMAKE_PROJECT_NAME}
         PRIVATE
         "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/fenv_compat.cpp"
         $<TARGET_OBJECTS:moonlight_nxdk_net_init>
+        $<TARGET_OBJECTS:moonlight_video_scanout>
 )
 target_include_directories(${CMAKE_PROJECT_NAME}
         SYSTEM PRIVATE
@@ -96,9 +96,9 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
         NXDK::Net
         moonlight_nxdk_compat
         moonlight_pbkit_scanout
-        NXDK::SDL2
-        NXDK::SDL2_Image
-        NXDK::SDL2_TTF
+        SDL3::SDL3
+        SDL3_image::SDL3_image-static
+        SDL3_ttf::SDL3_ttf-static
         OpenSSL::Crypto
         OpenSSL::SSL
 )
@@ -163,7 +163,7 @@ if(MOONLIGHT_BUILD_AUDIO_EXPERIMENTS)
     target_link_options(audio_playback_probe PRIVATE /safeseh:no)
     target_link_libraries(audio_playback_probe PRIVATE
             ${MOONLIGHT_FFMPEG_LIBRARIES}
-            NXDK::NXDK NXDK::NXDK_CXX NXDK::SDL2 moonlight_nxdk_compat)
+            NXDK::NXDK NXDK::NXDK_CXX SDL3::SDL3 moonlight_nxdk_compat)
     set(_audio_playback_probe_xbe_dir "${CMAKE_CURRENT_BINARY_DIR}/audio-playback-probe")
     file(MAKE_DIRECTORY "${_audio_playback_probe_xbe_dir}")
     add_custom_target(audio_playback_probe_iso ALL

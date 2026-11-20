@@ -127,6 +127,27 @@ namespace ui {
   ShellRect calculate_shell_dialog(int width, int height, int desiredWidth, int desiredHeight);
 
   /**
+   * @brief Fixed positions for the stream launch card across all startup steps.
+   */
+  struct StreamStartupLayout {
+    ShellRect card;  ///< Centered dialog bounds.
+    ShellRect title;  ///< Single line for the app name.
+    ShellRect body;  ///< Reserved lines for status and optional diagnostics.
+    ShellRect progress;  ///< Startup step indicators.
+    ShellRect hint;  ///< Reserved space for the stream-menu hint.
+  };
+
+  /**
+   * @brief Size the stream launch card without depending on the current step or text.
+   * @param width Output width in pixels.
+   * @param height Output height in pixels.
+   * @param titleLineHeight Title font line spacing.
+   * @param bodyLineHeight Body font line spacing.
+   * @return Bounded card and text regions, or an empty layout when they cannot fit.
+   */
+  StreamStartupLayout calculate_stream_startup_layout(int width, int height, int titleLineHeight, int bodyLineHeight);
+
+  /**
    * @brief Calculate a clockwise loading-icon rotation at a fixed speed.
    *
    * @param elapsedMilliseconds Monotonic elapsed time from the shell clock.

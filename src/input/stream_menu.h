@@ -6,6 +6,7 @@
 
 // standard includes
 #include <array>
+#include <cstdint>
 #include <string>
 
 namespace input {
@@ -73,7 +74,7 @@ namespace input {
      * @brief Open the menu on the controller that invoked the shortcut.
      * @param device SDL instance ID, or -1 for keyboard control.
      */
-    void open(int device);
+    void open(std::int64_t device);
     /**
      * @brief Close local controls and reset the highlighted action.
      */
@@ -144,7 +145,7 @@ namespace input {
     StreamDisconnectAction disconnectAction = StreamDisconnectAction::cancel;  ///< Confirmed exit intent, retained until session cleanup.
     StreamMenuPage page = StreamMenuPage::closed;  ///< Current screen.
     StreamAction selected = StreamAction::none;  ///< Highlighted wheel action.
-    int owner = -1;  ///< Controller that opened local controls.
+    std::int64_t owner = -1;  ///< Controller that opened local controls.
     int keyIndex = 10;  ///< Selected visual cell; the letter Q is focused initially.
     int keyboardLayout = 0;  ///< Letters, symbols, or desktop keys and shortcuts (0 through 2).
     bool shiftOnce = false;  ///< Shift applies to the next host key only.

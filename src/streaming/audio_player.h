@@ -8,7 +8,7 @@
 #include <string>
 
 // lib includes
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 // local includes
 #include "src/streaming/aligned_media_buffer.h"
@@ -23,7 +23,7 @@ struct _OPUS_MULTISTREAM_CONFIGURATION;
 namespace streaming {
 
   /**
-   * @brief Decode one Moonlight audio stream and queue its local mix to SDL.
+   * @brief Decode one Moonlight audio stream and queue its local mix through an SDL3 audio stream.
    *
    * The transport configures playback before starting and releases the decoder
    * after joining its audio thread.
@@ -107,8 +107,7 @@ namespace streaming {
     SwrContext *resampler_ = nullptr;  ///< Stereo S16 format converter.
     AVFrame *frame_ = nullptr;  ///< Reusable decoded Opus frame.
     AVPacket *packet_ = nullptr;  ///< Reusable encoded Opus packet.
-    SDL_AudioDeviceID device_ = 0;  ///< Open SDL device, or zero.
-    SDL_AudioSpec output_ {};  ///< SDL queue format.
+    SDL_AudioStream *stream_ = nullptr;  ///< Queued PCM stream that owns its playback device.
     AlignedMediaBuffer pcm_;  ///< Aligned PCM mix buffer.
   };
 

@@ -64,6 +64,11 @@ function(moonlight_prepare_nxdk_compat)
     add_library(moonlight_pbkit_scanout OBJECT "${port}/lib/pbkit/pbkit.c")
     target_include_directories(moonlight_pbkit_scanout PRIVATE "${NXDK_DIR}/lib/pbkit")
 
+    # Keep the CPU framebuffer address distinct from GPU surfaces across mode changes.
+    moonlight_patch_sources("${NXDK_DIR}" "${port}" "${compat}/video-scanout.patch"
+            lib/hal/video.c)
+    add_library(moonlight_video_scanout OBJECT "${port}/lib/hal/video.c")
+
     file(GLOB_RECURSE compat_inputs CONFIGURE_DEPENDS "${compat}/*.h" "${compat}/*.c")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${compat_inputs})
 endfunction()

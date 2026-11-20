@@ -5,11 +5,13 @@
 #pragma once
 
 // standard includes
+#include "src/ui/sdl_render.h"
+
 #include <algorithm>
 #include <cmath>
 
 // lib includes
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 namespace ui {
   /**
@@ -23,14 +25,14 @@ namespace ui {
     radius = std::max(0, std::min(radius, std::min(rect.w, rect.h) / 2));
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
     SDL_Rect middle {rect.x, rect.y + radius, rect.w, rect.h - radius * 2};
-    SDL_RenderFillRect(renderer, &middle);
+    ui::fill_rect(renderer, middle);
     for (int y = 0; y < radius; ++y) {
       const int dy = radius - y - 1;
       const int inset = radius - static_cast<int>(std::sqrt(radius * radius - dy * dy));
       SDL_Rect row {rect.x + inset, rect.y + y, rect.w - inset * 2, 1};
-      SDL_RenderFillRect(renderer, &row);
+      ui::fill_rect(renderer, row);
       row.y = rect.y + rect.h - y - 1;
-      SDL_RenderFillRect(renderer, &row);
+      ui::fill_rect(renderer, row);
     }
   }
 

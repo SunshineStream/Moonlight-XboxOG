@@ -6,6 +6,7 @@
 #include "src/streaming/audio_player.h"
 
 // standard includes
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -98,20 +99,16 @@ namespace streaming {
       return result;
     }
 
-    if ((SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) == 0 && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+    if ((SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) == 0 && !SDL_InitSubSystem(SDL_INIT_AUDIO)) {
       logging::error("stream", std::string("SDL_InitSubSystem(SDL_INIT_AUDIO) failed: ") + SDL_GetError());
       cleanup();
       return -1;
     }
-    // The nxdk SDL driver plays only 48 kHz signed 16-bit stereo PCM.
-    SDL_AudioSpec desired {};
-    desired.freq = OUTPUT_SAMPLE_RATE;
-    desired.format = AUDIO_S16SYS;
-    desired.channels = OUTPUT_CHANNELS;
-    desired.samples = 1024;
-    device_ = SDL_OpenAudioDevice(nullptr, 0, &desired, &output_, 0);
-    if (device_ == 0) {
-      logging::error("stream", std::string("SDL_OpenAudioDevice failed: ") + SDL_GetError());
+    // SDL opens a paused stream. The Xbox backend consumes 48 kHz stereo PCM.
+    const SDL_AudioSpec format {SDL_AUDIO_S16, OUTPUT_CHANNELS, OUTPUT_SAMPLE_RATE};
+    stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &format, nullptr, nullptr);
+    if (stream_ == nullptr) {
+      logging::error("stream", std::string("SDL_OpenAudioDeviceStream failed: ") + SDL_GetError());
       cleanup();
       return -1;
     }
@@ -119,46 +116,44 @@ namespace streaming {
   }
 
   void AudioPlayer::start() const {
-    if (device_ != 0) {
-      SDL_ClearQueuedAudio(device_);
-      SDL_PauseAudioDevice(device_, 0);
+    if (stream_ != nullptr) {
+      SDL_ClearAudioStream(stream_);
+      SDL_ResumeAudioStreamDevice(stream_);
     }
   }
 
   void AudioPlayer::stop() const {
-    if (device_ != 0) {
-      SDL_PauseAudioDevice(device_, 1);
+    if (stream_ != nullptr) {
+      SDL_PauseAudioStreamDevice(stream_);
     }
   }
 
   void AudioPlayer::cleanup() {
-    if (device_ != 0) {
-      stop();
-      SDL_CloseAudioDevice(device_);
-      device_ = 0;
+    if (stream_ != nullptr) {
+      SDL_DestroyAudioStream(stream_);
+      stream_ = nullptr;
     }
     av_packet_free(&packet_);
     av_frame_free(&frame_);
     avcodec_free_context(&codec_);
     swr_free(&resampler_);
-    output_ = {};
     pcm_.clear();
   }
 
   Uint32 AudioPlayer::pending_bytes() const {
-    return device_ == 0 ? 0 : SDL_GetQueuedAudioSize(device_);
+    return stream_ == nullptr ? 0U : static_cast<Uint32>(std::max(0, SDL_GetAudioStreamQueued(stream_)));
   }
 
   std::string AudioPlayer::describe_playback() const {
     if (!enabled_) {
       return "audio decode disabled";
     }
-    return device_ == 0 ? "audio idle" : std::to_string(pending_bytes()) + " queued audio bytes";
+    return stream_ == nullptr ? "audio idle" : std::to_string(pending_bytes()) + " queued audio bytes";
   }
 
   bool AudioPlayer::initialize_resampler() {
     AVChannelLayout stereo = AV_CHANNEL_LAYOUT_STEREO;
-    int result = swr_alloc_set_opts2(&resampler_, &stereo, AV_SAMPLE_FMT_S16, output_.freq, &frame_->ch_layout, static_cast<AVSampleFormat>(frame_->format), frame_->sample_rate, 0, nullptr);
+    int result = swr_alloc_set_opts2(&resampler_, &stereo, AV_SAMPLE_FMT_S16, OUTPUT_SAMPLE_RATE, &frame_->ch_layout, static_cast<AVSampleFormat>(frame_->format), frame_->sample_rate, 0, nullptr);
     if (result >= 0 && mode_ == AudioMode::mono) {
       // Play the mean of left and right on both outputs of the stereo device.
       constexpr std::array dualMono {0.5, 0.5, 0.5, 0.5};
@@ -196,10 +191,10 @@ namespace streaming {
     }
 
     const Uint32 bytes = static_cast<Uint32>(converted) * bytesPerFrame;
-    if (const Uint32 maxQueuedBytes = output_.freq * bytesPerFrame * QUEUE_LIMIT_MS / 1000U; pending_bytes() + bytes > maxQueuedBytes) {
-      SDL_ClearQueuedAudio(device_);
+    if (const Uint32 maxQueuedBytes = OUTPUT_SAMPLE_RATE * bytesPerFrame * QUEUE_LIMIT_MS / 1000U; pending_bytes() + bytes > maxQueuedBytes) {
+      SDL_ClearAudioStream(stream_);
     }
-    if (SDL_QueueAudio(device_, output, bytes) < 0) {
+    if (!SDL_PutAudioStreamData(stream_, output, static_cast<int>(bytes))) {
       logging::warn("stream", std::string("Failed to queue decoded audio: ") + SDL_GetError());
       return 0;
     }
@@ -207,7 +202,7 @@ namespace streaming {
   }
 
   Uint32 AudioPlayer::decode_and_queue(const char *data, int length) {
-    if (device_ == 0 || data == nullptr || length <= 0) {
+    if (stream_ == nullptr || data == nullptr || length <= 0) {
       return 0;
     }
     if (const int result = av_new_packet(packet_, length); result < 0) {

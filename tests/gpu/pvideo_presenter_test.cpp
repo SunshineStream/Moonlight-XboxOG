@@ -25,6 +25,7 @@ namespace {
   constexpr std::uint32_t CRTC_START = 0x600800;  ///< Physical scanout base.
   constexpr std::uint32_t CRTC_INTERRUPT = 0x600100;  ///< Vertical blank status.
   constexpr std::uint32_t CPU_FRAMEBUFFER = 0x40000;  ///< Fake physical address of the nxdk page.
+  constexpr std::uint32_t VIDEO_BUFFER = 0x8700;  ///< Overlay buffer submission register.
 
   /**
    * @brief Track the surface latched by the fake software display at vblank.
@@ -43,6 +44,8 @@ namespace {
   struct GpuVblank {
     DWORD count = 0;  ///< Number of simulated GPU blanks.
     DWORD resumeTick = 0;  ///< First tick at which the GPU may signal vblank.
+    std::uint32_t background = 0;  ///< Scanout address when the overlay request reached a blank.
+    std::uint32_t overlay = 0;  ///< Overlay submission at the last blank.
   };
 
   /**
@@ -150,6 +153,8 @@ void Sleep(DWORD milliseconds) {
   hardware.ticks += milliseconds;
   if (hardware.ticks >= hardware.gpuVblank.resumeTick) {
     ++hardware.gpuVblank.count;
+    hardware.gpuVblank.background = VIDEOREG(CRTC_START);
+    hardware.gpuVblank.overlay = VIDEOREG(VIDEO_BUFFER);
   }
   if (hardware.softwareDisplay.pollVblank && hardware.softwareDisplay.signalVblank) {
     hardware.softwareDisplay.displayedScanout = VIDEOREG(CRTC_START);
@@ -166,9 +171,15 @@ int pb_busy() {
   return 0;
 }
 
-int pb_init() {
+/**
+ * @brief Simulate PVIDEO acquiring pbkit while preserving the visible framebuffer.
+ * @param static_scanout Whether the presenter requested a single color page.
+ * @return The simulated initialization result.
+ */
+extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout) {
   ++hardware.initializations;
-  hardware.originalStart = VIDEOREG(0x600800);
+  hardware.staticScanout = static_scanout;
+  hardware.originalStart = VIDEOREG(CRTC_START);
   hardware.crtc[31] = 87;
   hardware.crtc[82] += 4;
   hardware.crtc[32] = 41;
@@ -179,12 +190,6 @@ int pb_init() {
     hardware.videoEnabled = false;
   }
   return hardware.initResult;
-}
-
-/** @brief Simulate acquisition of the single-page pbkit configuration. */
-extern "C" int moonlight_pb_init_static_scanout() {
-  hardware.staticScanout = true;
-  return pb_init();
 }
 
 void pb_kill() {
@@ -455,10 +460,43 @@ TEST_F(PvideoPresenterTest, SkipsWaitingWhenVblankHasAlreadyRetiredThePreviousBu
   EXPECT_GT(hardware.ticks, readyTick);
 }
 
+/** @brief The progress card remains visible while the first overlay frame is submitted and latched. */
+TEST_F(PvideoPresenterTest, KeepsStartupPageUntilFirstOverlayLatch) {
+  VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
+  XVideoGetFB()[0] = 0x67;
+  streaming::PvideoPresenter presenter;
+  std::string error;
+
+  ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
+  EXPECT_EQ(hardware.gpuVblank.background, CPU_FRAMEBUFFER);
+  EXPECT_EQ(hardware.gpuVblank.overlay, 1U);
+  EXPECT_EQ(VIDEOREG(CRTC_START), MmGetPhysicalAddress(pb_back_buffer()));
+  EXPECT_EQ(XVideoGetFB()[0], 0x67);
+}
+
+/** @brief A stalled first overlay is retired without replacing the startup page. */
+TEST_F(PvideoPresenterTest, KeepsStartupPageWhenFirstOverlayCannotLatch) {
+  VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
+  hardware.gpuVblank.resumeTick = 51;
+  streaming::PvideoPresenter presenter;
+  std::string error;
+
+  EXPECT_FALSE(presenter.present(frame, destination, &error));
+  EXPECT_NE(error.find("Timed out waiting for the first GPU frame"), std::string::npos);
+  EXPECT_EQ(hardware.gpuVblank.background, CPU_FRAMEBUFFER);
+  EXPECT_EQ(VIDEOREG(CRTC_START), CPU_FRAMEBUFFER);
+  EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
+  EXPECT_FALSE(presenter.active());
+  EXPECT_TRUE(hardware.allocations.empty());
+}
+
 /** @brief A stalled scanout fails presentation by the deadline and can still retire cleanly. */
 TEST_F(PvideoPresenterTest, TimesOutWhenVblankCannotRetireThePreviousBuffer) {
   streaming::PvideoPresenter presenter;
   std::string error;
+  ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
+  // The first submission waits for its own latch. The second queues a frame
+  // whose preceding buffer still has to retire.
   ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
 
   hardware.gpuVblank.resumeTick = hardware.ticks + 51U;

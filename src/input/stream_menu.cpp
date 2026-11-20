@@ -156,7 +156,7 @@ namespace input {
     {"Run", "Run", 'R', MODIFIER_META},
   }};
 
-  void StreamMenu::open(int device) {
+  void StreamMenu::open(std::int64_t device) {
     disconnectAction = StreamDisconnectAction::cancel;
     owner = device;
     page = StreamMenuPage::radial;

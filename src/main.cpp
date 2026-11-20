@@ -11,7 +11,7 @@
 #include <vector>
 
 // lib includes
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 // nxdk includes
 #include <hal/debug.h>
@@ -167,15 +167,15 @@ namespace {
     logging::print_startup_console_line(logging::LogLevel::info, "video", messageBuffer.data());
   }
 
-  int run_startup_task(void *context) {
-    auto *task = static_cast<StartupTaskState *>(context);
-    if (task == nullptr) {
-      return -1;
-    }
-
-    task->loadedHosts = startup::load_saved_hosts();
-    task->runtimeNetworkStatus = network::initialize_runtime_networking();
-    task->completed.store(true);
+  /**
+   * @brief Load saved hosts and initialize networking, then publish the startup result.
+   * @param task Startup state owned by the main thread.
+   * @return Zero after publishing the result.
+   */
+  int run_startup_task(StartupTaskState &task) {
+    task.loadedHosts = startup::load_saved_hosts();
+    task.runtimeNetworkStatus = network::initialize_runtime_networking();
+    task.completed.store(true);
     return 0;
   }
 
@@ -265,8 +265,10 @@ int main() {
   const BOOL setVideoModeResult = XVideoSetMode(bestVideoMode.width, bestVideoMode.height, bestVideoMode.bpp, bestVideoMode.refresh);
   debug_print_startup_checkpoint(setVideoModeResult ? "Returned from XVideoSetMode successfully" : "XVideoSetMode returned failure");
 
+  // Window surfaces must stay independent of the renderer and of pbkit.
+  SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0");
   debug_print_startup_checkpoint("About to call SDL_Init");
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
     return report_startup_failure("sdl", std::string("SDL_Init failed: ") + SDL_GetError());
   }
   debug_print_startup_checkpoint("SDL_Init succeeded");
@@ -274,11 +276,9 @@ int main() {
   debug_print_startup_checkpoint("About to create SDL window");
   SDL_Window *window = SDL_CreateWindow(
     "Moonlight Xbox",
-    SDL_WINDOWPOS_UNDEFINED,
-    SDL_WINDOWPOS_UNDEFINED,
     bestVideoMode.width,
     bestVideoMode.height,
-    SDL_WINDOW_SHOWN
+    0
   );
   if (window == nullptr) {
     const int exitCode = report_startup_failure("sdl", std::string("SDL_CreateWindow failed: ") + SDL_GetError());
@@ -289,10 +289,13 @@ int main() {
 
   StartupTaskState startupTask {};
   debug_print_startup_checkpoint("Starting background startup task");
-  startupTask.thread = SDL_CreateThread(run_startup_task, "startup-init", &startupTask);
+  const SDL_ThreadFunction startupEntry = [](auto context) {
+    return run_startup_task(*static_cast<StartupTaskState *>(context));
+  };
+  startupTask.thread = SDL_CreateThread(startupEntry, "startup-init", &startupTask);
   if (startupTask.thread == nullptr) {
     debug_print_startup_checkpoint("SDL_CreateThread failed; running startup task synchronously");
-    run_startup_task(&startupTask);
+    run_startup_task(startupTask);
   } else {
     debug_print_startup_checkpoint("Background startup task created");
   }

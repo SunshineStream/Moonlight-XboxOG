@@ -5,7 +5,7 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
  }
  
 -int pb_init(void)
-+static int pb_init_with_color_buffers(bool static_scanout)
++static int pb_init_with_scanout(bool static_scanout, bool preserve_scanout)
  {
      DWORD           old;
  
@@ -20,7 +20,7 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
  
      pb_FrameBuffersCount=BackBufferCount+1; //front buffer + back buffers
      pb_FrameBuffersWidth=Width;
-@@ -3274,7 +3274,7 @@ int pb_init(void)
+@@ -3274,11 +3274,15 @@ int pb_init(void)
      memset((DWORD *)pb_FBAddr[0],0,pb_FBSize);
      memset((DWORD *)pb_DSAddr,0,pb_DSSize);
  
@@ -29,18 +29,27 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
      pb_target_back_buffer();    //tells GPU what is the frame buffer target
  
      pb_front_index=0;       //frame buffer #0 is the front buffer for now
-@@ -3287,5 +3287,15 @@ int pb_init(void)
+-    pb_show_front_screen();     //show it
++    // Keep the current CPU page visible until PVIDEO has a frame to display.
++    if (preserve_scanout)
++        pb_debug_screen_active=1;
++    else
++        pb_show_front_screen();
+ 
+     pb_shutdown_registration.NotificationRoutine = pb_shutdown_notification_routine;
+     pb_shutdown_registration.Priority = 0;
+@@ -3287,5 +3291,15 @@ int pb_init(void)
      return 0;
  }
  
 +int pb_init(void)
 +{
-+    return pb_init_with_color_buffers(false);
++    return pb_init_with_scanout(false, false);
 +}
 +
-+int moonlight_pb_init_static_scanout(void)
++int moonlight_pb_init_pvideo_scanout(bool static_scanout)
 +{
-+    return pb_init_with_color_buffers(true);
++    return pb_init_with_scanout(static_scanout, true);
 +}
 +
  static NTAPI VOID pb_shutdown_notification_routine (PHAL_SHUTDOWN_REGISTRATION ShutdownRegistration)

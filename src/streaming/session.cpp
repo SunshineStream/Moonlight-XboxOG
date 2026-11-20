@@ -25,8 +25,8 @@
 // lib includes
 #include "third-party/moonlight-common-c/src/Limelight.h"
 
-#include <SDL.h>
-#include <SDL_ttf.h>
+#include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 // platform includes
 #include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
@@ -36,6 +36,7 @@
 #endif
 
 // local includes
+#include "src/input/shell_controller.h"
 #include "src/input/stream_exit.h"
 #include "src/logging/logger.h"
 #include "src/os.h"
@@ -45,6 +46,7 @@
 #include "src/streaming/stats_overlay.h"
 #include "src/streaming/stream_controls.h"
 #include "src/ui/dialog_surface.h"
+#include "src/ui/sdl_render.h"
 #include "src/ui/shell_layout.h"
 #include "src/ui/shell_view.h"
 
@@ -96,7 +98,7 @@ namespace {
     streaming::VideoStatisticsSampler statisticsSampler;  ///< One-second telemetry intervals.
     streaming::StreamControls controller;
     streaming::FfmpegStreamBackend mediaBackend {};
-    std::optional<Uint32> startupTick;  ///< Session entry tick, cleared when the first video frame is presented.
+    std::optional<Uint64> startupTick;  ///< Session entry tick, cleared when the first video frame is presented.
     std::optional<VIDEO_MODE> pendingVideoMode;  ///< Output to switch to immediately before presenting decoded video.
     bool ttfInitialized = false;
   };
@@ -202,18 +204,23 @@ namespace {
     int streamingRemotely = STREAM_CFG_AUTO;
   };
 
+  /** @brief Restore normal render-thread priority when leaving the scope. */
   class ScopedThreadPriority {
   public:
-    explicit ScopedThreadPriority(SDL_ThreadPriority priority) {
-      active_ = SDL_SetThreadPriority(priority) == 0;
+    /**
+     * @brief Set the render thread's priority for the duration of this scope.
+     * @param priority SDL priority to request.
+     */
+    explicit ScopedThreadPriority(SDL_ThreadPriority priority):
+        active_(SDL_SetCurrentThreadPriority(priority)) {
       if (!active_) {
-        logging::debug("stream", std::string("SDL_SetThreadPriority failed for stream render thread: ") + SDL_GetError());
+        logging::debug("stream", std::string("SDL_SetCurrentThreadPriority failed for stream render thread: ") + SDL_GetError());
       }
     }
 
     ~ScopedThreadPriority() {
       if (active_) {
-        SDL_SetThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
+        SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
       }
     }
 
@@ -221,7 +228,7 @@ namespace {
     ScopedThreadPriority &operator=(const ScopedThreadPriority &) = delete;
 
   private:
-    bool active_ = false;
+    bool active_;  ///< True after SDL accepted the priority change.
   };
 
   bool video_modes_match(const VIDEO_MODE &left, const VIDEO_MODE &right) {
@@ -559,12 +566,6 @@ namespace {
     return std::string(DATA_PATH) + "assets" + PATH_SEP + "fonts" + PATH_SEP + "vegur-regular.ttf";
   }
 
-  void close_controller(SDL_GameController *controller) {
-    if (controller != nullptr) {
-      SDL_GameControllerClose(controller);
-    }
-  }
-
   void close_stream_ui_resources(StreamUiResources *resources) {
     if (resources == nullptr) {
       return;
@@ -602,30 +603,20 @@ namespace {
    * @param preferredController Controller still retained by the shell, or nullptr.
    * @return Separately owned controller reference, or nullptr when no device could be opened.
    */
-  SDL_GameController *open_primary_controller(SDL_GameController *preferredController) {
-    if (preferredController != nullptr && SDL_GameControllerGetAttached(preferredController) != SDL_FALSE) {
-      const SDL_JoystickID preferredId = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(preferredController));
-      for (int joystickIndex = 0; joystickIndex < SDL_NumJoysticks(); ++joystickIndex) {
-        if (SDL_JoystickGetDeviceInstanceID(joystickIndex) == preferredId) {
-          if (SDL_GameController *controller = SDL_GameControllerOpen(joystickIndex); controller != nullptr) {
-            logging::info("input", "Retained the menu controller for streaming; USB input remains open");
-            return controller;
-          }
-        }
-      }
-    }
-    for (int joystickIndex = 0; joystickIndex < SDL_NumJoysticks(); ++joystickIndex) {
-      if (!SDL_IsGameController(joystickIndex)) {
-        continue;
-      }
-
-      SDL_GameController *controller = SDL_GameControllerOpen(joystickIndex);
-      if (controller != nullptr) {
-        char *mapping = SDL_GameControllerMapping(controller);
-        logging::info("input", "Opened stream controller at device " + std::to_string(joystickIndex) + " of " + std::to_string(SDL_NumJoysticks()) + " | mapping=" + (mapping != nullptr ? std::string(mapping) : std::string("unavailable")));
-        SDL_free(mapping);
+  SDL_Gamepad *open_primary_controller(SDL_Gamepad *preferredController) {
+    if (preferredController != nullptr && SDL_GamepadConnected(preferredController)) {
+      if (SDL_Gamepad *controller = SDL_OpenGamepad(SDL_GetGamepadID(preferredController)); controller != nullptr) {
+        logging::info("input", "Retained the menu controller for streaming; USB input remains open");
         return controller;
       }
+    }
+
+    SDL_Gamepad *controller = nullptr;
+    input::recover_shell_controller(&controller);
+    if (controller != nullptr) {
+      const std::unique_ptr<char, decltype(&SDL_free)> mapping(SDL_GetGamepadMapping(controller), SDL_free);
+      logging::info("input", "Opened stream controller " + std::to_string(SDL_GetGamepadID(controller)) + " | mapping=" + (mapping ? mapping.get() : "unavailable"));
+      return controller;
     }
 
     return nullptr;
@@ -641,51 +632,32 @@ namespace {
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
   }
 
-  bool initialize_stream_ui_resources(SDL_Window *window, const VIDEO_MODE &videoMode, SDL_GameController *preferredController, StreamUiResources *resources, std::string *errorMessage) {
-    if (window == nullptr || resources == nullptr) {
-      if (errorMessage != nullptr) {
-        *errorMessage = "Streaming requires a valid SDL window";
-      }
+  /**
+   * @brief Load the session fonts before the shell hands off the display.
+   * @param videoMode Output mode used to size fonts.
+   * @param resources Receives fonts owned by the session.
+   * @param errorMessage Receives an error when required fonts are unavailable.
+   * @return True when the title and body fonts are ready.
+   */
+  bool initialize_stream_fonts(const VIDEO_MODE &videoMode, StreamUiResources &resources, std::string &errorMessage) {
+    if (!TTF_Init()) {
+      errorMessage = std::string("TTF_Init failed for the streaming session: ") + SDL_GetError();
       return false;
     }
-
-    enable_stream_controller_events();
-
-    if (TTF_Init() != 0) {
-      if (errorMessage != nullptr) {
-        *errorMessage = std::string("TTF_Init failed for the streaming session: ") + TTF_GetError();
-      }
-      return false;
-    }
-    resources->ttfInitialized = true;
-
-    resources->renderer = SDL_CreateRenderer(window, -1, 0);
-    if (resources->renderer == nullptr) {
-      if (errorMessage != nullptr) {
-        *errorMessage = std::string("SDL_CreateRenderer failed for the streaming session: ") + SDL_GetError();
-      }
-      close_stream_ui_resources(resources);
-      return false;
-    }
+    resources.ttfInitialized = true;
 
     const std::string fontPath = build_font_path();
-    resources->titleFont = TTF_OpenFont(fontPath.c_str(), std::max(22, videoMode.height / 18));
-    resources->bodyFont = TTF_OpenFont(fontPath.c_str(), std::max(16, videoMode.height / streaming::controls_raster_scale(videoMode.height) / 28));
-    if (resources->titleFont == nullptr || resources->bodyFont == nullptr) {
-      if (errorMessage != nullptr) {
-        *errorMessage = std::string("Failed to load the streaming session font from ") + fontPath + ": " + TTF_GetError();
-      }
-      close_stream_ui_resources(resources);
+    resources.titleFont = TTF_OpenFont(fontPath.c_str(), std::max(22, videoMode.height / 18));
+    resources.bodyFont = TTF_OpenFont(fontPath.c_str(), std::max(16, videoMode.height / streaming::controls_raster_scale(videoMode.height) / 28));
+    if (resources.titleFont == nullptr || resources.bodyFont == nullptr) {
+      errorMessage = "Failed to load the streaming session font from " + fontPath + ": " + SDL_GetError();
       return false;
     }
 
-    resources->controller.reset(open_primary_controller(preferredController));
-    {
-      resources->statisticsFont = TTF_OpenFont(fontPath.c_str(), std::max(12, videoMode.height / 45));
-      if (resources->statisticsFont == nullptr) {
-        resources->statisticsEnabled = false;
-        logging::warn("stream", std::string("Unable to load the performance overlay font: ") + TTF_GetError());
-      }
+    resources.statisticsFont = TTF_OpenFont(fontPath.c_str(), std::max(12, videoMode.height / 45));
+    if (resources.statisticsFont == nullptr) {
+      resources.statisticsEnabled = false;
+      logging::warn("stream", std::string("Unable to load the performance overlay font: ") + SDL_GetError());
     }
     return true;
   }
@@ -908,8 +880,12 @@ namespace {
     logging::log(connection_log_level(message), "moonlight", message);
   }
 
-  int run_stream_start_thread(void *context) {
-    auto *startContext = static_cast<StreamStartContext *>(context);
+  /**
+   * @brief Start the streaming transport and publish its result to the render thread.
+   * @param startContext Transport configuration and shared connection state.
+   * @return Zero after publishing the result, or -1 if the context is incomplete.
+   */
+  int run_stream_start_thread(StreamStartContext *startContext) {
     if (startContext == nullptr || startContext->connectionState == nullptr) {
       return -1;
     }
@@ -946,7 +922,7 @@ namespace {
     }
     const SDL_Rect source {0, 0, std::min(surface->w, bounds.w), std::min(surface->h, bounds.h)};
     const SDL_Rect destination {bounds.x, bounds.y, source.w, source.h};
-    const bool rendered = SDL_RenderCopy(renderer, texture, &source, &destination) == 0;
+    const bool rendered = ui::render_texture(renderer, texture, &source, &destination);
     SDL_DestroyTexture(texture);
     return rendered;
   }
@@ -965,7 +941,7 @@ namespace {
       return false;
     }
 
-    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface(TTF_RenderUTF8_Blended_Wrapped(font, text.c_str(), color, static_cast<Uint32>(bounds.w)), &SDL_FreeSurface);
+    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(TTF_RenderText_Blended_Wrapped(font, text.c_str(), 0, color, static_cast<Uint32>(bounds.w)), &SDL_DestroySurface);
     return surface && render_text_surface(renderer, surface.get(), bounds);
   }
 
@@ -1007,7 +983,7 @@ namespace {
   void pump_stream_events(StreamUiResources *resources, StreamConnectionState *connectionState) {
     int width = 0;
     int height = 0;
-    SDL_GetRendererOutputSize(resources->renderer, &width, &height);
+    SDL_GetCurrentRenderOutputSize(resources->renderer, &width, &height);
     const bool wasVisible = resources->controller.has_overlay();
     if (resources->controller.pump(resources->mediaBackend, resources->bodyFont, width, height, connectionState->connectionStarted.load(), resources->statisticsEnabled)) {
       request_stream_stop(connectionState);
@@ -1065,14 +1041,14 @@ namespace {
   }
 
   /**
-   * @brief Sample telemetry and rasterize one shared panel at most once per second.
+   * @brief Sample telemetry at most once per second after the first frame has been presented.
    * @param context Active stream configuration.
    * @param connectionState Current connection quality.
    * @param resources Renderer, cached font, telemetry sampler and video backend.
    * @return True when the video must be refreshed to display a new panel.
    */
   bool update_stream_statistics_overlay(const StreamStartContext &context, const StreamConnectionState &connectionState, StreamUiResources *resources) {
-    if (resources == nullptr || resources->pendingVideoMode || resources->controller.has_overlay() || !resources->statisticsEnabled || resources->statisticsFont == nullptr || !resources->mediaBackend.has_decoded_video()) {
+    if (resources == nullptr || resources->startupTick || resources->pendingVideoMode || resources->controller.has_overlay() || !resources->statisticsEnabled || resources->statisticsFont == nullptr || !resources->mediaBackend.has_decoded_video()) {
       return false;
     }
     const auto now = PltGetMicroseconds();
@@ -1085,27 +1061,27 @@ namespace {
     const auto lines = streaming::build_live_stats_overlay_lines(snapshot);
     int screenWidth = 0;
     int screenHeight = 0;
-    SDL_GetRendererOutputSize(resources->renderer, &screenWidth, &screenHeight);
+    SDL_GetCurrentRenderOutputSize(resources->renderer, &screenWidth, &screenHeight);
     constexpr int padding = 6;
-    const int lineHeight = TTF_FontLineSkip(resources->statisticsFont) + 2;
+    const int lineHeight = TTF_GetFontLineSkip(resources->statisticsFont) + 2;
     int width = 0;
     for (const auto &line : lines) {
       int lineWidth = 0;
-      TTF_SizeUTF8(resources->statisticsFont, line.c_str(), &lineWidth, nullptr);
+      TTF_GetStringSize(resources->statisticsFont, line.c_str(), 0, &lineWidth, nullptr);
       width = std::max(width, lineWidth);
     }
     width = std::min(width + padding * 2, screenWidth - streaming::VideoOverlay::MARGIN * 2);
     const int height = std::min(static_cast<int>(lines.size()) * lineHeight + padding * 2, screenHeight - streaming::VideoOverlay::MARGIN * 2);
-    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> panel(SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888), SDL_FreeSurface);
+    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> panel(SDL_CreateSurface(width, height, SDL_PIXELFORMAT_ARGB8888), SDL_DestroySurface);
     if (!panel) {
       logging::warn("stream", std::string("Unable to allocate the performance overlay: ") + SDL_GetError());
       resources->statisticsEnabled = false;
       return false;
     }
-    SDL_FillRect(panel.get(), nullptr, SDL_MapRGB(panel->format, 16, 16, 16));
+    SDL_FillSurfaceRect(panel.get(), nullptr, SDL_MapSurfaceRGB(panel.get(), 16, 16, 16));
     int top = padding;
     for (const auto &line : lines) {
-      std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> text(TTF_RenderUTF8_Blended(resources->statisticsFont, line.c_str(), {255, 255, 255, 255}), SDL_FreeSurface);
+      std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> text(TTF_RenderText_Blended(resources->statisticsFont, line.c_str(), 0, {255, 255, 255, 255}), SDL_DestroySurface);
       if (text) {
         SDL_Rect position {padding, top, text->w, text->h};
         SDL_BlitSurface(text.get(), nullptr, panel.get(), &position);
@@ -1122,7 +1098,7 @@ namespace {
     return true;
   }
 
-  void request_idle_video_refresh_if_needed(const streaming::FfmpegStreamBackend *mediaBackend, Uint32 *lastRequestTicks) {
+  void request_idle_video_refresh_if_needed(const streaming::FfmpegStreamBackend *mediaBackend, Uint64 *lastRequestTicks) {
     if (mediaBackend == nullptr || lastRequestTicks == nullptr || !mediaBackend->has_decoded_video()) {
       return;
     }
@@ -1131,7 +1107,7 @@ namespace {
     if (idleMilliseconds < STREAM_VIDEO_IDLE_IDR_MILLISECONDS) {
       return;
     }
-    const Uint32 nowTicks = SDL_GetTicks();
+    const Uint64 nowTicks = SDL_GetTicks();
     if (*lastRequestTicks != 0U && nowTicks - *lastRequestTicks < STREAM_VIDEO_IDLE_IDR_COOLDOWN_MILLISECONDS) {
       return;
     }
@@ -1160,30 +1136,18 @@ namespace {
   }
 
   /**
-   * @brief Paint startup progress with a footer that stays inside television-safe margins.
-   * @param resources Event-thread renderer and fonts.
+   * @brief Paint a centered startup card whose layout stays fixed as progress changes.
+   * @param renderer Target for the current stage of the renderer handoff.
+   * @param resources Session fonts.
    * @param dialog Modal content with an optional startup progress step.
    * @param screenWidth Output width in pixels.
    * @param screenHeight Output height in pixels.
    * @param footer Optional stream-menu hint.
    * @return True when the dialog was drawn.
    */
-  bool draw_stream_start_dialog(const StreamUiResources &resources, const ui::ShellModalView &dialog, int screenWidth, int screenHeight, const std::string &footer = {}) {
-    const int padding = std::max(20, screenHeight / 40);
-    const int dialogWidth = std::min(760, screenWidth * 3 / 4);
-    const int innerWidth = dialogWidth - 2 * padding;
-    const int titleHeight = TTF_FontLineSkip(resources.titleFont);
-    const int bodyTop = 28 + titleHeight + 12;
-    constexpr int progressHeight = 8;
-    int footerTextHeight = 0;
-    if (!footer.empty()) {
-      int footerWidth = 0;
-      const bool wraps = TTF_SizeUTF8(resources.bodyFont, footer.c_str(), &footerWidth, nullptr) == 0 && footerWidth > innerWidth;
-      footerTextHeight = TTF_FontLineSkip(resources.bodyFont) * (wraps ? 2 : 1);
-    }
-    const int footerHeight = progressHeight + 12 + footerTextHeight;
-    const int maxBodyHeight = screenHeight - screenHeight / 10 - bodyTop - footerHeight - 2 * padding;
-    if (innerWidth <= 0 || maxBodyHeight <= 0) {
+  bool draw_stream_start_dialog(SDL_Renderer *renderer, const StreamUiResources &resources, const ui::ShellModalView &dialog, int screenWidth, int screenHeight, const std::string &footer = {}) {
+    const auto [card, title, body, progress, hint] = ui::calculate_stream_startup_layout(screenWidth, screenHeight, TTF_GetFontLineSkip(resources.titleFont), TTF_GetFontLineSkip(resources.bodyFont));
+    if (card.w == 0) {
       return false;
     }
 
@@ -1194,42 +1158,61 @@ namespace {
       }
       bodyText += line;
     }
-    const auto rasterizeBody = [&](TTF_Font *font) {
-      return std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)>(
-        TTF_RenderUTF8_Blended_Wrapped(font, bodyText.c_str(), {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, static_cast<Uint32>(innerWidth)),
-        SDL_FreeSurface
+    constexpr SDL_Color text {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
+    const auto rasterizeBody = [&bodyText, text, wrapWidth = static_cast<Uint32>(body.w)](TTF_Font *font) {
+      return std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>(
+        TTF_RenderText_Blended_Wrapped(font, bodyText.c_str(), 0, text, wrapWidth),
+        SDL_DestroySurface
       );
     };
-    auto body = rasterizeBody(resources.bodyFont);
-    if (body && body->h > maxBodyHeight && resources.statisticsFont != nullptr) {
-      if (auto compact = rasterizeBody(resources.statisticsFont); compact && compact->h < body->h) {
-        body = std::move(compact);
+    auto raster = rasterizeBody(resources.bodyFont);
+    if (raster && raster->h > body.h && resources.statisticsFont != nullptr) {
+      if (auto compact = rasterizeBody(resources.statisticsFont); compact && compact->h < raster->h) {
+        raster = std::move(compact);
       }
     }
-    if (!body) {
+    if (!raster) {
       return false;
     }
 
-    const int bodyHeight = std::min(body->h, maxBodyHeight);
-    const auto [x, y, w, h] = ui::calculate_shell_dialog(screenWidth, screenHeight, dialogWidth, bodyTop + bodyHeight + footerHeight + 2 * padding);
-    SDL_SetRenderDrawColor(resources.renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
-    SDL_RenderClear(resources.renderer);
-    ui::draw_dialog_surface(resources.renderer, {x, y, w, h});
-
-    const int left = x + padding;
-    const SDL_Color text {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
-    if (!render_text_line(resources.renderer, resources.titleFont, dialog.title, {left, y + 28, innerWidth, titleHeight}, text) || !render_text_surface(resources.renderer, body.get(), {left, y + bodyTop, innerWidth, bodyHeight})) {
+    SDL_SetRenderDrawColor(renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
+    SDL_RenderClear(renderer);
+    ui::draw_dialog_surface(renderer, {card.x, card.y, card.w, card.h});
+    if (!render_text_line(renderer, resources.titleFont, dialog.title, {title.x, title.y, title.w, title.h}, text) || !render_text_surface(renderer, raster.get(), {body.x, body.y, body.w, body.h})) {
       return false;
     }
     if (dialog.streamStartupStep.has_value()) {
-      ui::draw_dialog_progress(resources.renderer, {left, y + h - padding - footerHeight, innerWidth, progressHeight}, static_cast<int>(*dialog.streamStartupStep), ui::STREAM_STARTUP_STEP_COUNT);
+      ui::draw_dialog_progress(renderer, {progress.x, progress.y, progress.w, progress.h}, static_cast<int>(*dialog.streamStartupStep), ui::STREAM_STARTUP_STEP_COUNT);
     }
-    if (!footer.empty()) {
-      const int footerY = y + h - padding - footerTextHeight;
-      return render_text_line(resources.renderer, resources.bodyFont, footer, {left, footerY, innerWidth, footerTextHeight}, {0x82, 0xB4, 0xFF, 0xFF});
-    }
-    return true;
+    return footer.empty() || render_text_line(renderer, resources.bodyFont, footer, {hint.x, hint.y, hint.w, hint.h}, {0x82, 0xB4, 0xFF, 0xFF});
   }
+
+#ifdef NXDK
+  /**
+   * @brief Paint the startup card onto the CPU framebuffer before the shell releases pbkit.
+   * @param resources Session fonts shared by subsequent startup frames.
+   * @param dialog Current startup progress.
+   */
+  void stage_stream_start_dialog(const StreamUiResources &resources, const ui::ShellModalView &dialog) {
+    const VIDEO_MODE mode = XVideoGetMode();
+    void *framebuffer = XVideoGetFB();
+    if (framebuffer == nullptr || (mode.bpp != 15 && mode.bpp != 16 && mode.bpp != 32)) {
+      return;
+    }
+    const auto format = mode.bpp == 32 ? SDL_PIXELFORMAT_XRGB8888 : (mode.bpp == 16 ? SDL_PIXELFORMAT_RGB565 : SDL_PIXELFORMAT_XRGB1555);
+    const int pitch = mode.width * SDL_BYTESPERPIXEL(format);
+    const std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(SDL_CreateSurfaceFrom(mode.width, mode.height, format, framebuffer, pitch), SDL_DestroySurface);
+    if (!surface) {
+      return;
+    }
+    const std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer(SDL_CreateSoftwareRenderer(surface.get()), SDL_DestroyRenderer);
+    if (renderer && draw_stream_start_dialog(renderer.get(), resources, dialog, mode.width, mode.height)) {
+      // The standalone surface renderer needs no window resize or pbkit ownership.
+      SDL_RenderPresent(renderer.get());
+      XVideoFlushFB();
+    }
+  }
+#endif
 
   /**
    * @brief Present the latest decoded frame or continue showing startup progress.
@@ -1256,7 +1239,7 @@ namespace {
 
     int screenWidth = 0;
     int screenHeight = 0;
-    SDL_GetRendererOutputSize(resources->renderer, &screenWidth, &screenHeight);
+    SDL_GetCurrentRenderOutputSize(resources->renderer, &screenWidth, &screenHeight);
 
     const bool hasDecodedVideo = !resources->pendingVideoMode && mediaBackend != nullptr && mediaBackend->has_decoded_video();
     if (hasDecodedVideo && mediaBackend->render_latest_video_frame(resources->renderer, screenWidth, screenHeight)) {
@@ -1275,7 +1258,7 @@ namespace {
     if (resources->statisticsEnabled && mediaBackend != nullptr) {
       dialog.lines.push_back(mediaBackend->build_overlay_status_line());
     }
-    draw_stream_start_dialog(*resources, dialog, screenWidth, screenHeight, input::STREAM_EXIT_HINT);
+    draw_stream_start_dialog(resources->renderer, *resources, dialog, screenWidth, screenHeight, input::STREAM_EXIT_HINT);
 
     if (resources->controller.has_overlay() && mediaBackend != nullptr) {
       mediaBackend->render_local_overlay(resources->renderer, screenWidth, screenHeight);
@@ -1316,7 +1299,11 @@ namespace {
    * @return True when the worker ran to completion or cancellation.
    */
   bool run_stream_start_attempt(const StreamStartAttemptContext &attempt) {
-    if (SDL_Thread *startThread = SDL_CreateThread(run_stream_start_thread, "start-stream", &attempt.startContext); startThread != nullptr) {
+    const SDL_ThreadFunction startEntry = [](auto context) {
+      return run_stream_start_thread(static_cast<StreamStartContext *>(context));
+    };
+    SDL_Thread *startThread = SDL_CreateThread(startEntry, "start-stream", &attempt.startContext);
+    if (startThread != nullptr) {
       while (!attempt.connectionState.startCompleted.load() && !attempt.connectionState.stopRequested.load()) {
         pump_stream_events(&attempt.resources, &attempt.connectionState);
         if (attempt.connectionState.stopRequested.load()) {
@@ -1367,30 +1354,35 @@ namespace {
   }
 
   /**
-   * @brief Switch to the pending 1080i mode once the first frame is ready.
+   * @brief Switch directly from the progressive startup card to interlaced video.
    * @param loopContext Active stream resources and display mode.
+   * @return New output height when the mode changed, or zero when no resize is needed.
    */
-  void activate_pending_stream_video_mode(const ActiveStreamLoopContext &loopContext) {
+  int activate_pending_stream_video_mode(const ActiveStreamLoopContext &loopContext) {
     auto &resources = loopContext.resources;
     const int previousHeight = loopContext.videoMode.active_video_mode().height;
     loopContext.videoMode.switch_to(*resources.pendingVideoMode);
     resources.pendingVideoMode.reset();
     const int outputHeight = loopContext.videoMode.active_video_mode().height;
     if (outputHeight == previousHeight) {
-      return;
+      return 0;
     }
 
+    // xemu's VGA scanout can show only one field of a 1080i CPU framebuffer
+    // before PVIDEO takes over. Keep the startup card in the progressive mode.
     resources.controller.invalidate_panel(resources.mediaBackend);
-    const std::string fontPath = build_font_path();
-    const auto resizeFont = [&fontPath](TTF_Font *&font, int size) {
-      if (font == nullptr) {
-        return;
-      }
-      if (auto *replacement = TTF_OpenFont(fontPath.c_str(), size); replacement != nullptr) {
-        TTF_CloseFont(font);
-        font = replacement;
-      } else {
-        logging::warn("stream", std::string("Unable to resize a streaming font: ") + TTF_GetError());
+    return outputHeight;
+  }
+
+  /**
+   * @brief Resize the overlay fonts in place after the display handoff.
+   * @param resources Cached fonts owned by the stream.
+   * @param outputHeight Height of the new scanout in pixels.
+   */
+  void resize_stream_fonts(StreamUiResources &resources, int outputHeight) {
+    const auto resizeFont = [](TTF_Font *font, int size) {
+      if (font != nullptr && !TTF_SetFontSize(font, static_cast<float>(size))) {
+        logging::warn("stream", std::string("Unable to resize a streaming font: ") + SDL_GetError());
       }
     };
     resizeFont(resources.titleFont, std::max(22, outputHeight / 18));
@@ -1398,10 +1390,16 @@ namespace {
     resizeFont(resources.statisticsFont, std::max(12, outputHeight / 45));
   }
 
-  void render_active_stream_frame_if_needed(const ActiveStreamLoopContext &loopContext, Uint32 *lastIdleVideoIdrRequestTick) {
+  /**
+   * @brief Present a pending frame and finish any UI work deferred across the mode switch.
+   * @param loopContext Active stream resources and display mode.
+   * @param lastIdleVideoIdrRequestTick Last idle refresh request, updated when a new one is sent.
+   */
+  void render_active_stream_frame_if_needed(const ActiveStreamLoopContext &loopContext, Uint64 *lastIdleVideoIdrRequestTick) {
     const bool hasDecodedVideo = loopContext.resources.mediaBackend.has_decoded_video();
+    int newOutputHeight = 0;
     if (hasDecodedVideo && loopContext.resources.pendingVideoMode) {
-      activate_pending_stream_video_mode(loopContext);
+      newOutputHeight = activate_pending_stream_video_mode(loopContext);
     }
     const bool statisticsChanged = update_stream_statistics_overlay(loopContext.startContext, loopContext.connectionState, &loopContext.resources);
     if (const bool shouldRenderFrame = !hasDecodedVideo || statisticsChanged || loopContext.resources.mediaBackend.has_pending_overlay() || loopContext.resources.mediaBackend.has_unrendered_video_frame(); shouldRenderFrame) {
@@ -1414,6 +1412,9 @@ namespace {
         &loopContext.resources
       );
     }
+    if (newOutputHeight > 0) {
+      resize_stream_fonts(loopContext.resources, newOutputHeight);
+    }
     request_idle_video_refresh_if_needed(&loopContext.resources.mediaBackend, lastIdleVideoIdrRequestTick);
     SDL_Delay(hasDecodedVideo ? STREAM_PRESENT_POLL_MILLISECONDS : STREAM_FRAME_DELAY_MILLISECONDS);
   }
@@ -1423,7 +1424,7 @@ namespace {
    * @param loopContext Active stream resources.
    */
   void run_active_stream_loop(const ActiveStreamLoopContext &loopContext) {
-    Uint32 lastIdleVideoIdrRequestTick = 0U;
+    Uint64 lastIdleVideoIdrRequestTick = 0U;
     while (!loopContext.connectionState.connectionTerminated.load() && !loopContext.connectionState.stopRequested.load()) {
       pump_stream_events(&loopContext.resources, &loopContext.connectionState);
       if (loopContext.connectionState.stopRequested.load()) {
@@ -1478,15 +1479,15 @@ namespace streaming {
     const app::HostRecord &host,
     const app::HostAppRecord &app,
     const network::PairingIdentity &clientIdentity,
-    SDL_GameController *preferredController,
+    SDL_Gamepad *preferredController,
+    const std::function<void()> &releaseShell,
     StreamSessionReport &report
   ) {
-    const Uint32 sessionStarted = SDL_GetTicks();
+    const Uint64 sessionStarted = SDL_GetTicks();
     report = {};
     const ResolvedStreamParameters streamParameters = resolve_stream_parameters(videoMode, settings);
     const VIDEO_MODE streamPresentationVideoMode = startup::choose_stream_output_mode(streamParameters.videoMode, videoMode);
     const VIDEO_MODE startupVideoMode = startup::choose_stream_startup_mode(streamPresentationVideoMode, videoMode);
-    ScopedStreamVideoMode scopedStreamVideoMode(window, videoMode, startupVideoMode);
 
     StreamUiResources resources {};
     if (!video_modes_match(startupVideoMode, streamPresentationVideoMode)) {
@@ -1494,12 +1495,33 @@ namespace streaming {
     }
     resources.startupTick = sessionStarted;
     resources.statisticsEnabled = settings.presentation.showPerformanceStats;
+    std::string initializationError;
+    const bool fontsReady = initialize_stream_fonts(startupVideoMode, resources, initializationError);
+#ifdef NXDK
+    if (fontsReady) {
+      stage_stream_start_dialog(resources, ui::build_stream_launch_dialog(host, app));
+    }
+#endif
+    releaseShell();
+
+    ScopedStreamVideoMode scopedStreamVideoMode(window, videoMode, startupVideoMode);
     const auto &activeStreamVideoMode = scopedStreamVideoMode.active_video_mode();
-    if (std::string initializationError; !initialize_stream_ui_resources(window, activeStreamVideoMode, preferredController, &resources, &initializationError)) {
+    // PVIDEO owns pbkit while streaming. Keep the startup dialog and the SDL fallback on the CPU.
+    if (fontsReady) {
+      resources.renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
+      if (resources.renderer == nullptr) {
+        initializationError = std::string("SDL_CreateRenderer failed for the streaming session: ") + SDL_GetError();
+      }
+    }
+    if (resources.renderer == nullptr) {
+      close_stream_ui_resources(&resources);
       report.message = initializationError;
       logging::error("stream", initializationError);
       return false;
     }
+
+    enable_stream_controller_events();
+    resources.controller.reset(open_primary_controller(preferredController));
     resources.controller.configure(settings.controls.screenshotDirectory, settings.controls.keyboardDockTop, app::screenshot_source(host, app));
     ScopedThreadPriority streamThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 
@@ -1532,12 +1554,12 @@ namespace streaming {
 
     int screenWidth = 0;
     int screenHeight = 0;
-    SDL_GetRendererOutputSize(resources.renderer, &screenWidth, &screenHeight);
-    draw_stream_start_dialog(resources, ui::build_stream_launch_dialog(host, app, ui::StreamStartupStep::starting_on_host), screenWidth, screenHeight);
+    SDL_GetCurrentRenderOutputSize(resources.renderer, &screenWidth, &screenHeight);
+    draw_stream_start_dialog(resources.renderer, resources, ui::build_stream_launch_dialog(host, app, ui::StreamStartupStep::starting_on_host), screenWidth, screenHeight);
     SDL_RenderPresent(resources.renderer);
 
     std::string launchError;
-    const Uint32 hostRequestStarted = SDL_GetTicks();
+    const Uint64 hostRequestStarted = SDL_GetTicks();
     const bool accepted = network::launch_or_resume_stream(hostAddress, httpPort, clientIdentity, launchConfiguration, &launchResult, &launchError);
     logging::info("stream", "Stream startup: host request took " + std::to_string(SDL_GetTicks() - hostRequestStarted) + " ms");
     if (!accepted) {

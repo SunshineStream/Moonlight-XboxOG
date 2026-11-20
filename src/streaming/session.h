@@ -5,6 +5,7 @@
 #pragma once
 
 // standard includes
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -15,7 +16,7 @@
 #include "src/startup/video_mode.h"
 
 struct SDL_Window;
-typedef struct _SDL_GameController SDL_GameController;  ///< SDL controller handle shared with the shell without including SDL platform headers.
+struct SDL_Gamepad;  ///< SDL controller handle shared with the shell without including SDL platform headers.
 
 namespace streaming {
 
@@ -23,7 +24,7 @@ namespace streaming {
    * @brief Result returned to the shell after the stream resources are released.
    */
   struct StreamSessionReport {
-    SDL_GameController *controller = nullptr;  ///< Owned controller reference to keep or close on return, or nullptr.
+    SDL_Gamepad *controller = nullptr;  ///< Owned controller reference to keep or close on return, or nullptr.
     std::string message;  ///< Final session status or reason startup failed.
     std::vector<std::string> summaryLines;  ///< Outcome and statistics for the app picker's summary dialog.
   };
@@ -48,6 +49,7 @@ namespace streaming {
    * @param app Selected host app.
    * @param clientIdentity Paired client identity used for authenticated launch requests.
    * @param preferredController Controller retained by the shell throughout the session, or nullptr to use the first available device.
+   * @param releaseShell Called once to release the shell renderer after staging the startup screen.
    * @param report Output receiving the final status, summary and an owned controller reference when available.
    * @return True when the stream session started successfully.
    */
@@ -58,7 +60,8 @@ namespace streaming {
     const app::HostRecord &host,
     const app::HostAppRecord &app,
     const network::PairingIdentity &clientIdentity,
-    SDL_GameController *preferredController,
+    SDL_Gamepad *preferredController,
+    const std::function<void()> &releaseShell,
     StreamSessionReport &report
   );
 

@@ -30,6 +30,7 @@ extern "C" {
 // local includes
 #include "src/logging/logger.h"
 #include "src/platform/filesystem_utils.h"
+#include "src/ui/sdl_render.h"
 
 // nxdk includes
 #ifdef NXDK
@@ -298,7 +299,7 @@ namespace {
    * @brief Track actual completed BMP writes while retaining SDL's platform file implementation.
    */
   struct ScreenshotFileProgress {
-    SDL_RWops *file;  ///< Worker-owned file, closed after SDL finalizes the BMP header.
+    SDL_IOStream *file;  ///< Worker-owned file, closed after SDL finalizes the BMP header.
     std::atomic<int> &progress;  ///< UI-readable percentage independent of file and surface lifetimes.
     Sint64 expected;  ///< Final 24-bit BMP length, including scanline padding and header.
     Sint64 position = 0;  ///< Current file position, including SDL's header fixup seeks.
@@ -310,29 +311,32 @@ namespace {
 // SDL file callbacks use C linkage; project-prefixed names avoid global symbol collisions.
 /**
  * @brief Delegate a BMP file seek while keeping progress accounting in sync.
- * @param stream Progress-decorated SDL file.
+ * @param context BMP progress state.
  * @param offset Byte offset relative to whence.
  * @param whence SDL seek origin.
  * @return New byte position or a negative value on error.
  */
-extern "C" Sint64 moonlight_screenshot_file_seek(SDL_RWops *stream, Sint64 offset, int whence) {
-  auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
-  writer.position = SDL_RWseek(writer.file, offset, whence);
+extern "C" Sint64 moonlight_screenshot_file_seek(void *context, Sint64 offset, SDL_IOWhence whence) {
+  auto &writer = *static_cast<ScreenshotFileProgress *>(context);
+  writer.position = SDL_SeekIO(writer.file, offset, whence);
   return writer.position;
 }
 
 /**
  * @brief Forward one BMP write and publish progress only for bytes actually written.
- * @param stream Progress-decorated SDL file.
+ * @param context BMP progress state.
  * @param pixels Header or pixel bytes supplied by the SDL C writer callback.
- * @param size Bytes per object.
- * @param count Requested object count.
- * @return Number of complete objects written.
+ * @param size Requested byte count.
+ * @param status Receives the underlying stream's status after a partial write.
+ * @return Bytes written.
  */
-extern "C" std::size_t moonlight_screenshot_file_write(SDL_RWops *stream, const void *pixels, std::size_t size, std::size_t count) {
-  auto &writer = *static_cast<ScreenshotFileProgress *>(stream->hidden.unknown.data1);
-  const auto written = SDL_RWwrite(writer.file, pixels, size, count);
-  writer.position += static_cast<Sint64>(written * size);
+extern "C" std::size_t moonlight_screenshot_file_write(void *context, const void *pixels, std::size_t size, SDL_IOStatus *status) {
+  auto &writer = *static_cast<ScreenshotFileProgress *>(context);
+  const auto written = SDL_WriteIO(writer.file, pixels, size);
+  if (written < size) {
+    *status = SDL_GetIOStatus(writer.file);
+  }
+  writer.position += static_cast<Sint64>(written);
   writer.written = std::max(writer.written, writer.position);
   writer.progress.store(10 + static_cast<int>(85 * std::min(writer.written, writer.expected) / writer.expected));
   return written;
@@ -377,9 +381,9 @@ namespace streaming {
     statisticsTextureChanged_ = true;
     statisticsTextureDamage_ = {0, 0, statisticsOverlay_.width(), statisticsOverlay_.height()};
     if (statisticsTexture_ != nullptr) {
-      int width = 0;
-      int height = 0;
-      if (SDL_QueryTexture(statisticsTexture_, nullptr, nullptr, &width, &height) != 0 || width != statisticsOverlay_.width() || height != statisticsOverlay_.height()) {
+      float width = 0;
+      float height = 0;
+      if (!SDL_GetTextureSize(statisticsTexture_, &width, &height) || width != statisticsOverlay_.width() || height != statisticsOverlay_.height()) {
         SDL_DestroyTexture(statisticsTexture_);
         statisticsTexture_ = nullptr;
       }
@@ -472,17 +476,18 @@ namespace streaming {
    * @return True after both encoding and file finalization succeed.
    */
   bool save_screenshot_bitmap(SDL_Surface &surface, const std::string &path, std::atomic<int> &progress) {
-    SDL_RWops *file = SDL_RWFromFile(path.c_str(), "wb");
+    SDL_IOStream *file = SDL_IOFromFile(path.c_str(), "wb");
     if (file == nullptr) {
       return false;
     }
     ScreenshotFileProgress writer {file, progress, 54 + static_cast<Sint64>((surface.w * 3 + 3) & ~3) * surface.h};
-    SDL_RWops progressFile {};
-    progressFile.hidden.unknown.data1 = &writer;
-    progressFile.seek = moonlight_screenshot_file_seek;
-    progressFile.write = moonlight_screenshot_file_write;
-    const bool encoded = SDL_SaveBMP_RW(&surface, &progressFile, 0) == 0;
-    const bool closed = SDL_RWclose(file) == 0;
+    SDL_IOStreamInterface callbacks;
+    SDL_INIT_INTERFACE(&callbacks);
+    callbacks.seek = moonlight_screenshot_file_seek;
+    callbacks.write = moonlight_screenshot_file_write;
+    SDL_IOStream *progressFile = SDL_OpenIO(&callbacks, &writer);
+    const bool encoded = progressFile != nullptr && SDL_SaveBMP_IO(&surface, progressFile, true);
+    const bool closed = SDL_CloseIO(file);
     const bool saved = encoded && closed;
     if (!saved) {
       std::remove(path.c_str());
@@ -491,13 +496,13 @@ namespace streaming {
   }
 
   SDL_Surface *FfmpegStreamBackend::convert_screenshot_frame(const Yuv420FrameView &frame) {
-    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, frame.width, frame.height, 24, SDL_PIXELFORMAT_BGR24);
+    SDL_Surface *surface = SDL_CreateSurface(frame.width, frame.height, SDL_PIXELFORMAT_BGR24);
     if (surface == nullptr) {
       return nullptr;
     }
     SwsContext *conversion = sws_getContext(frame.width, frame.height, AV_PIX_FMT_YUV420P, frame.width, frame.height, AV_PIX_FMT_BGR24, SWS_POINT, nullptr, nullptr, nullptr);
     if (conversion == nullptr) {
-      SDL_FreeSurface(surface);
+      SDL_DestroySurface(surface);
       return nullptr;
     }
     const int *coefficients = sws_getCoefficients(frame.matrix == VideoColorMatrix::bt709 ? SWS_CS_ITU709 : SWS_CS_ITU601);
@@ -509,7 +514,7 @@ namespace streaming {
     const bool converted = sws_scale(conversion, pixels.data(), pitch.data(), 0, frame.height, output.data(), outputPitch.data()) == frame.height;
     sws_freeContext(conversion);
     if (!converted) {
-      SDL_FreeSurface(surface);
+      SDL_DestroySurface(surface);
       return nullptr;
     }
     return surface;
@@ -518,7 +523,7 @@ namespace streaming {
   int FfmpegStreamBackend::save_screenshot_worker(ScreenshotTask *context) {
     auto &job = *context;
     // Stay below the streaming event loop without starving behind USB/audio work.
-    SDL_SetThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
+    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
     job.progress.store(1);
     std::string error;
     const std::string path = app::next_screenshot_path(job.directory, job.capturedAt, error);
@@ -530,7 +535,7 @@ namespace streaming {
       job.progress.store(10);
       saved = save_screenshot_bitmap(*surface, path, job.progress);
     }
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
     if (saved) {
       job.progress.store(99);
       job.result = app::append_screenshot({job.source, path, job.capturedAt}, app::screenshot_library_path(), error) ? "Saved " + path : "Saved " + path + "; could not update the screenshot library: " + error;
@@ -723,21 +728,25 @@ namespace streaming {
     if (!gpuPresentationEnabled_ || overlayFailed_) {
       return false;
     }
-    if (!newFrame && !statisticsBitmapChanged_ && presenter_.active()) {
+    const bool alreadyPresenting = presenter_.active();
+    if (!newFrame && !statisticsBitmapChanged_ && alreadyPresenting) {
       return true;
-    }
-    if (!presenter_.active()) {
-      const VIDEO_MODE mode = XVideoGetMode();
-      if (auto *framebuffer = XVideoGetFB(); framebuffer != nullptr && mode.width > 0 && mode.height > 0 && (mode.bpp == 16 || mode.bpp == 32)) {
-        std::memset(framebuffer, 0, static_cast<std::size_t>(mode.width) * static_cast<std::size_t>(mode.height) * static_cast<std::size_t>(mode.bpp / 8));
-        XVideoFlushFB();
-      }
     }
     if (std::string reason; !presenter_.present(video_.renderFrame.view(), {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_)) {
       overlayFailed_ = true;
       acceleration_.record_fallback(reason);
       logging::warn("stream", "GPU presentation fallback: " + reason);
       return false;
+    }
+    if (!alreadyPresenting) {
+      // The GPU now owns scanout. Discard the startup card on the hidden CPU
+      // page so a later reset cannot put it back on screen.
+      const VIDEO_MODE mode = XVideoGetMode();
+      auto *framebuffer = XVideoGetFB();
+      if (framebuffer != nullptr && mode.width > 0 && mode.height > 0 && (mode.bpp == 16 || mode.bpp == 32)) {
+        std::memset(framebuffer, 0, static_cast<std::size_t>(mode.width) * static_cast<std::size_t>(mode.height) * static_cast<std::size_t>(mode.bpp / 8));
+        XVideoFlushFB();
+      }
     }
     if (newFrame) {
       ++acceleration_.gpuFrames;
@@ -765,14 +774,14 @@ namespace streaming {
       textureNeedsUpload = true;
     }
 
-    if (textureNeedsUpload && SDL_UpdateYUVTexture(video_.texture, nullptr, frame.planes[0], frame.pitches[0], frame.planes[1], frame.pitches[1], frame.planes[2], frame.pitches[2]) != 0) {
+    if (textureNeedsUpload && !SDL_UpdateYUVTexture(video_.texture, nullptr, frame.planes[0], frame.pitches[0], frame.planes[1], frame.pitches[1], frame.planes[2], frame.pitches[2])) {
       logging::error("stream", std::string("SDL_UpdateYUVTexture failed during video presentation: ") + SDL_GetError());
       return false;
     }
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
-    const bool presented = SDL_RenderCopy(renderer, video_.texture, nullptr, &destination) == 0;
+    const bool presented = ui::render_texture(renderer, video_.texture, nullptr, &destination);
     if (presented) {
       render_sdl_statistics(renderer, destination);
       SDL_RenderPresent(renderer);
@@ -805,7 +814,7 @@ namespace streaming {
       const SDL_Rect damage {region.x, region.y, region.width, region.height};
       void *pixels = nullptr;
       int pitch = 0;
-      if (SDL_LockTexture(statisticsTexture_, &damage, &pixels, &pitch) != 0) {
+      if (!SDL_LockTexture(statisticsTexture_, &damage, &pixels, &pitch)) {
         return;
       }
       const bool uploaded = statisticsOverlay_.copy_argb_region(region, static_cast<std::uint8_t *>(pixels), pitch);
@@ -819,7 +828,7 @@ namespace streaming {
     const auto bitmap = statisticsOverlay_.bitmap_rectangle(bounds);
     const SDL_Rect panel {bounds.x, bounds.y, bounds.width, bounds.height};
     const SDL_Rect source {bitmap.x, bitmap.y, bitmap.width, bitmap.height};
-    SDL_RenderCopy(renderer, statisticsTexture_, &source, &panel);
+    ui::render_texture(renderer, statisticsTexture_, &source, &panel);
   }
 
   int FfmpegStreamBackend::setup_video_decoder(int videoFormat, int width, int height, int redrawRate, int drFlags) {
@@ -981,8 +990,8 @@ namespace streaming {
   }
 
   int FfmpegStreamBackend::run_video_decode_thread() {
-    if (SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH) != 0) {
-      logging::debug("stream", std::string("SDL_SetThreadPriority failed for video decoder: ") + SDL_GetError());
+    if (!SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH)) {
+      logging::debug("stream", std::string("SDL_SetCurrentThreadPriority failed for video decoder: ") + SDL_GetError());
     }
 
     while (!video_.decoderStopRequested.load()) {

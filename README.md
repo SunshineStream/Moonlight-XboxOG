@@ -362,6 +362,14 @@ revision changes and local edits to tracked SDK files refresh the copy; unrelate
 untracked files and existing build products are excluded. `MOONLIGHT_NXDK_DIR`
 selects the source checkout; `MOONLIGHT_NXDK_BUILD_DIR` selects the build copy.
 
+The Xbox child build fetches [nxdk-sdl3](https://github.com/Ryzee119/nxdk-sdl3),
+SDL3_image, and SDL3_ttf at the revisions in `package-lock.cmake`.
+Moonlight applies its boot USB keyboard and mouse hooks, video-mode integration,
+and audio teardown changes to copies of the port's drivers in the build directory.
+The shell uses the Xbox SDL3 renderer when the output mode supports it and falls
+back to software rendering. Streaming uses a software SDL3 renderer for its
+dialog and final fallback so the PVIDEO presenter can own pbkit.
+
 The local network target builds upstream lwIP with the streaming receive limits,
 socket options and mDNS enabled. The `network/nxdk-network.patch` compatibility
 patch is applied with `git apply` to build-directory copies, preserving thread

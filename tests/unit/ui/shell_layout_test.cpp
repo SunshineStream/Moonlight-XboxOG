@@ -201,6 +201,42 @@ namespace {
   }
 
   /**
+   * @brief Reserve positions for the title, status, progress and hint throughout launch.
+   */
+  TEST(ShellLayoutTest, ReservesFixedStreamStartupRows) {
+    for (const auto [width, height] : {std::pair {640, 480}, {1280, 720}, {1920, 1080}}) {
+      constexpr int titleLine = 32;
+      constexpr int bodyLine = 20;
+      const auto layout = ui::calculate_stream_startup_layout(width, height, titleLine, bodyLine);
+      EXPECT_GE(layout.card.x, width / 20);
+      EXPECT_GE(layout.card.y, height / 20);
+      EXPECT_EQ(layout.title.h, titleLine);
+      EXPECT_EQ(layout.body.h, 3 * bodyLine);
+      EXPECT_EQ(layout.hint.h, 2 * bodyLine);
+      for (const auto rect : {layout.title, layout.body, layout.progress, layout.hint}) {
+        EXPECT_GT(rect.x, layout.card.x);
+        EXPECT_LT(rect.x + rect.w, layout.card.x + layout.card.w);
+      }
+      EXPECT_LT(layout.title.y + layout.title.h, layout.body.y);
+      EXPECT_LT(layout.body.y + layout.body.h, layout.progress.y);
+      EXPECT_LT(layout.progress.y + layout.progress.h, layout.hint.y);
+      EXPECT_LT(layout.hint.y + layout.hint.h, layout.card.y + layout.card.h);
+    }
+  }
+
+  /**
+   * @brief Keep at least one status row in cramped layouts and reject unusable bounds.
+   */
+  TEST(ShellLayoutTest, ClampsStartupStatusToAvailableHeight) {
+    const auto limited = ui::calculate_stream_startup_layout(320, 240, 28, 20);
+    EXPECT_GE(limited.body.h, 20);
+    EXPECT_LT(limited.body.h, 60);
+    EXPECT_EQ(ui::calculate_stream_startup_layout(320, 100, 28, 20).card.w, 0);
+    EXPECT_EQ(ui::calculate_stream_startup_layout(40, 480, 28, 20).card.w, 0);
+    EXPECT_EQ(ui::calculate_stream_startup_layout(0, 0, 0, 0).card.w, 0);
+  }
+
+  /**
    * @brief Keep navigation, headings, cards and controls inside the overscan inset.
    */
   TEST(ShellLayoutTest, FitsStandardAndWidescreenDisplayModes) {
