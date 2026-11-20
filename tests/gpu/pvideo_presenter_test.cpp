@@ -38,6 +38,14 @@ namespace {
   };
 
   /**
+   * @brief Track the fake GPU's vblank counter and when it resumes after a simulated stall.
+   */
+  struct GpuVblank {
+    DWORD count = 0;  ///< Number of simulated GPU blanks.
+    DWORD resumeTick = 0;  ///< First tick at which the GPU may signal vblank.
+  };
+
+  /**
    * @brief Mutable fake hardware, reset independently for each lifecycle test.
    */
   struct Hardware {
@@ -48,8 +56,7 @@ namespace {
     std::array<std::uint32_t, 640 * 480> gpuBuffer {};  ///< Separate GPU-owned scanout.
     VIDEO_MODE mode {640, 480, 32, 60};  ///< Active output mode.
     DWORD ticks = 0;  ///< Deterministic clock.
-    DWORD vblanks = 0;  ///< Deterministic scanout clock.
-    DWORD gpuVblankResumeTick = 0;  ///< First tick at which the fake GPU may signal vblank.
+    GpuVblank gpuVblank;  ///< Simulates pbkit's vblank counter.
     int initResult = 0;  ///< Injected pbkit initialization result.
     int allocationsUntilFailure = -1;  ///< Negative disables allocation failure injection.
     int initializations = 0;  ///< Number of GPU context acquisitions.
@@ -79,8 +86,8 @@ namespace {
       hardware.crtc.fill(0);
       hardware.crtcIndex = 0;
       hardware.mode = {640, 480, 32, 60};
-      hardware.ticks = hardware.vblanks = 0;
-      hardware.gpuVblankResumeTick = 0;
+      hardware.ticks = 0;
+      hardware.gpuVblank = {};
       hardware.initResult = 0;
       hardware.allocationsUntilFailure = -1;
       hardware.initializations = hardware.shutdowns = 0;
@@ -141,8 +148,8 @@ DWORD GetTickCount() {
 
 void Sleep(DWORD milliseconds) {
   hardware.ticks += milliseconds;
-  if (hardware.ticks >= hardware.gpuVblankResumeTick) {
-    ++hardware.vblanks;
+  if (hardware.ticks >= hardware.gpuVblank.resumeTick) {
+    ++hardware.gpuVblank.count;
   }
   if (hardware.softwareDisplay.pollVblank && hardware.softwareDisplay.signalVblank) {
     hardware.softwareDisplay.displayedScanout = VIDEOREG(CRTC_START);
@@ -152,7 +159,7 @@ void Sleep(DWORD milliseconds) {
 }
 
 std::uint32_t pb_get_vbl_counter() {
-  return hardware.vblanks;
+  return hardware.gpuVblank.count;
 }
 
 int pb_busy() {
@@ -438,7 +445,7 @@ TEST_F(PvideoPresenterTest, SkipsWaitingWhenVblankHasAlreadyRetiredThePreviousBu
   std::string error;
   ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
 
-  ++hardware.vblanks;
+  ++hardware.gpuVblank.count;
   const auto readyTick = hardware.ticks;
   ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
   EXPECT_EQ(hardware.ticks, readyTick);
@@ -454,10 +461,10 @@ TEST_F(PvideoPresenterTest, TimesOutWhenVblankCannotRetireThePreviousBuffer) {
   std::string error;
   ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
 
-  hardware.gpuVblankResumeTick = hardware.ticks + 51U;
+  hardware.gpuVblank.resumeTick = hardware.ticks + 51U;
   EXPECT_FALSE(presenter.present(frame, destination, &error));
   EXPECT_NE(error.find("Timed out waiting for GPU scanout"), std::string::npos);
-  EXPECT_EQ(hardware.ticks, hardware.gpuVblankResumeTick);
+  EXPECT_EQ(hardware.ticks, hardware.gpuVblank.resumeTick);
   EXPECT_EQ(VIDEOREG(0x8700), 0U);
   EXPECT_FALSE(presenter.active());
   EXPECT_TRUE(hardware.allocations.empty());
@@ -491,7 +498,7 @@ TEST_F(PvideoPresenterTest, RestoresOutputAndRegistersAcrossRepeatedSessions) {
   for (int session = 0; session < 2; ++session) {
     std::string error;
     ASSERT_TRUE(presenter.present(frame, destination, &error)) << error;
-    ++hardware.vblanks;
+    ++hardware.gpuVblank.count;
     const auto stopTick = hardware.ticks;
     ASSERT_TRUE(presenter.reset());
     EXPECT_GT(hardware.ticks, stopTick);
