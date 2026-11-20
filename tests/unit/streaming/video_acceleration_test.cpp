@@ -31,14 +31,14 @@ TEST(VideoAccelerationTest, PacksStridedPlanesWithoutOverwritingPadding) {
 }
 
 /**
- * @brief Wide packing handles unaligned planes, a partial block and exact last-row bounds.
+ * @brief Packing preserves every bit across wide blocks and a tail with unaligned planes and exact bounds.
  */
 TEST(VideoAccelerationTest, PacksWideRowsAndTailWithUnalignedStorage) {
-  constexpr int width = 34;
+  constexpr int width = 66;
   constexpr int height = 3;
-  constexpr int lumaPitch = 37;
-  constexpr int chromaPitch = 19;
-  constexpr int outputPitch = 73;
+  constexpr int lumaPitch = 69;
+  constexpr int chromaPitch = 35;
+  constexpr int outputPitch = 137;
   constexpr std::size_t outputBytes = (height - 1) * outputPitch + width * 2;
   std::array<std::uint8_t, 1 + (height - 1) * lumaPitch + width> y;
   std::array<std::uint8_t, 1 + chromaPitch + width / 2> u;
@@ -46,6 +46,9 @@ TEST(VideoAccelerationTest, PacksWideRowsAndTailWithUnalignedStorage) {
   std::iota(y.begin(), y.end(), 0);
   std::iota(u.begin(), u.end(), 120);
   std::iota(v.begin(), v.end(), 170);
+  // The first packed word forms a signaling NaN if interpreted as a float.
+  y[2] = 0x80;
+  v[1] = 0x7f;
   const streaming::Yuv420FrameView frame {
     width,
     height,

@@ -4,6 +4,45 @@
  */
 #include "src/streaming/video_acceleration.h"
 
+#if defined(__SSE__) && (defined(__clang__) || defined(__GNUC__))
+  #include <xmmintrin.h>
+
+namespace {
+  constexpr int PACK_BLOCK_PAIRS = 16;  ///< YUY2 pairs staged for wide stores.
+  constexpr int PACK_BLOCK_PIXELS = PACK_BLOCK_PAIRS * 2;  ///< Luma pixels covered by one block.
+
+  /**
+   * @brief Pack thirty-two pixels into YUY2 and copy them with wide SSE1 stores.
+   *
+   * Assemble the pixel words in cached storage so the writes to PVIDEO's
+   * write-combined buffer can use 16-byte stores. The SSE operations copy
+   * the word bits without floating-point conversion.
+   *
+   * @param y Thirty-two accessible luma bytes.
+   * @param u Sixteen accessible blue chroma bytes.
+   * @param v Sixteen accessible red chroma bytes.
+   * @param output Sixty-four accessible destination bytes, possibly unaligned.
+   */
+  inline void pack_yuy2_block(const std::uint8_t *y, const std::uint8_t *u, const std::uint8_t *v, std::uint8_t *output) {
+    alignas(16) std::array<float, PACK_BLOCK_PAIRS> packed;
+    for (int pair = 0; pair < PACK_BLOCK_PAIRS; ++pair) {
+      std::uint16_t luma;
+      __builtin_memcpy(&luma, y + pair * 2, sizeof(luma));
+      const auto lumaWord = static_cast<std::uint32_t>(luma);
+      const auto lumaBytes = (lumaWord | (lumaWord << 8U)) & 0x00ff00ffU;
+      const auto pixels = lumaBytes | (static_cast<std::uint32_t>(u[pair]) << 8U) | (static_cast<std::uint32_t>(v[pair]) << 24U);
+      __builtin_memcpy(&packed[pair], &pixels, sizeof(pixels));
+    }
+    constexpr int PAIRS_PER_VECTOR = sizeof(__m128) / sizeof(float);
+    for (int pair = 0; pair < PACK_BLOCK_PAIRS; pair += PAIRS_PER_VECTOR) {
+      const auto pixels = _mm_load_ps(packed.data() + pair);
+      // A fixed-size builtin copy allows an unaligned vector store even in nxdk's freestanding build.
+      __builtin_memcpy(output + pair * sizeof(std::uint32_t), &pixels, sizeof(pixels));
+    }
+  }
+}  // namespace
+#endif
+
 namespace streaming {
   std::string overlay_frame_error(const Yuv420FrameView &frame) {
     if (frame.width < 2 || frame.width > 2046 || frame.height < 2 || frame.height > 2047 || (frame.width & 1) != 0) {
@@ -32,43 +71,15 @@ namespace streaming {
     if (!overlay_frame_error(frame).empty() || destination == nullptr || pitch < frame.width * 2 || capacity < static_cast<std::uint64_t>(frame.height - 1) * static_cast<unsigned int>(pitch) + static_cast<unsigned int>(frame.width * 2)) {
       return false;
     }
-#if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
-    constexpr int PACK_BLOCK_PIXELS = 16;
-#endif
     for (int row = 0; row < frame.height; ++row) {
       const auto *y = luma + static_cast<std::size_t>(row) * frame.pitches[0];
       const auto *u = blueChroma + static_cast<std::size_t>(row / 2) * frame.pitches[1];
       const auto *v = redChroma + static_cast<std::size_t>(row / 2) * frame.pitches[2];
       auto *output = destination + static_cast<std::size_t>(row) * pitch;
       int column = 0;
-#if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
+#if defined(__SSE__) && (defined(__clang__) || defined(__GNUC__))
       for (; column <= frame.width - PACK_BLOCK_PIXELS; column += PACK_BLOCK_PIXELS) {
-        const int packedColumn = column * 2;
-        // Interleave sixteen luma samples and eight U/V pairs. Wide stores
-        // speed up writes to PVIDEO's write-combined buffers, even on
-        // unaligned rows. The memory clobber covers all accessed bytes.
-        asm volatile(
-          "movq (%[u]), %%mm2\n\t"
-          "movq (%[v]), %%mm3\n\t"
-          "movq %%mm2, %%mm4\n\t"
-          "punpcklbw %%mm3, %%mm2\n\t"
-          "punpckhbw %%mm3, %%mm4\n\t"
-          "movq (%[y]), %%mm0\n\t"
-          "movq 8(%[y]), %%mm1\n\t"
-          "movq %%mm0, %%mm3\n\t"
-          "movq %%mm1, %%mm5\n\t"
-          "punpcklbw %%mm2, %%mm0\n\t"
-          "punpckhbw %%mm2, %%mm3\n\t"
-          "punpcklbw %%mm4, %%mm1\n\t"
-          "punpckhbw %%mm4, %%mm5\n\t"
-          "movq %%mm0, %[out0]\n\t"
-          "movq %%mm3, %[out1]\n\t"
-          "movq %%mm1, %[out2]\n\t"
-          "movq %%mm5, %[out3]"
-          : [out0] "=m"(output[packedColumn]), [out1] "=m"(output[packedColumn + 8]), [out2] "=m"(output[packedColumn + 16]), [out3] "=m"(output[packedColumn + 24])
-          : [y] "r"(y + column), [u] "r"(u + column / 2), [v] "r"(v + column / 2)
-          : "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "memory"
-        );
+        pack_yuy2_block(y + column, u + column / 2, v + column / 2, output + column * 2);
       }
 #endif
       for (; column < frame.width; column += 2) {
@@ -78,12 +89,6 @@ namespace streaming {
         output[column * 2 + 3] = v[column / 2];
       }
     }
-#if defined(__MMX__) && (defined(__clang__) || defined(__GNUC__))
-    if (frame.width >= PACK_BLOCK_PIXELS) {
-      // MMX aliases the x87 stack. Mark its registers empty before returning.
-      asm volatile("emms");
-    }
-#endif
     return true;
   }
 
