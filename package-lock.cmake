@@ -33,7 +33,7 @@ CPMDeclarePackage(lucide
 )
 
 # Xbox SDL3 port, with its pinned SDL and xgu submodules.
-# renovate: datasource=git-refs depName=Ryzee119/nxdk-sdl3 packageName=https://github.com/Ryzee119/nxdk-sdl3.git
+# renovate: datasource=git-refs depName=Ryzee119/nxdk-sdl3
 # ref=master
 set(NXDK_SDL3_COMMIT 62455b72ac80d318961c05c1230ffcb471e9f2d4)
 set(NXDK_SDL3_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/nxdk-sdl3.patch")
@@ -87,7 +87,7 @@ CPMDeclarePackage(sdl3_ttf
 )
 
 # toml++
-# renovate: datasource=git-refs depName=marzer/tomlplusplus packageName=https://github.com/marzer/tomlplusplus.git
+# renovate: datasource=git-refs depName=marzer/tomlplusplus
 # ref=master
 set(TOMLPLUSPLUS_COMMIT c38c9b922a68fc9772b25d7f606133d3ec4decfd)
 CPMDeclarePackage(tomlplusplus
@@ -99,8 +99,7 @@ CPMDeclarePackage(tomlplusplus
 )
 
 # moonlight-common-c
-# cmake-lint: disable=C0301
-# renovate: datasource=git-refs depName=moonlight-stream/moonlight-common-c packageName=https://github.com/moonlight-stream/moonlight-common-c.git
+# renovate: datasource=git-refs depName=moonlight-stream/moonlight-common-c
 # ref=master
 set(MOONLIGHT_COMMON_C_COMMIT 94c65fd364d17b223f00a8763c9a5d94a66cb8dd)
 CPMDeclarePackage(moonlight-common-c
