@@ -139,21 +139,22 @@ namespace {
     ASSERT_EQ(BIO_new_bio_pair(&clientEnd, 0, &serverEnd, 0), 1);
     MemoryBioTransport transport(clientEnd);
     std::unique_ptr<BIO, decltype(&BIO_free)> serverBio(serverEnd, &BIO_free);
-    char freed = '0';  // OpenSSL exposes a char pointer for its callback argument.
+    int freed = 0;
     std::unique_ptr<SSL, decltype(&SSL_free)> server(SSL_new(serverContext.get()), &SSL_free);
     std::unique_ptr<SSL, decltype(&SSL_free)> client(SSL_new(clientContext.get()), &SSL_free);
     ASSERT_NE(server, nullptr);
     ASSERT_NE(client, nullptr);
-    BIO *clientBio = network::make_socket_bio(transport);
+    std::unique_ptr<BIO, decltype(&BIO_free)> clientBio(network::make_socket_bio(transport), &BIO_free);
     ASSERT_NE(clientBio, nullptr);
-    BIO_set_callback_arg(clientBio, &freed);
-    BIO_set_callback_ex(clientBio, [](auto *bio, int operation, const char *, std::size_t, int, long, int result, std::size_t *) -> long {
-      if (operation == BIO_CB_FREE) {
-        ++*BIO_get_callback_arg(bio);
+    const int freeCounterIndex = BIO_get_ex_new_index(0, nullptr, nullptr, nullptr, [](auto *, auto *data, auto *, int, long, auto *) {
+      if (auto *counter = static_cast<int *>(data); counter != nullptr) {
+        ++*counter;
       }
-      return result;
     });
-    SSL_set_bio(client.get(), clientBio, clientBio);
+    ASSERT_GE(freeCounterIndex, 0);
+    ASSERT_EQ(BIO_set_ex_data(clientBio.get(), freeCounterIndex, &freed), 1);
+    SSL_set_bio(client.get(), clientBio.get(), clientBio.get());
+    clientBio.release();
     SSL_set_bio(server.get(), serverEnd, serverEnd);
     serverBio.release();
     SSL_set_connect_state(client.get());
@@ -174,7 +175,7 @@ namespace {
     ASSERT_EQ(SSL_read(server.get(), received.data(), received.size()), 5);
     EXPECT_EQ(std::string(received.data(), 5), "hello");
     client.reset();
-    EXPECT_EQ(freed, '1');
+    EXPECT_EQ(freed, 1);
     ASSERT_EQ(SSL_write(server.get(), "ok", 2), 2);
     EXPECT_GT(transport.read_bytes(received.data(), received.size()), 0);
   }

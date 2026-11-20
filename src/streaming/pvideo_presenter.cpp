@@ -339,8 +339,7 @@ namespace streaming {
     const int pitch = failure.empty() ? (frame.width * 2 + 63) & ~63 : 0;
     // Retain one cache line beyond the visible rows for fetch padding and an
     // inclusive DMA limit that also satisfies xemu's exclusive-end check.
-    const std::size_t required = failure.empty() ? static_cast<std::size_t>(pitch) * static_cast<std::size_t>(frame.height) + 64U : 0;
-    if (failure.empty() && (!active_ || required != bufferSize_ || pitch != pitch_)) {
+    if (const std::size_t required = failure.empty() ? static_cast<std::size_t>(pitch) * static_cast<std::size_t>(frame.height) + 64U : 0; failure.empty() && (!active_ || required != bufferSize_ || pitch != pitch_)) {
       configure_overlay_buffers(required, pitch, failure);
     }
     if (failure.empty()) {

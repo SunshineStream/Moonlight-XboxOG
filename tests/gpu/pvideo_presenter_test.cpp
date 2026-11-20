@@ -9,9 +9,8 @@
 #include <algorithm>
 #include <array>
 #include <map>
-#include <memory>
-#include <new>
 #include <utility>
+#include <vector>
 
 // lib includes
 #include <hal/video.h>
@@ -52,7 +51,7 @@ namespace {
 
   /** @brief Track ownership and the fake physical address of a DMA buffer. */
   struct DmaAllocation {
-    std::unique_ptr<std::uint8_t[]> storage;  ///< The allocated byte storage.
+    std::vector<std::uint8_t> storage;  ///< The allocated byte storage.
     std::uint32_t physicalAddress;  ///< Simulated bus address.
   };
 
@@ -258,12 +257,11 @@ void *MmAllocateContiguousMemoryEx(std::size_t size, unsigned int, unsigned int,
   if (hardware().allocationsUntilFailure > 0) {
     --hardware().allocationsUntilFailure;
   }
-  auto storage = std::unique_ptr<std::uint8_t[]>(new (std::nothrow) std::uint8_t[size]);
-  auto *buffer = storage.get();
-  if (buffer != nullptr) {
-    hardware().allocations.emplace(buffer, DmaAllocation {std::move(storage), hardware().nextPhysical});
-    hardware().nextPhysical += 0x10000;
-  }
+  // Seed the fake allocation so the tests can detect missing clears in production.
+  std::vector<std::uint8_t> storage(size, 0xcd);
+  auto *buffer = storage.data();
+  hardware().allocations.try_emplace(buffer, DmaAllocation {std::move(storage), hardware().nextPhysical});
+  hardware().nextPhysical += 0x10000;
   return buffer;
 }
 
