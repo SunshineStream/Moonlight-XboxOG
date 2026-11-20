@@ -4607,9 +4607,14 @@ namespace {
     return true;
   }
 
-  void close_controller(SDL_Gamepad *controller) {
+  /**
+   * @brief Release an owned SDL gamepad reference and clear the handle.
+   * @param controller Owned handle, or null if no controller is open.
+   */
+  void close_controller(SDL_Gamepad *&controller) {
     if (controller != nullptr) {
       SDL_CloseGamepad(controller);
+      controller = nullptr;
     }
   }
 
@@ -4739,13 +4744,18 @@ namespace {
     }
   }
 
+  /**
+   * @brief Release the shell's controller and clear held inputs when its device is removed.
+   * @param controller Slot holding the shell's controller reference.
+   * @param event SDL gamepad removal event.
+   * @param inputState Shell input state to reset, if available.
+   */
   void handle_controller_device_removed(SDL_Gamepad **controller, const SDL_GamepadDeviceEvent &event, ShellInputState *inputState) {
     if (controller == nullptr || !should_close_removed_controller(*controller, event)) {
       return;
     }
 
     close_controller(*controller);
-    *controller = nullptr;
     if (inputState != nullptr) {
       inputState->reset_after_controller_change();
     }
@@ -5147,7 +5157,6 @@ namespace {
     }
 
     close_controller(resources->controller);
-    resources->controller = nullptr;
     clear_cover_art_texture_cache(&resources->coverArtTextureCache);
     clear_asset_texture_cache(&resources->assetTextureCache);
     clear_keypad_modal_layout_cache(&resources->keypadModalLayoutCache);

@@ -566,12 +566,6 @@ namespace {
     return std::string(DATA_PATH) + "assets" + PATH_SEP + "fonts" + PATH_SEP + "vegur-regular.ttf";
   }
 
-  void close_controller(SDL_Gamepad *controller) {
-    if (controller != nullptr) {
-      SDL_CloseGamepad(controller);
-    }
-  }
-
   void close_stream_ui_resources(StreamUiResources *resources) {
     if (resources == nullptr) {
       return;

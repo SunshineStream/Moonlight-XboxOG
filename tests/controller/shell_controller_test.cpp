@@ -8,7 +8,6 @@
 // standard includes
 #include <algorithm>
 #include <array>
-#include <memory>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -48,7 +47,7 @@ namespace {
     std::array<SDL_Gamepad, 5> handles;  ///< Stable objects returned by successful opens.
     std::vector<int> available;  ///< Current enumeration order; removal changes indices, not identities.
     bool enumerationFailed = false;  ///< Simulated failure allocating the next enumeration.
-    std::unordered_map<SDL_JoystickID *, std::unique_ptr<SDL_JoystickID[]>> enumerations;  ///< Snapshots owned by SDL until SDL_free.
+    std::unordered_map<SDL_JoystickID *, std::vector<SDL_JoystickID>> enumerations;  ///< Snapshots owned by SDL until SDL_free.
     int enumerationCalls = 0;  ///< Detect unnecessary rescans while the active pad remains attached.
   };
 
@@ -112,14 +111,14 @@ extern "C" {
     if (registry().enumerationFailed) {
       return nullptr;
     }
-    auto snapshot = std::make_unique<SDL_JoystickID[]>(registry().available.size() + 1);
+    std::vector<SDL_JoystickID> snapshot(registry().available.size() + 1);
     for (const int slot : registry().available) {
       if (registry().devices[slot].mapped) {
         snapshot[(*count)++] = FIRST_INSTANCE + slot;
       }
     }
     snapshot[*count] = 0;
-    auto *ids = snapshot.get();
+    auto *ids = snapshot.data();
     registry().enumerations.emplace(ids, std::move(snapshot));
     return ids;
   }
