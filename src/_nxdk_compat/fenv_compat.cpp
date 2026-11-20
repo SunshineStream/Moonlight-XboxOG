@@ -15,7 +15,9 @@
  * @return Zero on success.
  */
 int feholdexcept(fenv_t *environment) {
-  asm volatile("fnstenv %0\n\tfnclex" : "=m"(*environment));
+  fenv_t saved;
+  asm volatile("fnstenv %0\n\tfnclex" : "=m"(saved));
+  *environment = saved;
   return 0;
 }
 

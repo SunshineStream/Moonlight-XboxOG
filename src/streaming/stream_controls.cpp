@@ -210,7 +210,7 @@ namespace streaming {
   }
 
   void StreamControls::invalidate_panel(FfmpegStreamBackend &backend) {
-    backend.set_statistics_bitmap(0, 0, {});
+    backend.presentation().set_statistics_bitmap(0, 0, {});
     clear_panel();
     panel_.dirty = true;
   }
@@ -1046,19 +1046,19 @@ namespace streaming {
       navigation_.keyboard.reset();
       router_.set_captured(!focused_);
       if (!screenshotNotification_.visible) {
-        backend.set_statistics_bitmap(0, 0, {});
+        backend.presentation().set_statistics_bitmap(0, 0, {});
       }
       clear_panel();
       panel_.dirty = false;
       screenshotChanged = true;
     }
     const int scale = controls_raster_scale(height);
-    backend.local_overlay_size(width, height);
+    backend.presentation().local_overlay_size(width, height);
     if (!visible() && screenshotChanged) {
       if (screenshotNotification_.visible) {
         render_screenshot_notification(backend, font, width, height);
       } else {
-        backend.set_statistics_bitmap(0, 0, {});
+        backend.presentation().set_statistics_bitmap(0, 0, {});
         clear_panel();
       }
     }
@@ -1076,7 +1076,7 @@ namespace streaming {
       menu_.close();
       navigation_.keyboard.reset();
       router_.set_captured(!focused_);
-      backend.set_statistics_bitmap(0, 0, {});
+      backend.presentation().set_statistics_bitmap(0, 0, {});
       clear_panel();
       panel_.dirty = false;
     }
@@ -1171,7 +1171,7 @@ namespace streaming {
     SDL_SetRenderDrawColor(renderer, screenshotNotification_.saving || screenshotNotification_.saved ? 130 : 255, screenshotNotification_.saving || screenshotNotification_.saved ? 180 : 110, screenshotNotification_.saving || screenshotNotification_.saved ? 255 : 110, 255);
     ui::fill_rect(renderer, bar);
     SDL_RenderPresent(renderer);
-    backend.set_color_overlay_surface(panel_.surface, VideoOverlayPlacement::bottom_center);
+    backend.presentation().set_color_overlay_surface(panel_.surface, VideoOverlayPlacement::bottom_center);
   }
 
   bool StreamControls::render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip) {
@@ -1522,7 +1522,7 @@ namespace streaming {
   bool StreamControls::prepare_panel(FfmpegStreamBackend &backend, int width, int height) {
     if (!panel_.surface || panel_.surface->w != width || panel_.surface->h != height) {
       // Release both owners before allocating another full-size raster.
-      backend.set_statistics_bitmap(0, 0, {});
+      backend.presentation().set_statistics_bitmap(0, 0, {});
       clear_panel();
       if (auto *surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_ARGB8888); surface != nullptr) {
         panel_.surface.reset(surface, SDL_DestroySurface);
@@ -1545,14 +1545,14 @@ namespace streaming {
     SDL_RenderPresent(panel_.renderer.get());
     if (focusOnly) {
       for (const auto &area : panel_.damage) {
-        backend.update_color_overlay(area);
+        backend.presentation().update_color_overlay(area);
       }
     } else {
       VideoOverlayPlacement placement = VideoOverlayPlacement::full_screen;
       if (keyboard) {
         placement = keyboardTop_ ? VideoOverlayPlacement::dock_top : VideoOverlayPlacement::dock_bottom;
       }
-      backend.set_color_overlay_surface(panel_.surface, placement, keyboard, scale);
+      backend.presentation().set_color_overlay_surface(panel_.surface, placement, keyboard, scale);
     }
   }
 
