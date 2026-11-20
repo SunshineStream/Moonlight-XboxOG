@@ -13,7 +13,8 @@ namespace {
    *
    * Wide stores reduce the CPU time spent writing PVIDEO's write-combined
    * buffers. These instructions need only MMX and allow unaligned rows.
-   * The output operand describes the full span written by the four stores.
+   * Output operands give the address of each store. The memory clobber
+   * accounts for the full width of the loads and stores.
    *
    * @param y Sixteen accessible luma bytes.
    * @param u Eight accessible blue chroma bytes.
@@ -35,12 +36,12 @@ namespace {
       "punpckhbw %%mm2, %%mm3\n\t"
       "punpcklbw %%mm4, %%mm1\n\t"
       "punpckhbw %%mm4, %%mm5\n\t"
-      "movq %%mm0, %[packed]\n\t"
-      "movq %%mm3, 8(%[out])\n\t"
-      "movq %%mm1, 16(%[out])\n\t"
-      "movq %%mm5, 24(%[out])"
-      : [packed] "=m"(*reinterpret_cast<std::uint8_t (*)[PACK_BLOCK_PIXELS * 2]>(output))
-      : [y] "r"(y), [u] "r"(u), [v] "r"(v), [out] "r"(output)
+      "movq %%mm0, %[out0]\n\t"
+      "movq %%mm3, %[out1]\n\t"
+      "movq %%mm1, %[out2]\n\t"
+      "movq %%mm5, %[out3]"
+      : [out0] "=m"(output[0]), [out1] "=m"(output[8]), [out2] "=m"(output[16]), [out3] "=m"(output[24])
+      : [y] "r"(y), [u] "r"(u), [v] "r"(v)
       : "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "memory"
     );
   }
