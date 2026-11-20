@@ -161,8 +161,7 @@ namespace platform {
     }
     errno = 0;
     while (const auto *entry = readdir(directory)) {
-      const std::string name = entry->d_name;
-      if (name != "." && name != "..") {
+      if (const std::string name = entry->d_name; name != "." && name != "..") {
         const auto child = join_path(path, name);
         struct stat status {};
         if (stat(child.c_str(), &status) == 0 && S_ISDIR(status.st_mode)) {

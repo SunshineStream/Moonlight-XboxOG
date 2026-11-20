@@ -339,7 +339,7 @@ namespace {
   }
 
   std::vector<std::string> pair_host_body_lines(const app::ClientState &state) {
-    std::vector<std::string> lines = {
+    std::vector lines = {
       std::string("Target host: ") + state.pairingDraft.targetAddress,
     };
     if (state.pairingDraft.stage == app::PairingStage::idle) {
@@ -363,7 +363,7 @@ namespace {
    * @return Context lines for the settings detail panel.
    */
   std::vector<std::string> settings_body_lines(const app::ClientState &state) {
-    std::vector<std::string> lines = {
+    std::vector lines = {
       std::string("Category: ") + settings_category_label(state.settings.selectedCategory),
     };
     if (state.settings.selectedCategory == app::SettingsCategory::logging) {
@@ -499,7 +499,12 @@ namespace {
   std::vector<ui::ShellNotification> notification_views(const app::ClientState &state) {
     std::vector<ui::ShellNotification> notifications;
     for (const auto &notification : state.shell.notifications) {
-      const std::string icon = notification.kind == app::NotificationKind::success ? "icons\\circle-check.svg" : (notification.kind == app::NotificationKind::error ? "icons\\circle-x.svg" : "icons\\info.svg");
+      const char *icon = "icons\\info.svg";
+      if (notification.kind == app::NotificationKind::success) {
+        icon = "icons\\circle-check.svg";
+      } else if (notification.kind == app::NotificationKind::error) {
+        icon = "icons\\circle-x.svg";
+      }
       notifications.push_back({notification.title, notification.message, {}, icon});
     }
     if (!notifications.empty()) {
@@ -754,8 +759,13 @@ namespace {
         }
       case app::ModalId::connection_test:
         viewModel->modal.busy = state.connectionTest.inProgress;
-        viewModel->modal.title = state.connectionTest.inProgress ? "Testing connection" : (state.connectionTest.succeeded ? "Connection successful" : "Connection failed");
-        viewModel->modal.iconAssetPath = state.connectionTest.inProgress ? "icons\\loader-circle.svg" : (state.connectionTest.succeeded ? "icons\\circle-check.svg" : "icons\\circle-x.svg");
+        if (state.connectionTest.inProgress) {
+          viewModel->modal.title = "Testing connection";
+          viewModel->modal.iconAssetPath = "icons\\loader-circle.svg";
+        } else {
+          viewModel->modal.title = state.connectionTest.succeeded ? "Connection successful" : "Connection failed";
+          viewModel->modal.iconAssetPath = state.connectionTest.succeeded ? "icons\\circle-check.svg" : "icons\\circle-x.svg";
+        }
         viewModel->modal.lines = {state.connectionTest.address + ":" + std::to_string(state.connectionTest.port), state.connectionTest.message};
         return;
       case app::ModalId::none:

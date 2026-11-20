@@ -70,13 +70,13 @@ namespace {
         EXPECT_GT(columns.front().x, bounds.x);
         const int right = columns.back().x + columns.back().w;
         EXPECT_LE(std::abs((columns.front().x - bounds.x) - (bounds.x + bounds.w - right)), 1);
-        for (std::size_t index = 0; index < columns.size(); ++index) {
-          EXPECT_EQ(columns[index].w, 80);
-          EXPECT_EQ(columns[index].y, bounds.y);
-          EXPECT_EQ(columns[index].h, bounds.h);
-          if (index > 0U) {
-            EXPECT_EQ(columns[index].x - columns[index - 1U].x - columns[index - 1U].w, gap);
-          }
+        for (const auto &column : columns) {
+          EXPECT_EQ(column.w, 80);
+          EXPECT_EQ(column.y, bounds.y);
+          EXPECT_EQ(column.h, bounds.h);
+        }
+        for (std::size_t index = 1; index < columns.size(); ++index) {
+          EXPECT_EQ(columns[index].x - columns[index - 1U].x - columns[index - 1U].w, gap);
         }
       }
     }

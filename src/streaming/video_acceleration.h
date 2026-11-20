@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace streaming {
@@ -84,7 +85,7 @@ namespace streaming {
      *
      * @param reason Explanation supplied by the failed accelerated path.
      */
-    void record_fallback(const std::string &reason);
+    void record_fallback(std::string_view reason);
 
     /**
      * @brief Build conspicuous end-of-stream diagnostics.

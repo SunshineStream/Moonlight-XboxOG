@@ -9,6 +9,7 @@ link=1
 for arg in "$@"; do
   case "$arg" in
     -c|-E|-S|-M|-MM) link=0 ;;
+    *) ;;
   esac
 done
 

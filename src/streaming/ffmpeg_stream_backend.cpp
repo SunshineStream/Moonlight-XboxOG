@@ -353,7 +353,10 @@ namespace streaming {
   }
 
   std::string FfmpegStreamBackend::presentation_path() const {
-    return presenter_.active() ? "GPU" : (acceleration_.softwareFrames > 0 ? "Software" : "Waiting");
+    if (presenter_.active()) {
+      return "GPU";
+    }
+    return acceleration_.softwareFrames > 0 ? "Software" : "Waiting";
   }
 
   void FfmpegStreamBackend::set_statistics_bitmap(int width, int height, std::vector<std::uint8_t> grayscale, VideoOverlayPlacement placement, std::vector<std::uint8_t> opacity) {
@@ -844,7 +847,11 @@ namespace streaming {
     overlayFailed_ = false;
     softwareScanoutFailed_ = false;
     const int cpuFlags = av_get_cpu_flags();
-    acceleration_.cpuFeatures = (cpuFlags & AV_CPU_FLAG_SSE) != 0 ? "MMX/SSE" : ((cpuFlags & AV_CPU_FLAG_MMX) != 0 ? "MMX" : "Scalar");
+    if ((cpuFlags & AV_CPU_FLAG_SSE) != 0) {
+      acceleration_.cpuFeatures = "MMX/SSE";
+    } else {
+      acceleration_.cpuFeatures = (cpuFlags & AV_CPU_FLAG_MMX) != 0 ? "MMX" : "Scalar";
+    }
     acceleration_.threaded = std::string(avcodec_configuration()).find("--enable-w32threads") != std::string::npos;
 
     if ((videoFormat & VIDEO_FORMAT_MASK_H264) == 0) {
@@ -1023,7 +1030,7 @@ namespace streaming {
     return 0;
   }
 
-  void FfmpegStreamBackend::record_received_unit(PDECODE_UNIT unit) {
+  void FfmpegStreamBackend::record_received_unit(const DECODE_UNIT *unit) {
     if (unit != nullptr && unit->fullLength > 0) {
       statistics_.received(static_cast<std::uint32_t>(unit->frameNumber), static_cast<std::uint64_t>(unit->fullLength), unit->frameHostProcessingLatency);
     }

@@ -20,15 +20,15 @@ namespace {
 }  // namespace
 
 namespace streaming {
-  bool predict_mpeg2_luma(const Mpeg2LumaPlane &reference, int xHalfPel, int yHalfPel, int width, int height, std::uint8_t *destination, std::size_t capacity, int pitch) {
-    if (reference.data == nullptr || reference.width < 1 || reference.height < 1 || reference.pitch < reference.width || reference.size < static_cast<std::uint64_t>(reference.height - 1) * static_cast<unsigned int>(reference.pitch) + static_cast<unsigned int>(reference.width) || destination == nullptr || width < 1 || height < 1 || width > 128 || height > 128 || pitch < width || capacity < static_cast<std::uint64_t>(height - 1) * static_cast<unsigned int>(pitch) + static_cast<unsigned int>(width)) {
+  bool predict_mpeg2_luma(const Mpeg2LumaPlane &reference, int xHalfPel, int yHalfPel, const Mpeg2LumaBlock &destination) {
+    if (reference.data == nullptr || reference.width < 1 || reference.height < 1 || reference.pitch < reference.width || reference.size < static_cast<std::uint64_t>(reference.height - 1) * static_cast<unsigned int>(reference.pitch) + static_cast<unsigned int>(reference.width) || destination.data == nullptr || destination.width < 1 || destination.height < 1 || destination.width > 128 || destination.height > 128 || destination.pitch < destination.width || destination.size < static_cast<std::uint64_t>(destination.height - 1) * static_cast<unsigned int>(destination.pitch) + static_cast<unsigned int>(destination.width)) {
       return false;
     }
-    for (int row = 0; row < height; ++row) {
+    for (int row = 0; row < destination.height; ++row) {
       const auto sy = static_cast<std::int64_t>(yHalfPel) + row * 2;
       const auto iy = floor_half(sy);
       const bool halfY = sy != iy * 2;
-      for (int column = 0; column < width; ++column) {
+      for (int column = 0; column < destination.width; ++column) {
         const auto sx = static_cast<std::int64_t>(xHalfPel) + column * 2;
         const auto ix = floor_half(sx);
         const bool halfX = sx != ix * 2;
@@ -43,7 +43,7 @@ namespace streaming {
         } else if (halfY) {
           value = (value + sample(ix, iy + 1) + 1U) / 2U;
         }
-        destination[static_cast<std::size_t>(row) * pitch + column] = static_cast<std::uint8_t>(value);
+        destination.data[static_cast<std::size_t>(row) * destination.pitch + column] = static_cast<std::uint8_t>(value);
       }
     }
     return true;

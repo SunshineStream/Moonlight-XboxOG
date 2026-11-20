@@ -4,53 +4,24 @@
  */
 #pragma once
 
+#include "src/_nxdk_compat/ffmpeg_memory.h"
+
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <limits>
-#include <utility>
-#include <vector>
+#include <memory>
 
 namespace streaming {
   /**
    * @brief Owns byte storage with a 64-byte-aligned start and zeroed read padding.
+   *
+   * Moving a buffer transfers its allocation and leaves the source empty.
    */
   class AlignedMediaBuffer {
   public:
     static constexpr std::size_t PADDING = 64;  ///< FFmpeg's required input overread padding.
-
-    /**
-     * @brief Construct an empty media buffer.
-     */
-    AlignedMediaBuffer() = default;
-    AlignedMediaBuffer(const AlignedMediaBuffer &) = delete;
-    AlignedMediaBuffer &operator=(const AlignedMediaBuffer &) = delete;
-
-    /**
-     * @brief Transfer an aligned allocation without relocating its payload.
-     *
-     * @param other Buffer relinquishing its allocation.
-     */
-    AlignedMediaBuffer(AlignedMediaBuffer &&other) noexcept:
-        storage_(std::move(other.storage_)),
-        size_(std::exchange(other.size_, 0)) {
-    }
-
-    /**
-     * @brief Replace this allocation with another buffer's aligned storage.
-     *
-     * @param other Buffer relinquishing its allocation.
-     *
-     * @return This buffer after ownership transfer.
-     */
-    AlignedMediaBuffer &operator=(AlignedMediaBuffer &&other) noexcept {
-      if (this != &other) {
-        storage_ = std::move(other.storage_);
-        size_ = std::exchange(other.size_, 0);
-      }
-      return *this;
-    }
 
     /**
      * @brief Resize storage, discarding prior payload contents and zeroing trailing read padding.
@@ -58,28 +29,36 @@ namespace streaming {
      * @param size Required payload bytes.
      */
     void resize(std::size_t size) {
-      if (size > std::numeric_limits<std::size_t>::max() - PADDING - 63) {
+      if (size > std::numeric_limits<std::size_t>::max() - PADDING) {
         std::abort();
       }
-      storage_.resize(size + PADDING + 63);
-      size_ = size;
-      std::memset(data() + size_, 0, PADDING);
+      const auto required = size + PADDING;
+      if (!storage_ || required > capacity_) {
+        auto *allocation = static_cast<std::uint8_t *>(moonlight_ffmpeg_aligned_malloc(required, ALIGNMENT));
+        if (allocation == nullptr) {
+          std::abort();
+        }
+        storage_.reset(allocation);
+        capacity_ = required;
+      }
+      used_ = required;
+      std::fill_n(storage_.get() + size, PADDING, std::uint8_t {});
     }
 
     /**
      * @brief Return the aligned payload address.
-     * @return Payload storage, or nullptr for an empty buffer.
+     * @return Payload storage, or nullptr when no payload has been prepared.
      */
     std::uint8_t *data() {
-      return storage_.empty() ? nullptr : reinterpret_cast<std::uint8_t *>((reinterpret_cast<std::uintptr_t>(storage_.data()) + 63U) & ~std::uintptr_t {63});
+      return used_ == 0 ? nullptr : storage_.get();
     }
 
     /**
      * @brief Return the aligned read-only payload address.
-     * @return Payload storage, or nullptr for an empty buffer.
+     * @return Payload storage, or nullptr when no payload has been prepared.
      */
     const std::uint8_t *data() const {
-      return storage_.empty() ? nullptr : reinterpret_cast<const std::uint8_t *>((reinterpret_cast<std::uintptr_t>(storage_.data()) + 63U) & ~std::uintptr_t {63});
+      return used_ == 0 ? nullptr : storage_.get();
     }
 
     /**
@@ -87,19 +66,20 @@ namespace streaming {
      * @return Usable byte count.
      */
     std::size_t size() const {
-      return size_;
+      return data() == nullptr ? 0 : used_ - PADDING;
     }
 
     /**
      * @brief Clear the payload while retaining reusable allocation capacity.
      */
     void clear() {
-      storage_.clear();
-      size_ = 0;
+      used_ = 0;
     }
 
   private:
-    std::vector<std::uint8_t> storage_;  ///< Overallocated backing storage.
-    std::size_t size_ = 0;  ///< Payload length before the zero padding.
+    static constexpr std::size_t ALIGNMENT = 64;  ///< Alignment required by FFmpeg SIMD routines.
+    std::unique_ptr<std::uint8_t, decltype(&moonlight_ffmpeg_aligned_free)> storage_ {nullptr, &moonlight_ffmpeg_aligned_free};  ///< Owned aligned storage.
+    std::size_t capacity_ = 0;  ///< Allocated bytes, meaningful while storage is owned.
+    std::size_t used_ = 0;  ///< Payload and padding bytes, or zero when cleared.
   };
 }  // namespace streaming

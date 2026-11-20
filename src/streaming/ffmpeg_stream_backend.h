@@ -294,7 +294,7 @@ namespace streaming {
      *
      * @param unit Completed network frame.
      */
-    void record_received_unit(PDECODE_UNIT unit);
+    void record_received_unit(const DECODE_UNIT *unit);
     /**
      * @brief Entry point used by the SDL video decode worker thread.
      *

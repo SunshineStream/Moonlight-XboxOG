@@ -65,11 +65,11 @@ namespace streaming {
   std::vector<std::string> build_live_stats_overlay_lines(const StreamStatisticsSnapshot &s) {
     return {
       "Video stream: " + std::to_string(s.width) + "x" + std::to_string(s.height) + " @ " + std::to_string(s.fps) + " FPS (" + s.videoCodec + ")",
-      "FPS: incoming " + metric(s.incomingFps, "") + " | decoded " + metric(s.decodingFps, "") + " | rendered " + metric(s.renderingFps, ""),
-      "Video bitrate: " + metric(s.videoBitrateMbps, " Mbps") + " | Host processing: " + metric(s.hostProcessingMs, " ms"),
+      "FPS: incoming " + metric(s.interval.incomingFps, "") + " | decoded " + metric(s.interval.decodingFps, "") + " | rendered " + metric(s.interval.renderingFps, ""),
+      "Video bitrate: " + metric(s.interval.videoBitrateMbps, " Mbps") + " | Host processing: " + metric(s.interval.hostProcessingMs, " ms"),
       "Network latency: " + (s.roundTripTimeMs < 0 ? std::string("N/A") : std::to_string(s.roundTripTimeMs) + " ms") + " | Variance: " + (s.roundTripVarianceMs < 0 ? std::string("N/A") : std::to_string(s.roundTripVarianceMs) + " ms"),
-      "Decode: " + metric(s.decodeTimeMs, " ms") + " | Decoder queue: " + metric(s.queueTimeMs, " ms") + " | Present: " + metric(s.presentationTimeMs, " ms"),
-      "Frames dropped: network " + metric(s.networkDropPercent, "%") + " | client " + metric(s.clientDropPercent, "%"),
+      "Decode: " + metric(s.interval.decodeTimeMs, " ms") + " | Decoder queue: " + metric(s.interval.queueTimeMs, " ms") + " | Present: " + metric(s.interval.presentationTimeMs, " ms"),
+      "Frames dropped: network " + metric(s.interval.networkDropPercent, "%") + " | client " + metric(s.interval.clientDropPercent, "%"),
       "Video queue: " + (s.videoQueueDepth < 0 ? std::string("N/A") : std::to_string(s.videoQueueDepth) + " frames") + " | Audio queue: " + (s.audioQueueDurationMs < 0 ? std::string("N/A") : std::to_string(s.audioQueueDurationMs) + " ms"),
       "Decoder: FFmpeg CPU / " + s.decoderFeatures + " | Presentation: " + s.presentationPath,
     };
@@ -170,16 +170,7 @@ namespace streaming {
     if (s == nullptr) {
       return;
     }
-    s->incomingFps = measured_.incomingFps;
-    s->decodingFps = measured_.decodingFps;
-    s->renderingFps = measured_.renderingFps;
-    s->videoBitrateMbps = measured_.videoBitrateMbps;
-    s->hostProcessingMs = measured_.hostProcessingMs;
-    s->decodeTimeMs = measured_.decodeTimeMs;
-    s->queueTimeMs = measured_.queueTimeMs;
-    s->presentationTimeMs = measured_.presentationTimeMs;
-    s->networkDropPercent = measured_.networkDropPercent;
-    s->clientDropPercent = measured_.clientDropPercent;
+    s->interval = measured_;
   }
 
   std::vector<std::string> build_stats_overlay_lines(const StreamStatisticsSnapshot &snapshot) {

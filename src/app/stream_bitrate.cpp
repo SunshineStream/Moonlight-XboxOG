@@ -31,7 +31,7 @@ namespace app {
     const double frameRateFactor = std::clamp(framerate, 15, 60) / 30.0;
     // nxdk's lround() is an assertion stub. The product is positive and at most 80,
     // so adding 0.5 before truncating safely matches Android's whole-Mbps rounding.
-    const int bitrateMbps = static_cast<int>(resolutionFactor * frameRateFactor + 0.5);
+    const auto bitrateMbps = static_cast<int>(resolutionFactor * frameRateFactor + 0.5);
     return std::min(bitrateMbps * 1000, 50000);
   }
 

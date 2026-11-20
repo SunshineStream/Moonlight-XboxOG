@@ -19,21 +19,26 @@ namespace streaming {
     int pitch = 0;  ///< Positive row stride.
   };
 
+  /** @brief Writable MPEG-2 prediction block and its storage bounds. */
+  struct Mpeg2LumaBlock {
+    std::uint8_t *data;  ///< Output pixels.
+    std::size_t size;  ///< Accessible output bytes.
+    int width;  ///< Prediction width, up to 128 pixels.
+    int height;  ///< Prediction height, up to 128 pixels.
+    int pitch;  ///< Output row stride.
+  };
+
   /**
    * @brief Reconstruct progressive frame luma predictions with MPEG-2 rounding and edge extension.
    *
    * @param reference Decoded reference picture.
    * @param xHalfPel Horizontal source origin in half-pixel units, including motion.
    * @param yHalfPel Vertical source origin in half-pixel units, including motion.
-   * @param width Prediction region width, up to 128 pixels.
-   * @param height Prediction region height, up to 128 pixels.
-   * @param destination Output pixels.
-   * @param capacity Accessible output bytes.
-   * @param pitch Output row stride.
+   * @param destination Output block to reconstruct.
    *
    * @return True when the complete prediction fits the supplied buffers.
    */
-  bool predict_mpeg2_luma(const Mpeg2LumaPlane &reference, int xHalfPel, int yHalfPel, int width, int height, std::uint8_t *destination, std::size_t capacity, int pitch);
+  bool predict_mpeg2_luma(const Mpeg2LumaPlane &reference, int xHalfPel, int yHalfPel, const Mpeg2LumaBlock &destination);
 
   /**
    * @brief Add inverse-transformed residuals with MPEG-2 byte saturation.

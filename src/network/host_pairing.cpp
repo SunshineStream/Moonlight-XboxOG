@@ -240,8 +240,7 @@ namespace {
       return append_error(errorMessage, std::string("Failed to query the host pairing socket mode (socket error ") + std::to_string(last_socket_error()) + ")");
     }
 
-    const int updatedFlags = enabled ? (currentFlags | O_NONBLOCK) : (currentFlags & ~O_NONBLOCK);
-    if (fcntl(socketHandle, F_SETFL, updatedFlags) != 0) {
+    if (const int updatedFlags = enabled ? (currentFlags | O_NONBLOCK) : (currentFlags & ~O_NONBLOCK); fcntl(socketHandle, F_SETFL, updatedFlags) != 0) {
       return append_error(errorMessage, std::string("Failed to configure the host pairing socket mode (socket error ") + std::to_string(last_socket_error()) + ")");
     }
 #endif
@@ -255,8 +254,8 @@ namespace {
       timeoutMilliseconds / 1000,
       (timeoutMilliseconds % 1000) * 1000,
     };
-    setsockopt(socketHandle, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout), sizeof(timeout));
-    setsockopt(socketHandle, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&timeout), sizeof(timeout));
+    setsockopt(socketHandle, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(socketHandle, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 #else
     const DWORD platformTimeoutMilliseconds = static_cast<DWORD>(timeoutMilliseconds);
     setsockopt(socketHandle, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&platformTimeoutMilliseconds), sizeof(platformTimeoutMilliseconds));
@@ -304,6 +303,8 @@ namespace {
     }
   };
 
+#ifdef NXDK
+  /** @brief Release the RSA key used by the bundled Xbox pairing implementation. */
   struct RsaDeleter {
     void operator()(RSA *rsa) const {
       if (rsa != nullptr) {
@@ -312,6 +313,7 @@ namespace {
     }
   };
 
+  /** @brief Release the RSA exponent used during Xbox key generation. */
   struct BignumDeleter {
     void operator()(BIGNUM *value) const {
       if (value != nullptr) {
@@ -319,6 +321,7 @@ namespace {
       }
     }
   };
+#endif
 
   struct MdCtxDeleter {
     void operator()(EVP_MD_CTX *context) const {
@@ -1813,25 +1816,45 @@ namespace {
       return append_cancelled_pairing_error(errorMessage);
     }
 
+#ifdef NXDK
+    /** @brief Borrow an lwIP socket for the lifetime of an OpenSSL pairing session. */
+    class LwipSocketTransport final: public network::SocketBioTransport {
+    public:
+      /**
+       * @brief Retain the descriptor of an open lwIP socket.
+       * @param socket Caller-owned socket descriptor.
+       */
+      explicit LwipSocketTransport(SOCKET socket):
+          socket_(socket) {}
+
+      /** @copydoc network::SocketBioTransport::read_bytes */
+      int read_bytes(char *buffer, int size) override {
+        return static_cast<int>(lwip_recv(socket_, buffer, static_cast<std::size_t>(size), 0));
+      }
+
+      /** @copydoc network::SocketBioTransport::write_bytes */
+      int write_bytes(const char *buffer, int size) override {
+        return static_cast<int>(lwip_send(socket_, buffer, static_cast<std::size_t>(size), 0));
+      }
+
+      /** @copydoc network::SocketBioTransport::retryable */
+      bool retryable() const override {
+        const int error = errno;
+        return error == EWOULDBLOCK || error == EAGAIN || error == EINTR || error == EINPROGRESS || error == EALREADY;
+      }
+
+    private:
+      SOCKET socket_;  ///< Descriptor borrowed from the caller.
+    };
+
+    LwipSocketTransport transport(socketHandle);
+#endif
     std::unique_ptr<SSL, SslDeleter> ssl(SSL_new(context.get()));
     if (ssl == nullptr) {
       return append_openssl_error(errorMessage, "Failed to create the TLS session for host pairing");
     }
 
 #ifdef NXDK
-    const network::SocketBioTransport transport {
-      &socketHandle,
-      [](void *context, char *buffer, int size) {
-        return static_cast<int>(lwip_recv(*static_cast<SOCKET *>(context), buffer, static_cast<std::size_t>(size), 0));
-      },
-      [](void *context, const char *buffer, int size) {
-        return static_cast<int>(lwip_send(*static_cast<SOCKET *>(context), buffer, static_cast<std::size_t>(size), 0));
-      },
-      [](void *) {
-        const int error = errno;
-        return error == EWOULDBLOCK || error == EAGAIN || error == EINTR || error == EINPROGRESS || error == EALREADY;
-      }
-    };
     std::unique_ptr<BIO, BioDeleter> socketBio(network::make_socket_bio(transport));
     if (socketBio == nullptr) {
       return append_openssl_error(errorMessage, "Failed to attach the host pairing socket to TLS");

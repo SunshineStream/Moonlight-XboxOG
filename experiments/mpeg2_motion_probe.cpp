@@ -10,7 +10,7 @@
 #include <hal/debug.h>
 #include <hal/video.h>
 #include <pbkit/pbkit.h>
-#include <windows.h>
+#include <synchapi.h>
 
 namespace {
   constexpr int SOURCE_SIZE = 144;  ///< Reference plane includes a border for negative motion vectors.
@@ -54,31 +54,29 @@ int main() {
   }
   const streaming::Yuv420FrameView frame {SOURCE_SIZE, SOURCE_SIZE, {luma.data(), chroma.data(), chroma.data()}, {luma.size(), chroma.size(), chroma.size()}, {SOURCE_SIZE, SOURCE_SIZE / 2, SOURCE_SIZE / 2}};
   const streaming::Mpeg2LumaPlane reference {luma.data(), luma.size(), SOURCE_SIZE, SOURCE_SIZE, SOURCE_SIZE};
+  const streaming::Mpeg2LumaBlock output {prediction.data(), prediction.size(), BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE};
   streaming::PvideoPresenter presenter;
-  for (;;) {
-    for (int motionY = -1; motionY <= 1; ++motionY) {
-      for (int motionX = -1; motionX <= 1; ++motionX) {
-        presenter.reset();
-        std::memset(XVideoGetFB(), 0, 640 * 480 * 4);
-        debugPrint("MPEG-2 prediction experiment\nCPU reference left | GPU sampling right\nMotion: %d/2, %d/2 pixels\nVisual comparison only; not a hardware decoder.\n", motionX, motionY);
-        if (!streaming::predict_mpeg2_luma(reference, 16 + motionX, 16 + motionY, BLOCK_SIZE, BLOCK_SIZE, prediction.data(), prediction.size(), BLOCK_SIZE)) {
-          return 2;
-        }
-        std::string error;
-        if (!presenter.present(frame, {352, 100, BLOCK_SIZE, BLOCK_SIZE}, &error, {16 + motionX, 16 + motionY, BLOCK_SIZE, BLOCK_SIZE})) {
-          debugPrint("GPU EXPERIMENT FAILED: %s\n", error.c_str());
-          Sleep(10000);
-          return 3;
-        }
-        // xemu composes PVIDEO only over a GPU-rendered scanout surface.
-        // Draw the CPU oracle there as RGB; its prediction arithmetic and
-        // range conversion remain independent of PVIDEO's YUV conversion.
-        draw_cpu_prediction(prediction);
-        pb_erase_text_screen();
-        pb_print("MPEG-2 prediction experiment\nCPU reference left | GPU sampling right\nMotion: %d/2, %d/2 pixels\nVisual comparison only; not a hardware decoder.\n", motionX, motionY);
-        pb_draw_text_screen();
-        Sleep(5000);
-      }
+  for (int motion = 0;; motion = (motion + 1) % 9) {
+    const int motionX = motion % 3 - 1;
+    const int motionY = motion / 3 - 1;
+    presenter.reset();
+    std::memset(XVideoGetFB(), 0, 640 * 480 * 4);
+    debugPrint("MPEG-2 prediction experiment\nCPU reference left | GPU sampling right\nMotion: %d/2, %d/2 pixels\nVisual comparison only; not a hardware decoder.\n", motionX, motionY);
+    if (!streaming::predict_mpeg2_luma(reference, 16 + motionX, 16 + motionY, output)) {
+      return 2;
     }
+    if (std::string error; !presenter.present(frame, {352, 100, BLOCK_SIZE, BLOCK_SIZE}, &error, {16 + motionX, 16 + motionY, BLOCK_SIZE, BLOCK_SIZE})) {
+      debugPrint("GPU EXPERIMENT FAILED: %s\n", error.c_str());
+      Sleep(10000);
+      return 3;
+    }
+    // xemu composes PVIDEO only over a GPU-rendered scanout surface.
+    // Draw the CPU oracle there as RGB; its prediction arithmetic and
+    // range conversion remain independent of PVIDEO's YUV conversion.
+    draw_cpu_prediction(prediction);
+    pb_erase_text_screen();
+    pb_print("MPEG-2 prediction experiment\nCPU reference left | GPU sampling right\nMotion: %d/2, %d/2 pixels\nVisual comparison only; not a hardware decoder.\n", motionX, motionY);
+    pb_draw_text_screen();
+    Sleep(5000);
   }
 }
