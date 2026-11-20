@@ -5,7 +5,7 @@
 
 # Lucide SVG icons
 # renovate: datasource=github-tags depName=lucide-icons/lucide
-set(LUCIDE_VERSION 1.76.0)
+set(LUCIDE_VERSION 1.77.0)
 CPMDeclarePackage(lucide
         NAME lucide
         VERSION ${LUCIDE_VERSION}
