@@ -27,6 +27,7 @@ namespace {
   constexpr std::uint32_t CRTC_INTERRUPT = 0x600100;  ///< Vertical blank status.
   constexpr std::uint32_t CPU_FRAMEBUFFER = 0x40000;  ///< Fake physical address of the nxdk page.
   constexpr std::uint32_t VIDEO_BUFFER = 0x8700;  ///< Overlay buffer submission register.
+  constexpr std::uint32_t VIDEO_ADDRESS = 0x8920;  ///< Bank zero overlay DMA offset.
 
   /**
    * @brief Track the surface latched by the fake software display at vblank.
@@ -47,6 +48,8 @@ namespace {
     DWORD resumeTick = 0;  ///< First tick at which the GPU may signal vblank.
     std::uint32_t background = 0;  ///< Scanout address when the overlay request reached a blank.
     std::uint32_t overlay = 0;  ///< Overlay submission at the last blank.
+    std::uint32_t overlayAddress = 0;  ///< Overlay address at the last blank.
+    std::size_t packedBuffers = 0;  ///< Buffers populated with this fixture's nonzero luma before the blank.
   };
 
   /** @brief Track ownership and the fake physical address of a DMA buffer. */
@@ -185,6 +188,11 @@ void Sleep(DWORD milliseconds) {
     ++hardware().gpuVblank.count;
     hardware().gpuVblank.background = VIDEOREG(CRTC_START);
     hardware().gpuVblank.overlay = VIDEOREG(VIDEO_BUFFER);
+    hardware().gpuVblank.overlayAddress = VIDEOREG(VIDEO_ADDRESS);
+    const auto &allocations = hardware().allocations;
+    hardware().gpuVblank.packedBuffers = static_cast<std::size_t>(std::count_if(allocations.begin(), allocations.end(), [](const auto &allocation) {
+      return allocation.second.storage.front() == 16;
+    }));
   }
   if (hardware().softwareDisplay.pollVblank && hardware().softwareDisplay.signalVblank) {
     hardware().softwareDisplay.displayedScanout = VIDEOREG(CRTC_START);
@@ -487,6 +495,76 @@ TEST_F(PvideoPresenterTest, SkipsWaitingWhenVblankHasAlreadyRetiredThePreviousBu
   // The newest submission still needs one blank before its old buffer is safe.
   ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
   EXPECT_GT(hardware().ticks, readyTick);
+}
+
+/** @brief Pack the 720p spare before the blank, then replace the pending address after it latches. */
+TEST_F(PvideoPresenterTest, Prepares720pSpareWhileThePriorRequestIsPending) {
+  hardware().mode = {1280, 720, 32, 60};
+  hardware().pitch = 1280 * 4;
+  streaming::PvideoPresenter presenter;
+  std::string error;
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  EXPECT_EQ(hardware().allocations.size(), 3U);
+  const auto first = VIDEOREG(VIDEO_ADDRESS);
+
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  const auto second = VIDEOREG(VIDEO_ADDRESS);
+  EXPECT_NE(first, second);
+
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  const auto third = VIDEOREG(VIDEO_ADDRESS);
+  EXPECT_NE(third, first);
+  EXPECT_NE(third, second);
+  EXPECT_EQ(hardware().gpuVblank.packedBuffers, 3U);
+  EXPECT_EQ(hardware().gpuVblank.overlayAddress, second);
+  EXPECT_EQ(VIDEOREG(0x8908), third + 64U * 3U - 1U);
+
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  EXPECT_EQ(hardware().gpuVblank.overlayAddress, third);
+  EXPECT_EQ(VIDEOREG(VIDEO_ADDRESS), first);
+}
+
+/** @brief Preserve double-buffered 720p presentation when the spare cannot be allocated. */
+TEST_F(PvideoPresenterTest, ReusesTwo720pBuffersWhenTheSpareAllocationFails) {
+  hardware().mode = {1280, 720, 32, 60};
+  hardware().pitch = 1280 * 4;
+  hardware().allocationsUntilFailure = 2;
+  streaming::PvideoPresenter presenter;
+  std::string error;
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  const auto first = VIDEOREG(VIDEO_ADDRESS);
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  const auto second = VIDEOREG(VIDEO_ADDRESS);
+  EXPECT_NE(first, second);
+
+  const auto pendingTick = hardware().ticks;
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  EXPECT_GT(hardware().ticks, pendingTick);
+  EXPECT_EQ(hardware().gpuVblank.overlayAddress, second);
+  EXPECT_EQ(VIDEOREG(VIDEO_ADDRESS), first);
+  EXPECT_EQ(hardware().allocations.size(), 2U);
+}
+
+/** @brief Retire the pending request if a packed 720p spare cannot be submitted before the timeout. */
+TEST_F(PvideoPresenterTest, RestoresSoftwareOutputWhen720pSpareCannotBeSubmitted) {
+  hardware().mode = {1280, 720, 32, 60};
+  hardware().pitch = 1280 * 4;
+  VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
+  streaming::PvideoPresenter presenter;
+  std::string error;
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
+  const auto pendingAddress = VIDEOREG(VIDEO_ADDRESS);
+
+  hardware().gpuVblank.resumeTick = hardware().ticks + 51U;
+  EXPECT_FALSE(presenter.present(frame(), destination(), &error));
+  EXPECT_NE(error.find("Timed out waiting for GPU scanout"), std::string::npos);
+  EXPECT_EQ(hardware().gpuVblank.packedBuffers, 3U);
+  EXPECT_EQ(hardware().gpuVblank.overlayAddress, pendingAddress);
+  EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
+  EXPECT_EQ(VIDEOREG(CRTC_START), CPU_FRAMEBUFFER);
+  EXPECT_FALSE(presenter.active());
+  EXPECT_TRUE(hardware().allocations.empty());
 }
 
 /** @brief The progress card remains visible while the first overlay frame is submitted and latched. */

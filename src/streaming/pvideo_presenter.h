@@ -20,10 +20,10 @@ namespace streaming {
   };
 
   /**
-   * @brief Double-buffered, main-thread-only NV2A YUV overlay presenter.
+   * @brief Main-thread-only NV2A YUV overlay presenter with an optional spare buffer at 720p.
    *
    * Supports progressive limited-range BT.601/BT.709 YUV420 with a compatible
-   * 32-bit output mode. Callers select software presentation when present()
+   * 16-bit or 32-bit output mode. Callers select software presentation when present()
    * returns false. Successful register submission does not verify the image
    * displayed by the emulator or console.
    *
@@ -82,7 +82,7 @@ namespace streaming {
 
 #ifdef NXDK
     /**
-     * @brief Replace the scanout surface and allocate the two overlay buffers.
+     * @brief Replace the scanout surface and allocate two overlay buffers, plus a spare when supported.
      * @param required Bytes per buffer including DMA padding.
      * @param pitch Packed bytes per row.
      * @param failure Receives the reason setup failed, if any.
@@ -90,7 +90,7 @@ namespace streaming {
     void configure_overlay_buffers(std::size_t required, int pitch, std::string &failure);
 
     /**
-     * @brief Wait for reusable storage, pack the picture and composite the optional UI.
+     * @brief Pack the picture and optional UI, waiting for scanout before reuse or submission as needed.
      * @param frame Decoded video to pack.
      * @param destination Visible output rectangle used for UI placement.
      * @param overlay Optional UI to composite into the packed video.
@@ -114,15 +114,15 @@ namespace streaming {
     bool submit_overlay();
 #endif
 
-    std::array<std::uint8_t *, 2> buffers_ {};  ///< Contiguous write-combined YUY2 storage.
+    std::array<std::uint8_t *, 3> buffers_ {};  ///< Two contiguous write-combined YUY2 buffers and an optional spare.
     std::array<std::uint32_t, 28> savedRegisters_ {};  ///< Overlay state restored on teardown.
     std::array<std::uint8_t, 4> savedCrtcRegisters_ {};  ///< Legacy scanout controls changed by pbkit.
     std::uint32_t savedCrtcConfig_ = 0;  ///< Scanout start-address latching mode before pbkit.
     bool scanoutStateSaved_ = false;  ///< Legacy scanout and overlay state must be restored, including initialization failures.
     std::size_t bufferSize_ = 0;  ///< Allocated size of each DMA buffer.
     int pitch_ = 0;  ///< Packed source stride.
-    std::uint32_t bufferReuseVblank_ = 0;  ///< Vblank counter that must advance before the next buffer can be written.
-    unsigned int nextBuffer_ = 0;  ///< Buffer not currently being scanned out.
+    std::uint32_t bufferReuseVblank_ = 0;  ///< Vblank counter that must advance before replacing the pending request.
+    unsigned int nextBuffer_ = 0;  ///< Next buffer to pack once it is safe to write.
     bool active_ = false;  ///< An overlay request is active and must be retired before freeing buffers.
     bool surfaceActive_ = false;  ///< pbkit owns the GPU context and vblank counter for the scanout surface.
   };
