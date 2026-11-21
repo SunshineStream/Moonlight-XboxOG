@@ -25,6 +25,7 @@
 #include "src/logging/logger.h"
 #include "src/startup/saved_files.h"
 #include "src/streaming/audio_configuration.h"
+#include "src/streaming/video_acceleration.h"
 #include "src/ui/menu_model.h"
 
 namespace app {
@@ -391,6 +392,7 @@ namespace app {
   struct VideoPresentationPreferences {
     bool gpuPresentation = DEFAULT_GPU_PRESENTATION;  ///< Use NV2A presentation with software fallback on new streams.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
+    streaming::GpuBufferCount gpuBufferCount = streaming::GpuBufferCount::automatic;  ///< YUY2 buffer preference for new GPU streams.
   };
 
   /** @brief Preferences for host and Xbox audio playback during streaming. */

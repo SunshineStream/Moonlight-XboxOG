@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 
 // lib includes
 #include <lizardbyte/common/testing.h>
@@ -1537,6 +1538,30 @@ namespace {
     EXPECT_TRUE(state.settings.presentation.showPerformanceStats);
     ASSERT_NE(state.detailMenu.selected_item(), nullptr);
     EXPECT_EQ(state.detailMenu.selected_item()->label, "Video Presentation: GPU");
+  }
+
+  /** @brief Cycle GPU buffer preferences independently of the selected presentation path. */
+  TEST(ClientStateTest, DisplaySettingsCycleGpuBufferCount) {
+    using streaming::GpuBufferCount;
+    auto state = app::create_initial_state();
+    state.settings.presentation.gpuPresentation = false;
+    ASSERT_NO_FATAL_FAILURE(open_display_settings_options(state));
+    ASSERT_TRUE(state.detailMenu.select_item_by_id("cycle-gpu-buffer-count"));
+    ASSERT_NE(state.detailMenu.selected_item(), nullptr);
+    EXPECT_EQ(state.detailMenu.selected_item()->label, "GPU Video Buffers: Auto");
+
+    for (const auto &[count, label] : {
+           std::pair {GpuBufferCount::two, "GPU Video Buffers: 2"},
+           std::pair {GpuBufferCount::three, "GPU Video Buffers: 3"},
+           std::pair {GpuBufferCount::automatic, "GPU Video Buffers: Auto"},
+         }) {
+      EXPECT_TRUE(app::handle_command(state, input::UiCommand::activate).persistence.settingsChanged);
+      EXPECT_TRUE(state.settings.dirty);
+      EXPECT_EQ(state.settings.presentation.gpuBufferCount, count);
+      EXPECT_FALSE(state.settings.presentation.gpuPresentation);
+      ASSERT_NE(state.detailMenu.selected_item(), nullptr);
+      EXPECT_EQ(state.detailMenu.selected_item()->label, label);
+    }
   }
 
   /**

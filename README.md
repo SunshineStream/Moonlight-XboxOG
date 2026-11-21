@@ -78,6 +78,12 @@ No network connection or JavaScript runtime is needed to display the icons on th
 scaling with automatic software fallback. **Software** combines the decoded video and overlay on the
 CPU before displaying each frame. Moonlight keeps your selection in `streaming.gpu_presentation`.
 
+**Settings → Display → GPU Video Buffers** applies to new GPU streams at any resolution. **Auto**
+tries three buffers at 720p when the packed source fits a 1280×720 buffer and uses two elsewhere. Choose **2**
+to save memory or **3** to pack the next frame while the previous one waits for scanout. If Moonlight
+cannot allocate the spare, it uses two buffers. The `streaming.gpu_buffer_count` settings key accepts
+`0` (Auto), `2`, and `3`. The stream log reports the number of GPU buffers in use.
+
 With 1080i enabled in the Xbox video settings, **Stream Resolution → 1920×1080** requests a
 1920×1080 stream and uses native 1080i output. Moonlight uses a 16-bit RGB framebuffer in this mode
 to leave memory for the H.264 decoder.

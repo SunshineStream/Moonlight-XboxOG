@@ -52,10 +52,25 @@ namespace {
     std::size_t packedBuffers = 0;  ///< Buffers populated with this fixture's nonzero luma before the blank.
   };
 
+  /** @brief Track depth detachment and the time until its GPU commands finish. */
+  struct GpuDepthSurface {
+    unsigned int detachments = 0;  ///< Number of times depth detachment was queued.
+    unsigned int releases = 0;  ///< Number of times a detached surface was released.
+    std::size_t overlayBuffersAtDetach = 0;  ///< Number of overlay buffers allocated before depth detachment.
+    DWORD detachDuration = 0;  ///< Simulated duration of the queued commands.
+    DWORD idleTick = 0;  ///< Earliest tick when the GPU reports those commands complete.
+  };
+
   /** @brief Track ownership and the fake physical address of a DMA buffer. */
   struct DmaAllocation {
     std::vector<std::uint8_t> storage;  ///< The allocated byte storage.
     std::uint32_t physicalAddress;  ///< Simulated bus address.
+  };
+
+  /** @brief Store indexed VGA registers and their active selector together. */
+  struct IndexedVgaRegisters {
+    std::array<std::uint8_t, 256> values {};  ///< Indexed VGA register values.
+    std::uint8_t index = 0;  ///< Active VGA selector.
   };
 
   /**
@@ -63,13 +78,13 @@ namespace {
    */
   struct Hardware {
     std::array<std::uint32_t, 0x700000 / 4> registers {};  ///< MMIO storage.
-    std::array<std::uint8_t, 256> crtc {};  ///< Indexed VGA registers.
-    std::uint8_t crtcIndex = 0;  ///< Active VGA selector.
+    IndexedVgaRegisters vga;  ///< Indexed VGA state.
     std::array<unsigned char, 640 * 480 * 4> framebuffer {};  ///< CPU-owned framebuffer.
     std::array<std::uint32_t, 640 * 480> gpuBuffer {};  ///< Separate GPU-owned scanout.
     VIDEO_MODE mode {640, 480, 32, 60};  ///< Active output mode.
     DWORD ticks = 0;  ///< Deterministic clock.
     GpuVblank gpuVblank;  ///< Simulates pbkit's vblank counter.
+    GpuDepthSurface depthSurface;  ///< Simulates retirement of pbkit's depth surface.
     int initResult = 0;  ///< Injected pbkit initialization result.
     int allocationsUntilFailure = -1;  ///< Negative disables allocation failure injection.
     int initializations = 0;  ///< Number of GPU context acquisitions.
@@ -103,11 +118,11 @@ namespace {
      */
     void SetUp() override {
       hardware().registers.fill(0);
-      hardware().crtc.fill(0);
-      hardware().crtcIndex = 0;
+      hardware().vga = {};
       hardware().mode = {640, 480, 32, 60};
       hardware().ticks = 0;
       hardware().gpuVblank = {};
+      hardware().depthSurface = {};
       hardware().initResult = 0;
       hardware().allocationsUntilFailure = -1;
       hardware().initializations = 0;
@@ -155,7 +170,8 @@ std::uint32_t &pvideo_test_register(std::uint32_t address) {
 }
 
 std::uint8_t &pvideo_test_register8(std::uint32_t address) {
-  return address == 0x6013d4 ? hardware().crtcIndex : hardware().crtc.at(hardware().crtcIndex);
+  auto &vga = hardware().vga;
+  return address == 0x6013d4 ? vga.index : vga.values.at(vga.index);
 }
 
 VIDEO_MODE XVideoGetMode() {
@@ -206,7 +222,7 @@ std::uint32_t pb_get_vbl_counter() {
 }
 
 int pb_busy() {
-  return 0;
+  return hardware().ticks < hardware().depthSurface.idleTick;
 }
 
 /**
@@ -218,16 +234,37 @@ extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout) {
   ++hardware().initializations;
   hardware().staticScanout = static_scanout;
   hardware().originalStart = VIDEOREG(CRTC_START);
-  hardware().crtc[31] = 87;
-  hardware().crtc[82] += 4;
-  hardware().crtc[32] = 41;
-  hardware().crtc[27] = 5;
+  hardware().vga.values[31] = 87;
+  hardware().vga.values[82] += 4;
+  hardware().vga.values[32] = 41;
+  hardware().vga.values[27] = 5;
   VIDEOREG(0x8910) = 0x1000;
   VIDEOREG(0x600804) = 2;
   if (hardware().initResult != 0) {
     hardware().videoEnabled = false;
   }
   return hardware().initResult;
+}
+
+/** @brief Queue depth detachment after the GPU background and overlay buffers are ready. */
+extern "C" void moonlight_pb_detach_depth_stencil() {
+  EXPECT_TRUE(hardware().staticScanout);
+  EXPECT_TRUE(hardware().backgroundCleared);
+  EXPECT_GE(hardware().allocations.size(), 2U);
+  EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
+  auto &depth = hardware().depthSurface;
+  ++depth.detachments;
+  depth.overlayBuffersAtDetach = hardware().allocations.size();
+  depth.idleTick = hardware().ticks + depth.detachDuration;
+}
+
+/** @brief Record release only after a queued depth detachment has finished. */
+extern "C" void moonlight_pb_release_detached_depth_stencil() {
+  auto &depth = hardware().depthSurface;
+  EXPECT_GT(depth.detachments, depth.releases);
+  EXPECT_EQ(pb_busy(), 0);
+  EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
+  ++depth.releases;
 }
 
 void pb_kill() {
@@ -505,6 +542,7 @@ TEST_F(PvideoPresenterTest, Prepares720pSpareWhileThePriorRequestIsPending) {
   std::string error;
   ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
   EXPECT_EQ(hardware().allocations.size(), 3U);
+  EXPECT_EQ(hardware().depthSurface.detachments, 0U);
   const auto first = VIDEOREG(VIDEO_ADDRESS);
 
   ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
@@ -615,16 +653,92 @@ TEST_F(PvideoPresenterTest, TimesOutWhenVblankCannotRetireThePreviousBuffer) {
   EXPECT_TRUE(hardware().allocations.empty());
 }
 
-/** @brief The 16-bit 1080i framebuffer still presents full-resolution YUY2 video. */
-TEST_F(PvideoPresenterTest, UsesRgb565For16BitScanout) {
+/** @brief Apply Auto and explicit buffer counts at each output resolution. */
+TEST_F(PvideoPresenterTest, SelectsGpuBufferCountAcrossOutputModes) {
+  using streaming::GpuBufferCount;
+  for (const auto &mode : {VIDEO_MODE {640, 480, 32, 60}, VIDEO_MODE {1280, 720, 32, 60}, VIDEO_MODE {1920, 1080, 16, 60}}) {
+    hardware().mode = mode;
+    hardware().pitch = mode.width * (mode.bpp / 8);
+    for (const auto count : {GpuBufferCount::automatic, GpuBufferCount::two, GpuBufferCount::three}) {
+      SCOPED_TRACE(mode.height);
+      SCOPED_TRACE(static_cast<int>(count));
+      streaming::PvideoPresenter presenter;
+      presenter.set_buffer_count(count);
+      EXPECT_EQ(presenter.active_buffer_count(), 0U);
+
+      std::string error;
+      ASSERT_TRUE(presenter.present(frame(), {0, 0, mode.width, mode.height}, &error)) << error;
+      const auto expected = count == GpuBufferCount::three || (count == GpuBufferCount::automatic && mode.height == 720) ? 3U : 2U;
+      EXPECT_EQ(hardware().allocations.size(), expected);
+      EXPECT_EQ(presenter.active_buffer_count(), expected);
+      ASSERT_TRUE(presenter.reset());
+      EXPECT_EQ(presenter.active_buffer_count(), 0U);
+    }
+  }
+}
+
+/** @brief Release depth after GPU detachment and after allocating the requested 1080i spare. */
+TEST_F(PvideoPresenterTest, RetiresDepthBeforeSubmitting1080iOverlay) {
   hardware().mode = {1920, 1080, 16, 60};
   hardware().pitch = 1920 * 2;
+  hardware().depthSurface.detachDuration = 3;
+  const streaming::VideoRectangle output {0, 0, 1920, 1080};
   streaming::PvideoPresenter presenter;
+  presenter.set_buffer_count(streaming::GpuBufferCount::three);
   std::string error;
-  ASSERT_TRUE(presenter.present(frame(), {0, 0, 1920, 1080}, &error)) << error;
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
   EXPECT_EQ(VIDEOREG(0x8950), 1920U | (1080U << 16U));
+  EXPECT_EQ(hardware().allocations.size(), 3U);
   EXPECT_TRUE(hardware().backgroundCleared);
   EXPECT_TRUE(hardware().staticScanout);
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
+  EXPECT_EQ(hardware().depthSurface.detachments, 1U);
+  EXPECT_EQ(hardware().depthSurface.releases, 1U);
+  EXPECT_EQ(hardware().depthSurface.overlayBuffersAtDetach, 3U);
+}
+
+/** @brief Keep 1080i GPU presentation double-buffered if the optional allocation fails. */
+TEST_F(PvideoPresenterTest, ReusesTwo1080iBuffersWhenTheSpareAllocationFails) {
+  hardware().mode = {1920, 1080, 16, 60};
+  hardware().pitch = 1920 * 2;
+  hardware().allocationsUntilFailure = 2;
+  const streaming::VideoRectangle output {0, 0, 1920, 1080};
+  streaming::PvideoPresenter presenter;
+  presenter.set_buffer_count(streaming::GpuBufferCount::three);
+  std::string error;
+
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
+  const auto first = VIDEOREG(VIDEO_ADDRESS);
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
+  EXPECT_NE(VIDEOREG(VIDEO_ADDRESS), first);
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
+  EXPECT_EQ(VIDEOREG(VIDEO_ADDRESS), first);
+  EXPECT_EQ(hardware().allocations.size(), 2U);
+  EXPECT_EQ(presenter.active_buffer_count(), 2U);
+  EXPECT_EQ(hardware().depthSurface.releases, 1U);
+  EXPECT_EQ(hardware().depthSurface.overlayBuffersAtDetach, 2U);
+}
+
+/** @brief Leave depth cleanup to pbkit and keep CPU output visible if detaching depth times out. */
+TEST_F(PvideoPresenterTest, RestoresSoftwareOutputWhenDepthDetachmentTimesOut) {
+  hardware().mode = {1920, 1080, 16, 60};
+  hardware().pitch = 1920 * 2;
+  // The commands complete in time for teardown, after the initial deadline.
+  hardware().depthSurface.detachDuration = 101;
+  VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
+  streaming::PvideoPresenter presenter;
+  std::string error;
+
+  EXPECT_FALSE(presenter.present(frame(), {0, 0, 1920, 1080}, &error));
+  EXPECT_NE(error.find("Timed out detaching the GPU depth surface"), std::string::npos);
+  EXPECT_EQ(hardware().depthSurface.detachments, 1U);
+  EXPECT_EQ(hardware().depthSurface.releases, 0U);
+  EXPECT_EQ(hardware().shutdowns, 1);
+  EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
+  EXPECT_EQ(VIDEOREG(CRTC_START), CPU_FRAMEBUFFER);
+  EXPECT_TRUE(hardware().videoEnabled);
+  EXPECT_FALSE(presenter.active());
+  EXPECT_TRUE(hardware().allocations.empty());
 }
 
 /**
@@ -634,7 +748,7 @@ TEST_F(PvideoPresenterTest, RestoresOutputAndRegistersAcrossRepeatedSessions) {
   constexpr std::array<int, 4> crtcRegisters {31, 82, 32, 27};
   const std::array<std::uint8_t, 4> originalCrtc {13, 14, 15, 16};
   for (std::size_t index = 0; index < originalCrtc.size(); ++index) {
-    hardware().crtc[crtcRegisters[index]] = originalCrtc[index];
+    hardware().vga.values[crtcRegisters[index]] = originalCrtc[index];
   }
   VIDEOREG(0x8910) = 0x2000;
   VIDEOREG(0x600800) = 0x3eb4000;
@@ -655,17 +769,20 @@ TEST_F(PvideoPresenterTest, RestoresOutputAndRegistersAcrossRepeatedSessions) {
     EXPECT_TRUE(hardware().videoEnabled);
     EXPECT_TRUE(hardware().allocations.empty());
     for (std::size_t index = 0; index < originalCrtc.size(); ++index) {
-      EXPECT_EQ(hardware().crtc[crtcRegisters[index]], originalCrtc[index]);
+      EXPECT_EQ(hardware().vga.values[crtcRegisters[index]], originalCrtc[index]);
     }
   }
   EXPECT_EQ(hardware().initializations, 2);
   EXPECT_EQ(hardware().shutdowns, 2);
+  EXPECT_EQ(hardware().depthSurface.detachments, 0U);
 }
 
 /**
  * @brief A partial allocation failure releases GPU ownership and restores visible software output.
  */
 TEST_F(PvideoPresenterTest, RestoresSoftwareOutputAfterPartialAllocationFailure) {
+  hardware().mode = {1920, 1080, 16, 60};
+  hardware().pitch = 1920 * 2;
   hardware().allocationsUntilFailure = 1;
   streaming::PvideoPresenter presenter;
   std::string error;
@@ -674,6 +791,7 @@ TEST_F(PvideoPresenterTest, RestoresSoftwareOutputAfterPartialAllocationFailure)
   EXPECT_TRUE(hardware().videoEnabled);
   EXPECT_TRUE(hardware().allocations.empty());
   EXPECT_EQ(hardware().shutdowns, 1);
+  EXPECT_EQ(hardware().depthSurface.detachments, 0U);
 }
 
 /**

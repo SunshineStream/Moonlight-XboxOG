@@ -41,10 +41,11 @@ namespace streaming {
     FfmpegVideoPresenter &operator=(const FfmpegVideoPresenter &) = delete;
 
     /**
-     * @brief Select the preferred presentation path before starting the session.
+     * @brief Select the preferred presentation path and GPU buffer count for the new session.
      * @param enabled True to try NV2A with automatic software fallback.
+     * @param bufferCount Requested number of YUY2 buffers if NV2A is used.
      */
-    void set_gpu_presentation_enabled(bool enabled);
+    void configure_gpu_presentation(bool enabled, GpuBufferCount bufferCount);
 
     /**
      * @brief Describe the active presentation path.

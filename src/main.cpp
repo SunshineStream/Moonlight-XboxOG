@@ -39,7 +39,7 @@ namespace {
   };
 
   /**
-   * @brief Restore saved preferences, including the requested audio mode, into the shell.
+   * @brief Restore saved shell and streaming preferences.
    * @param state Shell state to update.
    * @param settings Saved settings snapshot.
    */
@@ -52,6 +52,7 @@ namespace {
     state.settings.streamFramerate = settings.streamFramerate;
     state.settings.streamBitrateKbps = settings.streamBitrateKbps;
     state.settings.presentation.gpuPresentation = settings.gpuPresentation;
+    state.settings.presentation.gpuBufferCount = settings.gpuBufferCount;
     state.settings.audio.playOnPc = settings.playAudioOnPc;
     state.settings.presentation.showPerformanceStats = settings.showPerformanceStats;
     state.settings.audio.playOnXbox = settings.playAudioOnXbox;

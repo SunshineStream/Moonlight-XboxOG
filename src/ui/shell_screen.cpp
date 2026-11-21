@@ -2528,7 +2528,7 @@ namespace {
   }
 
   /**
-   * @brief Snapshot persisted shell and stream preferences, including playback mode.
+   * @brief Snapshot persisted shell and stream preferences, including GPU buffering.
    * @param state Current client state.
    * @return Settings snapshot ready for TOML serialization.
    */
@@ -2548,6 +2548,7 @@ namespace {
       state.settings.controls.keyboardDockTop,
       state.settings.presentation.gpuPresentation,
       state.settings.audio.mode,
+      state.settings.presentation.gpuBufferCount,
     };
   }
 
