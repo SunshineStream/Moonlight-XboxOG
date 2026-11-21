@@ -13,6 +13,18 @@
 #include <stdio.h>
 #include <sys/types.h>
 
+#if defined(NXDK) && !defined(__cplusplus)
+  #include "ffmpeg_math.h"
+
+  // FFmpeg 9.1 calls these functions directly. nxdk's symbols assert at runtime.
+  #define exp2 moonlight_ffmpeg_exp2  ///< Use the private double-precision exponential.
+  #define exp2f moonlight_ffmpeg_exp2f  ///< Use the private single-precision exponential.
+  #define lrint moonlight_ffmpeg_lrint  ///< Round a double to the Xbox long type.
+  #define lrintf moonlight_ffmpeg_lrintf  ///< Round a float to the Xbox long type.
+  #define llrint moonlight_ffmpeg_llrint  ///< Round a double to a 64-bit integer.
+  #define llrintf moonlight_ffmpeg_llrintf  ///< Round a float to a 64-bit integer.
+#endif
+
 #ifdef NXDK
   #ifdef __cplusplus
 extern "C" {
