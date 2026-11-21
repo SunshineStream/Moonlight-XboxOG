@@ -1,7 +1,26 @@
 diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
 --- a/lib/pbkit/pbkit.c
 +++ b/lib/pbkit/pbkit.c
-@@ -2210,6 +2210,6 @@ static inline void pb_calc_ptimer_param (uint32_t nvclk, uint32_t *denominator,
+@@ -1667,7 +1667,7 @@
+     p=pb_push1_to(SUBCH_4,p,NV20_TCL_PRIMITIVE_3D_SET_OBJECT2,11);
+     pb_end(p);
+ 
+-    depth_stencil=1;
++    depth_stencil=pb_DSAddr!=0;
+ 
+     if (depth_stencil != -1 && pb_DepthStencilLast != depth_stencil) // stencil changed?
+     {
+@@ -1702,7 +1702,7 @@
+         p=pb_push1(p,NV20_TCL_PRIMITIVE_3D_FIRE_INTERRUPT,PB_SETOUTER);
+         p=pb_push1(p,NV20_TCL_PRIMITIVE_3D_SET_OBJECT4,10);
+         p=pb_push1(p,NV20_TCL_PRIMITIVE_3D_DEPTH_TEST_ENABLE,flag); //ZEnable=TRUE or FALSE (But don't use W, see below)
+-        p=pb_push1(p,NV20_TCL_PRIMITIVE_3D_STENCIL_ENABLE,1);   //StencilEnable=TRUE
++        p=pb_push1(p,NV20_TCL_PRIMITIVE_3D_STENCIL_ENABLE,flag); //Use the same enable state as the depth test.
+         pb_end(p);
+ 
+         pb_DepthStencilLast=depth_stencil;
+@@ -2209,7 +2209,7 @@
+     *denominator = den;
  }
  
 -int pb_init(void)
@@ -9,7 +28,7 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
  {
      DWORD           old;
  
-@@ -2927,8 +2927,8 @@ int pb_init(void)
+@@ -2927,8 +2927,8 @@
      Width=vm.width;
      Height=vm.height;
  
@@ -20,7 +39,7 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
  
      pb_FrameBuffersCount=BackBufferCount+1; //front buffer + back buffers
      pb_FrameBuffersWidth=Width;
-@@ -3274,11 +3274,15 @@ int pb_init(void)
+@@ -3274,11 +3274,15 @@
      memset((DWORD *)pb_FBAddr[0],0,pb_FBSize);
      memset((DWORD *)pb_DSAddr,0,pb_DSSize);
  
@@ -38,7 +57,7 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
  
      pb_shutdown_registration.NotificationRoutine = pb_shutdown_notification_routine;
      pb_shutdown_registration.Priority = 0;
-@@ -3287,5 +3291,15 @@ int pb_init(void)
+@@ -3287,5 +3291,45 @@
      return 0;
  }
  
@@ -50,6 +69,36 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
 +int moonlight_pb_init_pvideo_scanout(bool static_scanout)
 +{
 +    return pb_init_with_scanout(static_scanout, true);
++}
++
++/**
++ * @brief Disable depth and stencil access after the streaming background has been cleared.
++ *
++ * Keep ownership in pb_DepthStencilAddr until the queued commands have completed.
++ */
++void moonlight_pb_detach_depth_stencil(void)
++{
++    pb_DSAddr=0;
++    pb_target_back_buffer();
++
++    uint32_t *p=pb_begin();
++    p=pb_push1(p,NV20_TCL_PRIMITIVE_3D_DEPTH_WRITE_ENABLE,0);
++    p=pb_push1(p,NV20_TCL_PRIMITIVE_3D_CULL_ENABLE,0);
++    pb_end(p);
++}
++
++/**
++ * @brief Free the detached depth allocation after the caller has waited for GPU idle.
++ */
++void moonlight_pb_release_detached_depth_stencil(void)
++{
++    if (pb_DSAddr != 0 || pb_DepthStencilAddr == 0)
++        return;
++
++    pb_release_tile(1,1);
++    MmFreeContiguousMemory((PVOID)pb_DepthStencilAddr);
++    pb_DepthStencilAddr=0;
++    pb_DSSize=0;
 +}
 +
  static NTAPI VOID pb_shutdown_notification_routine (PHAL_SHUTDOWN_REGISTRATION ShutdownRegistration)

@@ -83,6 +83,9 @@ namespace streaming {
 #ifdef NXDK
     /**
      * @brief Replace the scanout surface and allocate the required buffers plus an optional 720p spare.
+     *
+     * At 1080i, release the setup depth surface once the GPU has detached it.
+     *
      * @param required Bytes per buffer including DMA padding.
      * @param pitch Packed bytes per row.
      * @param failure Receives the reason setup failed, if any.

@@ -52,6 +52,14 @@ namespace {
     std::size_t packedBuffers = 0;  ///< Buffers populated with this fixture's nonzero luma before the blank.
   };
 
+  /** @brief Track depth detachment and the time until its GPU commands finish. */
+  struct GpuDepthSurface {
+    unsigned int detachments = 0;  ///< Number of times depth detachment was queued.
+    unsigned int releases = 0;  ///< Number of times a detached surface was released.
+    DWORD detachDuration = 0;  ///< Simulated duration of the queued commands.
+    DWORD idleTick = 0;  ///< Earliest tick when the GPU reports those commands complete.
+  };
+
   /** @brief Track ownership and the fake physical address of a DMA buffer. */
   struct DmaAllocation {
     std::vector<std::uint8_t> storage;  ///< The allocated byte storage.
@@ -70,6 +78,7 @@ namespace {
     VIDEO_MODE mode {640, 480, 32, 60};  ///< Active output mode.
     DWORD ticks = 0;  ///< Deterministic clock.
     GpuVblank gpuVblank;  ///< Simulates pbkit's vblank counter.
+    GpuDepthSurface depthSurface;  ///< Simulates retirement of pbkit's depth surface.
     int initResult = 0;  ///< Injected pbkit initialization result.
     int allocationsUntilFailure = -1;  ///< Negative disables allocation failure injection.
     int initializations = 0;  ///< Number of GPU context acquisitions.
@@ -108,6 +117,7 @@ namespace {
       hardware().mode = {640, 480, 32, 60};
       hardware().ticks = 0;
       hardware().gpuVblank = {};
+      hardware().depthSurface = {};
       hardware().initResult = 0;
       hardware().allocationsUntilFailure = -1;
       hardware().initializations = 0;
@@ -206,7 +216,7 @@ std::uint32_t pb_get_vbl_counter() {
 }
 
 int pb_busy() {
-  return 0;
+  return hardware().ticks < hardware().depthSurface.idleTick;
 }
 
 /**
@@ -228,6 +238,26 @@ extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout) {
     hardware().videoEnabled = false;
   }
   return hardware().initResult;
+}
+
+/** @brief Queue depth detachment after the GPU background and the two overlay buffers are ready. */
+extern "C" void moonlight_pb_detach_depth_stencil() {
+  EXPECT_TRUE(hardware().staticScanout);
+  EXPECT_TRUE(hardware().backgroundCleared);
+  EXPECT_EQ(hardware().allocations.size(), 2U);
+  EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
+  auto &depth = hardware().depthSurface;
+  ++depth.detachments;
+  depth.idleTick = hardware().ticks + depth.detachDuration;
+}
+
+/** @brief Record release only after a queued depth detachment has finished. */
+extern "C" void moonlight_pb_release_detached_depth_stencil() {
+  auto &depth = hardware().depthSurface;
+  EXPECT_GT(depth.detachments, depth.releases);
+  EXPECT_EQ(pb_busy(), 0);
+  EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
+  ++depth.releases;
 }
 
 void pb_kill() {
@@ -505,6 +535,7 @@ TEST_F(PvideoPresenterTest, Prepares720pSpareWhileThePriorRequestIsPending) {
   std::string error;
   ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
   EXPECT_EQ(hardware().allocations.size(), 3U);
+  EXPECT_EQ(hardware().depthSurface.detachments, 0U);
   const auto first = VIDEOREG(VIDEO_ADDRESS);
 
   ASSERT_TRUE(presenter.present(frame(), destination(), &error)) << error;
@@ -615,16 +646,43 @@ TEST_F(PvideoPresenterTest, TimesOutWhenVblankCannotRetireThePreviousBuffer) {
   EXPECT_TRUE(hardware().allocations.empty());
 }
 
-/** @brief The 16-bit 1080i framebuffer still presents full-resolution YUY2 video. */
-TEST_F(PvideoPresenterTest, UsesRgb565For16BitScanout) {
+/** @brief Set up RGB565 scanout and release depth once, after the GPU finishes detaching it. */
+TEST_F(PvideoPresenterTest, RetiresDepthBeforeSubmitting1080iOverlay) {
   hardware().mode = {1920, 1080, 16, 60};
   hardware().pitch = 1920 * 2;
+  hardware().depthSurface.detachDuration = 3;
+  const streaming::VideoRectangle output {0, 0, 1920, 1080};
   streaming::PvideoPresenter presenter;
   std::string error;
-  ASSERT_TRUE(presenter.present(frame(), {0, 0, 1920, 1080}, &error)) << error;
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
   EXPECT_EQ(VIDEOREG(0x8950), 1920U | (1080U << 16U));
   EXPECT_TRUE(hardware().backgroundCleared);
   EXPECT_TRUE(hardware().staticScanout);
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
+  EXPECT_EQ(hardware().depthSurface.detachments, 1U);
+  EXPECT_EQ(hardware().depthSurface.releases, 1U);
+}
+
+/** @brief Leave depth cleanup to pbkit and keep CPU output visible if detaching depth times out. */
+TEST_F(PvideoPresenterTest, RestoresSoftwareOutputWhenDepthDetachmentTimesOut) {
+  hardware().mode = {1920, 1080, 16, 60};
+  hardware().pitch = 1920 * 2;
+  // The commands complete in time for teardown, after the initial deadline.
+  hardware().depthSurface.detachDuration = 101;
+  VIDEOREG(CRTC_START) = CPU_FRAMEBUFFER;
+  streaming::PvideoPresenter presenter;
+  std::string error;
+
+  EXPECT_FALSE(presenter.present(frame(), {0, 0, 1920, 1080}, &error));
+  EXPECT_NE(error.find("Timed out detaching the GPU depth surface"), std::string::npos);
+  EXPECT_EQ(hardware().depthSurface.detachments, 1U);
+  EXPECT_EQ(hardware().depthSurface.releases, 0U);
+  EXPECT_EQ(hardware().shutdowns, 1);
+  EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
+  EXPECT_EQ(VIDEOREG(CRTC_START), CPU_FRAMEBUFFER);
+  EXPECT_TRUE(hardware().videoEnabled);
+  EXPECT_FALSE(presenter.active());
+  EXPECT_TRUE(hardware().allocations.empty());
 }
 
 /**
@@ -660,12 +718,15 @@ TEST_F(PvideoPresenterTest, RestoresOutputAndRegistersAcrossRepeatedSessions) {
   }
   EXPECT_EQ(hardware().initializations, 2);
   EXPECT_EQ(hardware().shutdowns, 2);
+  EXPECT_EQ(hardware().depthSurface.detachments, 0U);
 }
 
 /**
  * @brief A partial allocation failure releases GPU ownership and restores visible software output.
  */
 TEST_F(PvideoPresenterTest, RestoresSoftwareOutputAfterPartialAllocationFailure) {
+  hardware().mode = {1920, 1080, 16, 60};
+  hardware().pitch = 1920 * 2;
   hardware().allocationsUntilFailure = 1;
   streaming::PvideoPresenter presenter;
   std::string error;
@@ -674,6 +735,7 @@ TEST_F(PvideoPresenterTest, RestoresSoftwareOutputAfterPartialAllocationFailure)
   EXPECT_TRUE(hardware().videoEnabled);
   EXPECT_TRUE(hardware().allocations.empty());
   EXPECT_EQ(hardware().shutdowns, 1);
+  EXPECT_EQ(hardware().depthSurface.detachments, 0U);
 }
 
 /**

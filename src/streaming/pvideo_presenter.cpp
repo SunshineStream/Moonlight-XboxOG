@@ -25,6 +25,12 @@
  */
 extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout);
 
+/** @brief Queue depth and stencil detachment from the 1080i background target. */
+extern "C" void moonlight_pb_detach_depth_stencil();
+
+/** @brief Release the detached depth surface after the GPU has completed the detachment. */
+extern "C" void moonlight_pb_release_detached_depth_stencil();
+
 namespace {
   constexpr std::uint32_t CRTC_START = 0x600800;  ///< Physical address of the scanout background.
   constexpr std::uint32_t VIDEO_BUFFER = 0x8700;  ///< Overlay buffer submission register.
@@ -249,7 +255,8 @@ namespace streaming {
     // Bound the extra contiguous allocation to a 720p YUY2 frame and
     // leave smaller scanout modes and memory-constrained 1080i double-buffered.
     constexpr std::size_t MAX_SPARE_BYTES = 1280U * 720U * 2U + 64U;
-    const bool allowSpare = XVideoGetMode().height == 720 && required <= MAX_SPARE_BYTES;
+    const int outputHeight = XVideoGetMode().height;
+    const bool allowSpare = outputHeight == 720 && required <= MAX_SPARE_BYTES;
     const std::size_t requiredBufferCount = buffers_.size() - 1;
     const std::size_t bufferCount = allowSpare ? buffers_.size() : requiredBufferCount;
     decltype(MmGetPhysicalAddress(nullptr)) highestAddress = 0;
@@ -265,6 +272,16 @@ namespace streaming {
       }
       std::memset(buffer, 0, required);
       highestAddress = std::max(highestAddress, MmGetPhysicalAddress(buffer));
+    }
+    if (outputHeight == 1080) {
+      // xemu is sensitive to the initial GPU buffer layout. Keep depth
+      // allocated until the background and YUY2 buffers are ready.
+      moonlight_pb_detach_depth_stencil();
+      if (!wait_for_gpu_idle()) {
+        failure = "Timed out detaching the GPU depth surface";
+        return;
+      }
+      moonlight_pb_release_detached_depth_stencil();
     }
     bufferSize_ = required;
     pitch_ = pitch;
