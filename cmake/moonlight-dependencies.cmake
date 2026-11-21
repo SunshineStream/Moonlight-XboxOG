@@ -1,33 +1,5 @@
 include_guard(GLOBAL)
 
-# Disable nxdk's unimplemented math entry points; aligned allocation uses private adapters.
-function(_moonlight_patch_ffmpeg_config_header ffmpeg_config_header)
-    if(NOT EXISTS "${ffmpeg_config_header}")
-        return()
-    endif()
-
-    file(READ "${ffmpeg_config_header}" ffmpeg_config_text)
-
-    foreach(ffmpeg_disabled_probe
-            IN ITEMS
-            HAVE_EXP2
-            HAVE_EXP2F
-            HAVE_LLRINT
-            HAVE_LLRINTF
-            HAVE_LOG2
-            HAVE_LOG2F
-            HAVE_LRINT
-            HAVE_LRINTF)
-        string(REGEX REPLACE
-                "#define ${ffmpeg_disabled_probe} [0-9]+"
-                "#define ${ffmpeg_disabled_probe} 0"
-                ffmpeg_config_text
-                "${ffmpeg_config_text}")
-    endforeach()
-
-    file(WRITE "${ffmpeg_config_header}" "${ffmpeg_config_text}")
-endfunction()
-
 # Validate FFmpeg source and support files before attempting a configure.
 function(_moonlight_validate_xbox_ffmpeg_inputs ffmpeg_source_dir)
     if(NOT EXISTS "${ffmpeg_source_dir}/configure")
@@ -285,9 +257,6 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
                 "${ffmpeg_build_dir}"
                 ${ffmpeg_configure_args})
     endif()
-
-    set(ffmpeg_config_header "${ffmpeg_build_dir}/config.h")
-    _moonlight_patch_ffmpeg_config_header("${ffmpeg_config_header}")
 
     if(CMAKE_HOST_WIN32)
         _moonlight_run_windows_ffmpeg_command(
