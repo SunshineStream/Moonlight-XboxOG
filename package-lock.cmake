@@ -37,11 +37,18 @@
 # extractVersion=^n(?<version>\d+\.\d+(?:\.\d+)?)$
 set(FFMPEG_VERSION 9.1)
 set(FFMPEG_NXDK_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch")
+# Keep each version and patch revision in a separate checkout so FetchContent
+# never reapplies patches on top of a previously patched source tree.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${FFMPEG_NXDK_PATCH}")
+file(SHA256 "${FFMPEG_NXDK_PATCH}" ffmpeg_patch_hash)
+string(SUBSTRING "${ffmpeg_patch_hash}" 0 12 ffmpeg_patch_id)
 CPMDeclarePackage(ffmpeg
         NAME ffmpeg
         VERSION ${FFMPEG_VERSION}
         GIT_REPOSITORY https://github.com/FFmpeg/FFmpeg.git
         GIT_TAG n${FFMPEG_VERSION}
+        GIT_SHALLOW TRUE
+        SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/ffmpeg-${FFMPEG_VERSION}-${ffmpeg_patch_id}-src"
         # Preserve LF endings in the upstream shell scripts on Windows.
         GIT_CONFIG core.autocrlf=false
         UPDATE_DISCONNECTED YES

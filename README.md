@@ -224,6 +224,7 @@ nxdk_dependencies=(
   "mingw-w64-x86_64-nasm"
 )
 moonlight_dependencies=(
+  "diffutils"
   "patch"
   "mingw-w64-x86_64-doxygen"
   "mingw-w64-x86_64-graphviz"

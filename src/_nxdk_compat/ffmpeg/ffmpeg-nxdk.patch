@@ -1,7 +1,8 @@
-Adapt FFmpeg's thread wrapper to the Xbox runtime:
+Adapt FFmpeg to the Xbox runtime:
 
 - nxdk condition variables own kernel events and require explicit destruction.
 - Desktop Windows thread naming APIs are unavailable on Xbox.
+- nxdk has VirtualAlloc but lacks VirtualProtect, and the Xbox scaler has no JIT backend.
 
 diff --git a/compat/w32pthreads.h b/compat/w32pthreads.h
 --- a/compat/w32pthreads.h
@@ -27,3 +28,17 @@ diff --git a/compat/w32pthreads.h b/compat/w32pthreads.h
      typedef HRESULT (WINAPI *SetThreadDescriptionFn)(HANDLE, PCWSTR);
  
      // Although SetThreadDescription lives in kernel32.dll, on Windows Server 2016,
+diff --git a/libswscale/jit.c b/libswscale/jit.c
+--- a/libswscale/jit.c
++++ b/libswscale/jit.c
+@@ -59,9 +59,9 @@ void ff_sws_jit_free(void *ptr, size_t size)
+         munmap(ptr, size);
+ }
+ 
+-#elif HAVE_VIRTUALALLOC
++#elif HAVE_VIRTUALALLOC && !defined(NXDK)
+ 
+ #include <windows.h>
+ 
+ void *ff_sws_jit_alloc(size_t size)
+ {
