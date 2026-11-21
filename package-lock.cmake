@@ -35,7 +35,7 @@
 # FFmpeg, cross-compiled with its upstream configure script.
 # renovate: datasource=github-tags depName=FFmpeg/FFmpeg versioning=semver-coerced
 # extractVersion=^n(?<version>\d+\.\d+(?:\.\d+)?)$
-set(FFMPEG_VERSION 9.0.2)
+set(FFMPEG_VERSION 9.1)
 set(FFMPEG_NXDK_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch")
 CPMDeclarePackage(ffmpeg
         NAME ffmpeg
