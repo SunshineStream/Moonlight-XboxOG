@@ -34,7 +34,7 @@ namespace {
   /** @brief Keep DMA storage resident and disable overlays after synchronization fails. */
   struct OverlayQuarantine {
     bool disabled = false;  ///< Whether a timeout prevents future overlays.
-    std::array<std::uint8_t *, 2> buffers {};  ///< Allocations the display may still read.
+    std::array<std::uint8_t *, 3> buffers {};  ///< Allocations the display may still read.
   };
 
   /**
@@ -246,20 +246,31 @@ namespace streaming {
     if (!initialize_scanout_surface(&failure)) {
       return;
     }
-    for (auto *&buffer : buffers_) {
+    // Bound the extra contiguous allocation to a 720p YUY2 frame and
+    // leave smaller scanout modes and memory-constrained 1080i double-buffered.
+    constexpr std::size_t MAX_SPARE_BYTES = 1280U * 720U * 2U + 64U;
+    const bool allowSpare = XVideoGetMode().height == 720 && required <= MAX_SPARE_BYTES;
+    const std::size_t requiredBufferCount = buffers_.size() - 1;
+    const std::size_t bufferCount = allowSpare ? buffers_.size() : requiredBufferCount;
+    decltype(MmGetPhysicalAddress(nullptr)) highestAddress = 0;
+    for (std::size_t index = 0; index < bufferCount; ++index) {
+      auto *&buffer = buffers_[index];
       buffer = static_cast<std::uint8_t *>(MmAllocateContiguousMemoryEx(required, 0, 0x03ffffff, 64, PAGE_READWRITE | PAGE_WRITECOMBINE));
       if (buffer == nullptr) {
-        failure = "Not enough contiguous memory for GPU presentation";
-        return;
+        if (index < requiredBufferCount) {
+          failure = "Not enough contiguous memory for GPU presentation";
+          return;
+        }
+        break;
       }
       std::memset(buffer, 0, required);
+      highestAddress = std::max(highestAddress, MmGetPhysicalAddress(buffer));
     }
     bufferSize_ = required;
     pitch_ = pitch;
     // xemu reads the descriptor concurrently with MMIO writes. Keep a
-    // single DMA window for both buffers so a new address paired with
+    // single DMA window for all buffers so a new address paired with
     // the previous frame's limit is still within bounds.
-    const auto highestAddress = std::max(MmGetPhysicalAddress(buffers_[0]), MmGetPhysicalAddress(buffers_[1]));
     VIDEOREG(0x8900) = 0;
     VIDEOREG(0x8908) = static_cast<std::uint32_t>(highestAddress + bufferSize_ - 1U);
     VIDEOREG(0x8140) = 0;
@@ -269,14 +280,18 @@ namespace streaming {
   }
 
   void PvideoPresenter::prepare_overlay_frame(const Yuv420FrameView &frame, const VideoRectangle &destination, VideoOverlay *overlay, std::string &failure) {
-    // The previous submission must cross a vblank before we reuse its old
-    // scanout buffer. That vblank may already have passed since submission.
-    if (active_ && !wait_for_scanout_after(bufferReuseVblank_)) {
+    // The previous submission must cross a vblank before the old scanout
+    // buffer can be reused. With a spare, pack before waiting for that latch.
+    const bool hasSpare = buffers_.back() != nullptr;
+    if (active_ && !hasSpare && !wait_for_scanout_after(bufferReuseVblank_)) {
       failure = "Timed out waiting for GPU scanout; using software presentation";
     } else if (!pack_overlay_yuy2(frame, buffers_[nextBuffer_], bufferSize_, pitch_)) {
       failure = "Failed to pack the GPU overlay frame";
     } else if (overlay != nullptr && !overlay->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination, frame.matrix)) {
       failure = "Could not compose stream controls with GPU presentation";
+    } else if (active_ && hasSpare && !wait_for_scanout_after(bufferReuseVblank_)) {
+      // The single overlay bank still holds the pending request until vblank.
+      failure = "Timed out waiting for GPU scanout; using software presentation";
     }
   }
 
@@ -316,7 +331,10 @@ namespace streaming {
       // Switch the background at the blank so letterbox bars become black with video already ready.
       VIDEOREG(CRTC_START) = static_cast<std::uint32_t>(MmGetPhysicalAddress(pb_back_buffer()));
     }
-    nextBuffer_ ^= 1U;
+    ++nextBuffer_;
+    if (nextBuffer_ == buffers_.size() || buffers_[nextBuffer_] == nullptr) {
+      nextBuffer_ = 0;
+    }
     return true;
   }
 #endif
