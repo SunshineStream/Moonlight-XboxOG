@@ -8,6 +8,7 @@
 // standard includes
 #include <cctype>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -355,6 +356,8 @@ namespace {
     content += std::string("fps = ") + std::to_string(settings.streamFramerate) + "\n";
     content += std::string("bitrate_kbps = ") + std::to_string(settings.streamBitrateKbps) + "\n";
     content += std::string("gpu_presentation = ") + (settings.gpuPresentation ? "true" : "false") + "\n";
+    content += "# GPU video buffers: 0 for Auto, 2 for two, or 3 to try a spare.\n";
+    content += "gpu_buffer_count = " + std::to_string(static_cast<int>(settings.gpuBufferCount)) + "\n";
     content += std::string("play_audio_on_pc = ") + (settings.playAudioOnPc ? "true" : "false") + "\n";
     content += std::string("play_audio_on_xbox = ") + (settings.playAudioOnXbox ? "true" : "false") + "\n";
     content += std::string("audio_mode = \"") + streaming::audio_mode_key(settings.audioMode) + "\"\n";
@@ -398,7 +401,7 @@ namespace {
   }
 
   /**
-   * @brief Mark unknown streaming keys for cleanup, preserving recognized settings such as audio mode.
+   * @brief Mark unknown streaming keys for cleanup, preserving recognized settings.
    *
    * @param streamingTable Parsed streaming settings table.
    * @param filePath Settings file path used in warnings.
@@ -407,7 +410,7 @@ namespace {
   void inspect_streaming_keys(const toml::table &streamingTable, const std::string &filePath, app::LoadAppSettingsResult *result) {
     for (const auto &[rawKey, node] : streamingTable) {
       const std::string key(rawKey.str());
-      if (key == "video_width" || key == "video_height" || key == "video_bpp" || key == "video_refresh" || key == "video_mode_selected" || key == "fps" || key == "bitrate_kbps" || key == "gpu_presentation" || key == "play_audio_on_pc" || key == "play_audio_on_xbox" || key == "audio_mode" || key == "show_performance_stats" || key == "screenshot_directory" || key == "keyboard_dock_top") {
+      if (key == "video_width" || key == "video_height" || key == "video_bpp" || key == "video_refresh" || key == "video_mode_selected" || key == "fps" || key == "bitrate_kbps" || key == "gpu_presentation" || key == "gpu_buffer_count" || key == "play_audio_on_pc" || key == "play_audio_on_xbox" || key == "audio_mode" || key == "show_performance_stats" || key == "screenshot_directory" || key == "keyboard_dock_top") {
         continue;
       }
 
@@ -510,6 +513,14 @@ namespace app {
     load_integer_setting(settingsTable["streaming"]["bitrate_kbps"], filePath, "streaming.bitrate_kbps", &result.settings.streamBitrateKbps, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_pc"], filePath, "streaming.play_audio_on_pc", &result.settings.playAudioOnPc, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["gpu_presentation"], filePath, "streaming.gpu_presentation", &result.settings.gpuPresentation, &result.warnings);
+    if (const auto node = settingsTable["streaming"]["gpu_buffer_count"]; node) {
+      using streaming::GpuBufferCount;
+      if (const auto count = node.value_exact<std::int64_t>(); count && (*count == static_cast<int>(GpuBufferCount::automatic) || *count == static_cast<int>(GpuBufferCount::two) || *count == static_cast<int>(GpuBufferCount::three))) {
+        result.settings.gpuBufferCount = static_cast<GpuBufferCount>(*count);
+      } else {
+        append_invalid_value_warning(&result.warnings, filePath, "streaming.gpu_buffer_count", "<expected 0, 2 or 3>");
+      }
+    }
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_xbox"], filePath, "streaming.play_audio_on_xbox", &result.settings.playAudioOnXbox, &result.warnings);
     if (const auto audioModeNode = settingsTable["streaming"]["audio_mode"]; audioModeNode) {
       const auto key = audioModeNode.value<std::string_view>();

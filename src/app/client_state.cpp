@@ -567,7 +567,24 @@ namespace {
   }
 
   /**
-   * @brief Build the active settings options, including audio mode and screenshot destination.
+   * @brief Label a GPU buffer preference in the Display settings.
+   * @param count Requested buffer count.
+   * @return Display label for the preference.
+   */
+  const char *gpu_buffer_count_label(streaming::GpuBufferCount count) {
+    switch (count) {
+      case streaming::GpuBufferCount::two:
+        return "2";
+      case streaming::GpuBufferCount::three:
+        return "3";
+      case streaming::GpuBufferCount::automatic:
+        return "Auto";
+    }
+    return "Auto";
+  }
+
+  /**
+   * @brief Build the active settings options, including GPU buffering.
    * @param state Current screen and settings values.
    * @return Selectable settings rows for the current category.
    */
@@ -607,6 +624,12 @@ namespace {
             "toggle-gpu-presentation",
             std::string("Video Presentation: ") + (state.settings.presentation.gpuPresentation ? "GPU" : "Software"),
             "Choose how new streams display decoded video. GPU uses NV2A with automatic software fallback. Software can be faster in xemu.",
+            true,
+          },
+          {
+            "cycle-gpu-buffer-count",
+            std::string("GPU Video Buffers: ") + gpu_buffer_count_label(state.settings.presentation.gpuBufferCount),
+            "Choose Auto, 2, or 3 buffers for GPU presentation on new streams. Auto tries three at 720p. The third buffer needs extra RAM.",
             true,
           },
           {
@@ -2477,7 +2500,7 @@ namespace app {
   }
 
   /**
-   * @brief Toggle a presentation preference and refresh its selected menu row.
+   * @brief Change a presentation preference and refresh its selected menu row.
    *
    * @param state Client state containing the presentation preferences.
    * @param itemId Activated menu row.
@@ -2489,6 +2512,20 @@ namespace app {
     if (itemId == "toggle-gpu-presentation") {
       presentation.gpuPresentation = !presentation.gpuPresentation;
       state.shell.statusMessage = std::string("Video presentation set to ") + (presentation.gpuPresentation ? "GPU" : "Software");
+    } else if (itemId == "cycle-gpu-buffer-count") {
+      using streaming::GpuBufferCount;
+      switch (presentation.gpuBufferCount) {
+        case GpuBufferCount::automatic:
+          presentation.gpuBufferCount = GpuBufferCount::two;
+          break;
+        case GpuBufferCount::two:
+          presentation.gpuBufferCount = GpuBufferCount::three;
+          break;
+        case GpuBufferCount::three:
+          presentation.gpuBufferCount = GpuBufferCount::automatic;
+          break;
+      }
+      state.shell.statusMessage = std::string("GPU video buffers set to ") + gpu_buffer_count_label(presentation.gpuBufferCount);
     } else if (itemId == "toggle-show-performance-stats") {
       presentation.showPerformanceStats = !presentation.showPerformanceStats;
       state.shell.statusMessage = std::string("Performance stats ") + (presentation.showPerformanceStats ? "enabled" : "disabled");

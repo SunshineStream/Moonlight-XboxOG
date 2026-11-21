@@ -20,7 +20,7 @@ namespace streaming {
   };
 
   /**
-   * @brief Main-thread-only NV2A YUV overlay presenter with an optional spare buffer at 720p.
+   * @brief Main-thread-only NV2A YUV overlay presenter with a configurable spare buffer.
    *
    * Supports progressive limited-range BT.601/BT.709 YUV420 with a compatible
    * 16-bit or 32-bit output mode. Callers select software presentation when present()
@@ -71,6 +71,18 @@ namespace streaming {
      */
     bool active() const;
 
+    /**
+     * @brief Set the buffer preference used at the next overlay setup.
+     * @param count Requested buffer count.
+     */
+    void set_buffer_count(GpuBufferCount count);
+
+    /**
+     * @brief Report the number of buffers available to the active overlay.
+     * @return Two or three for an active overlay, or zero while inactive.
+     */
+    std::size_t active_buffer_count() const;
+
   private:
     /**
      * @brief Prepare a black GPU background while the current CPU framebuffer remains visible.
@@ -82,9 +94,9 @@ namespace streaming {
 
 #ifdef NXDK
     /**
-     * @brief Replace the scanout surface and allocate the required buffers plus an optional 720p spare.
+     * @brief Replace the scanout surface and allocate the required buffers plus a spare when requested.
      *
-     * At 1080i, release the setup depth surface once the GPU has detached it.
+     * At 1080i, release the setup depth surface once the GPU has detached it and the overlay buffers are ready.
      *
      * @param required Bytes per buffer including DMA padding.
      * @param pitch Packed bytes per row.
@@ -118,6 +130,7 @@ namespace streaming {
 #endif
 
     std::array<std::uint8_t *, 3> buffers_ {};  ///< Two contiguous write-combined YUY2 buffers and an optional spare.
+    GpuBufferCount requestedBufferCount_ = GpuBufferCount::automatic;  ///< Preference used when configuring the DMA buffers.
     std::array<std::uint32_t, 28> savedRegisters_ {};  ///< Overlay state restored on teardown.
     std::array<std::uint8_t, 4> savedCrtcRegisters_ {};  ///< Legacy scanout controls changed by pbkit.
     std::uint32_t savedCrtcConfig_ = 0;  ///< Scanout start-address latching mode before pbkit.

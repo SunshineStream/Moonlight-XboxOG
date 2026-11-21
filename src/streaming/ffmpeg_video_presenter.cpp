@@ -147,8 +147,9 @@ namespace streaming {
     softwareScanoutFailed_ = false;
   }
 
-  void FfmpegVideoPresenter::set_gpu_presentation_enabled(bool enabled) {
+  void FfmpegVideoPresenter::configure_gpu_presentation(bool enabled, GpuBufferCount bufferCount) {
     gpuPresentationEnabled_ = enabled;
+    presenter_.set_buffer_count(bufferCount);
   }
 
   std::string FfmpegVideoPresenter::presentation_path() const {
@@ -271,6 +272,7 @@ namespace streaming {
       return false;
     }
     if (!alreadyPresenting) {
+      logging::info("stream", "GPU presentation using " + std::to_string(presenter_.active_buffer_count()) + " buffers");
       // The GPU now owns scanout. Discard the startup card on the hidden CPU
       // page so a later reset cannot put it back on screen.
       const VIDEO_MODE mode = XVideoGetMode();

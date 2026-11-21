@@ -12,6 +12,13 @@
 #include <vector>
 
 namespace streaming {
+  /** @brief Requested number of YUY2 buffers for GPU presentation. */
+  enum class GpuBufferCount {
+    automatic = 0,  ///< Use the default for the active output mode and source size.
+    two = 2,  ///< Use the required pair of buffers.
+    three = 3,  ///< Try to allocate a spare alongside the required pair.
+  };
+
   /**
    * @brief Color matrices understood by the hardware presentation path.
    */

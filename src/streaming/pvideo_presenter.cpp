@@ -142,6 +142,17 @@ namespace streaming {
     return active_;
   }
 
+  void PvideoPresenter::set_buffer_count(GpuBufferCount count) {
+    requestedBufferCount_ = count;
+  }
+
+  std::size_t PvideoPresenter::active_buffer_count() const {
+    if (!active_) {
+      return 0;
+    }
+    return buffers_.back() == nullptr ? buffers_.size() - 1 : buffers_.size();
+  }
+
   bool PvideoPresenter::initialize_scanout_surface(std::string *error) {
 #ifdef NXDK
     const VIDEO_MODE mode = XVideoGetMode();
@@ -252,13 +263,12 @@ namespace streaming {
     if (!initialize_scanout_surface(&failure)) {
       return;
     }
-    // Bound the extra contiguous allocation to a 720p YUY2 frame and
-    // leave smaller scanout modes and memory-constrained 1080i double-buffered.
-    constexpr std::size_t MAX_SPARE_BYTES = 1280U * 720U * 2U + 64U;
+    constexpr std::size_t MAX_720P_SPARE_BYTES = 1280U * 720U * 2U + 64U;
     const int outputHeight = XVideoGetMode().height;
-    const bool allowSpare = outputHeight == 720 && required <= MAX_SPARE_BYTES;
+    const bool trySpare = requestedBufferCount_ == GpuBufferCount::three ||
+                          (requestedBufferCount_ == GpuBufferCount::automatic && outputHeight == 720 && required <= MAX_720P_SPARE_BYTES);
     const std::size_t requiredBufferCount = buffers_.size() - 1;
-    const std::size_t bufferCount = allowSpare ? buffers_.size() : requiredBufferCount;
+    const std::size_t bufferCount = trySpare ? buffers_.size() : requiredBufferCount;
     decltype(MmGetPhysicalAddress(nullptr)) highestAddress = 0;
     for (std::size_t index = 0; index < bufferCount; ++index) {
       auto *&buffer = buffers_[index];
@@ -274,8 +284,8 @@ namespace streaming {
       highestAddress = std::max(highestAddress, MmGetPhysicalAddress(buffer));
     }
     if (outputHeight == 1080) {
-      // xemu is sensitive to the initial GPU buffer layout. Keep depth
-      // allocated until the background and YUY2 buffers are ready.
+      // Keep depth allocated through the spare allocation. Allocating the
+      // spare after freeing depth slowed playback in xemu.
       moonlight_pb_detach_depth_stencil();
       if (!wait_for_gpu_idle()) {
         failure = "Timed out detaching the GPU depth surface";

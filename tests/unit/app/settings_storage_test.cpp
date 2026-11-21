@@ -130,6 +130,38 @@ namespace {
     EXPECT_NE(invalid.warnings.front().find("streaming.gpu_presentation"), std::string::npos);
   }
 
+  /** @brief Round-trip all GPU buffer choices and default older settings to Auto. */
+  TEST_F(SettingsStorageTest, SavesAndLoadsGpuBufferCount) {
+    using streaming::GpuBufferCount;
+    write_text_file(settingsPath, "[streaming]\nfps = 30\n");
+    const auto oldSettings = app::load_app_settings(settingsPath);
+    EXPECT_EQ(oldSettings.settings.gpuBufferCount, GpuBufferCount::automatic);
+    EXPECT_TRUE(oldSettings.warnings.empty());
+
+    for (const auto count : {GpuBufferCount::automatic, GpuBufferCount::two, GpuBufferCount::three}) {
+      app::AppSettings settings;
+      settings.gpuBufferCount = count;
+      ASSERT_TRUE(app::save_app_settings(settings, settingsPath).success);
+      const auto reloaded = app::load_app_settings(settingsPath);
+      EXPECT_EQ(reloaded.settings.gpuBufferCount, count);
+      EXPECT_TRUE(reloaded.warnings.empty());
+      EXPECT_FALSE(reloaded.cleanupRequired);
+    }
+  }
+
+  /** @brief Accept only the three documented integer values for GPU buffering. */
+  TEST_F(SettingsStorageTest, RejectsInvalidGpuBufferCounts) {
+    for (const auto value : {"-1", "1", "4", "4294967299", "3.0", "'3'", "true"}) {
+      SCOPED_TRACE(value);
+      write_text_file(settingsPath, std::string("[streaming]\ngpu_buffer_count = ") + value + "\n");
+      const auto invalid = app::load_app_settings(settingsPath);
+      EXPECT_EQ(invalid.settings.gpuBufferCount, streaming::GpuBufferCount::automatic);
+      ASSERT_EQ(invalid.warnings.size(), 1U);
+      EXPECT_NE(invalid.warnings.front().find("streaming.gpu_buffer_count"), std::string::npos);
+      EXPECT_FALSE(invalid.cleanupRequired);
+    }
+  }
+
   /** @brief A partial settings file derives bitrate from the saved resolution and active frame rate. */
   TEST_F(SettingsStorageTest, DerivesMissingBitrateFromSavedStreamMode) {
     write_text_file(settingsPath, "[streaming]\nvideo_width = 1280\nvideo_height = 720\nvideo_mode_selected = true\n");

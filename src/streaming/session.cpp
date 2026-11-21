@@ -1662,7 +1662,7 @@ namespace streaming {
       std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps" + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
     );
     resources.mediaBackend.audio_player().configure(settings.audio.mode, settings.audio.playOnXbox);
-    resources.mediaBackend.presentation().set_gpu_presentation_enabled(settings.presentation.gpuPresentation);
+    resources.mediaBackend.presentation().configure_gpu_presentation(settings.presentation.gpuPresentation, settings.presentation.gpuBufferCount);
     logging::info("stream", std::string("Xbox audio mode: ") + (settings.audio.playOnXbox ? audio_mode_label(settings.audio.mode) : "Disabled"));
     logging::debug(
       "stream",

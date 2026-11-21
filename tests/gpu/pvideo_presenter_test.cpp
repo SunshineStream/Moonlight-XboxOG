@@ -56,6 +56,7 @@ namespace {
   struct GpuDepthSurface {
     unsigned int detachments = 0;  ///< Number of times depth detachment was queued.
     unsigned int releases = 0;  ///< Number of times a detached surface was released.
+    std::size_t overlayBuffersAtDetach = 0;  ///< Number of overlay buffers allocated before depth detachment.
     DWORD detachDuration = 0;  ///< Simulated duration of the queued commands.
     DWORD idleTick = 0;  ///< Earliest tick when the GPU reports those commands complete.
   };
@@ -240,14 +241,15 @@ extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout) {
   return hardware().initResult;
 }
 
-/** @brief Queue depth detachment after the GPU background and the two overlay buffers are ready. */
+/** @brief Queue depth detachment after the GPU background and overlay buffers are ready. */
 extern "C" void moonlight_pb_detach_depth_stencil() {
   EXPECT_TRUE(hardware().staticScanout);
   EXPECT_TRUE(hardware().backgroundCleared);
-  EXPECT_EQ(hardware().allocations.size(), 2U);
+  EXPECT_GE(hardware().allocations.size(), 2U);
   EXPECT_EQ(VIDEOREG(VIDEO_BUFFER), 0U);
   auto &depth = hardware().depthSurface;
   ++depth.detachments;
+  depth.overlayBuffersAtDetach = hardware().allocations.size();
   depth.idleTick = hardware().ticks + depth.detachDuration;
 }
 
@@ -646,21 +648,70 @@ TEST_F(PvideoPresenterTest, TimesOutWhenVblankCannotRetireThePreviousBuffer) {
   EXPECT_TRUE(hardware().allocations.empty());
 }
 
-/** @brief Set up RGB565 scanout and release depth once, after the GPU finishes detaching it. */
+/** @brief Apply Auto and explicit buffer counts at each output resolution. */
+TEST_F(PvideoPresenterTest, SelectsGpuBufferCountAcrossOutputModes) {
+  using streaming::GpuBufferCount;
+  for (const auto &mode : {VIDEO_MODE {640, 480, 32, 60}, VIDEO_MODE {1280, 720, 32, 60}, VIDEO_MODE {1920, 1080, 16, 60}}) {
+    hardware().mode = mode;
+    hardware().pitch = mode.width * (mode.bpp / 8);
+    for (const auto count : {GpuBufferCount::automatic, GpuBufferCount::two, GpuBufferCount::three}) {
+      SCOPED_TRACE(mode.height);
+      SCOPED_TRACE(static_cast<int>(count));
+      streaming::PvideoPresenter presenter;
+      presenter.set_buffer_count(count);
+      EXPECT_EQ(presenter.active_buffer_count(), 0U);
+
+      std::string error;
+      ASSERT_TRUE(presenter.present(frame(), {0, 0, mode.width, mode.height}, &error)) << error;
+      const auto expected = count == GpuBufferCount::three || (count == GpuBufferCount::automatic && mode.height == 720) ? 3U : 2U;
+      EXPECT_EQ(hardware().allocations.size(), expected);
+      EXPECT_EQ(presenter.active_buffer_count(), expected);
+      ASSERT_TRUE(presenter.reset());
+      EXPECT_EQ(presenter.active_buffer_count(), 0U);
+    }
+  }
+}
+
+/** @brief Release depth after GPU detachment and after allocating the requested 1080i spare. */
 TEST_F(PvideoPresenterTest, RetiresDepthBeforeSubmitting1080iOverlay) {
   hardware().mode = {1920, 1080, 16, 60};
   hardware().pitch = 1920 * 2;
   hardware().depthSurface.detachDuration = 3;
   const streaming::VideoRectangle output {0, 0, 1920, 1080};
   streaming::PvideoPresenter presenter;
+  presenter.set_buffer_count(streaming::GpuBufferCount::three);
   std::string error;
   ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
   EXPECT_EQ(VIDEOREG(0x8950), 1920U | (1080U << 16U));
+  EXPECT_EQ(hardware().allocations.size(), 3U);
   EXPECT_TRUE(hardware().backgroundCleared);
   EXPECT_TRUE(hardware().staticScanout);
   ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
   EXPECT_EQ(hardware().depthSurface.detachments, 1U);
   EXPECT_EQ(hardware().depthSurface.releases, 1U);
+  EXPECT_EQ(hardware().depthSurface.overlayBuffersAtDetach, 3U);
+}
+
+/** @brief Keep 1080i GPU presentation double-buffered if the optional allocation fails. */
+TEST_F(PvideoPresenterTest, ReusesTwo1080iBuffersWhenTheSpareAllocationFails) {
+  hardware().mode = {1920, 1080, 16, 60};
+  hardware().pitch = 1920 * 2;
+  hardware().allocationsUntilFailure = 2;
+  const streaming::VideoRectangle output {0, 0, 1920, 1080};
+  streaming::PvideoPresenter presenter;
+  presenter.set_buffer_count(streaming::GpuBufferCount::three);
+  std::string error;
+
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
+  const auto first = VIDEOREG(VIDEO_ADDRESS);
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
+  EXPECT_NE(VIDEOREG(VIDEO_ADDRESS), first);
+  ASSERT_TRUE(presenter.present(frame(), output, &error)) << error;
+  EXPECT_EQ(VIDEOREG(VIDEO_ADDRESS), first);
+  EXPECT_EQ(hardware().allocations.size(), 2U);
+  EXPECT_EQ(presenter.active_buffer_count(), 2U);
+  EXPECT_EQ(hardware().depthSurface.releases, 1U);
+  EXPECT_EQ(hardware().depthSurface.overlayBuffersAtDetach, 2U);
 }
 
 /** @brief Leave depth cleanup to pbkit and keep CPU output visible if detaching depth times out. */
