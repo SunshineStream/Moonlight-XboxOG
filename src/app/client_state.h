@@ -78,6 +78,17 @@ namespace app {
     right,  ///< Dock the log viewer on the right side of the split layout.
   };
 
+  /**
+   * @brief Video codec preference applied to new streaming sessions.
+   */
+  enum class VideoCodecSelection {
+    preferMpeg2,  ///< Prefer advertised MPEG-2, with normal negotiation available as a fallback.
+    autoDetect,  ///< Negotiate supported codecs using the shared modern-first preference order.
+    h264,  ///< Request only H.264 video.
+    mpeg2,  ///< Request only MPEG-2/H.262 video.
+    h263p,  ///< Request only H.263+ video.
+  };
+
   inline constexpr int DEFAULT_STREAM_FRAMERATE = 60;  ///< Stream frame rate at the default 640x480 resolution.
   inline constexpr int DEFAULT_STREAM_BITRATE_KBPS = 3000;  ///< Bitrate for the default 640x480, 60 FPS profile.
   inline constexpr bool DEFAULT_GPU_PRESENTATION = true;  ///< Default to NV2A presentation with software fallback.
@@ -387,9 +398,10 @@ namespace app {
   };
 
   /**
-   * @brief Preferences for presenting decoded video and its on-screen statistics.
+   * @brief Preferences for decoding and presenting video in new streams.
    */
-  struct VideoPresentationPreferences {
+  struct StreamVideoPreferences {
+    VideoCodecSelection codec = VideoCodecSelection::preferMpeg2;  ///< Preferred video codec for new streams.
     bool gpuPresentation = DEFAULT_GPU_PRESENTATION;  ///< Use NV2A presentation with software fallback on new streams.
     bool showPerformanceStats = false;  ///< Display live performance telemetry and include it in the stream summary.
     streaming::GpuBufferCount gpuBufferCount = streaming::GpuBufferCount::automatic;  ///< YUY2 buffer preference for new GPU streams.
@@ -419,7 +431,7 @@ namespace app {
     bool preferredVideoModeSet = false;  ///< True when preferredVideoMode contains a user-selected or default mode.
     int streamFramerate = DEFAULT_STREAM_FRAMERATE;  ///< Preferred stream frame rate in frames per second.
     int streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;  ///< Preferred stream bitrate in kilobits per second.
-    VideoPresentationPreferences presentation;  ///< Presentation path and statistics overlay preferences.
+    StreamVideoPreferences video;  ///< Codec, presentation path, and statistics overlay preferences.
     AudioPlaybackPreferences audio;  ///< Host and Xbox playback preferences.
     LocalStreamPreferences controls;  ///< Screenshot storage and keyboard placement preferences.
     bool dirty = false;  ///< True when persisted TOML-backed settings changed and should be saved.

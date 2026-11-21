@@ -47,6 +47,7 @@
 #include "src/streaming/ffmpeg_stream_backend.h"
 #include "src/streaming/stats_overlay.h"
 #include "src/streaming/stream_controls.h"
+#include "src/streaming/video_codec_selection.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/sdl_render.h"
 #include "src/ui/shell_layout.h"
@@ -199,9 +200,10 @@ namespace {
   };
 
   struct ResolvedStreamParameters {
-    VIDEO_MODE videoMode {};
+    VIDEO_MODE videoMode {};  ///< Stream mode requested from the host.
     int fps = app::DEFAULT_STREAM_FRAMERATE;
     int bitrateKbps = app::DEFAULT_STREAM_BITRATE_KBPS;
+    app::VideoCodecSelection videoCodec = app::VideoCodecSelection::preferMpeg2;  ///< Decoder preference resolved against host capabilities after launch.
     int packetSize = DEFAULT_PACKET_SIZE;
     int streamingRemotely = STREAM_CFG_AUTO;
   };
@@ -778,6 +780,29 @@ namespace {
   }
 
   /**
+   * @brief Describe a codec preference for logs and waiting screens.
+   *
+   * @param selection Codec preference selected in settings.
+   * @return Human-readable codec preference.
+   */
+  const char *describe_video_codec_selection(app::VideoCodecSelection selection) {
+    switch (selection) {
+      case app::VideoCodecSelection::preferMpeg2:
+        return "Auto (Prefer MPEG-2)";
+      case app::VideoCodecSelection::autoDetect:
+        return "Auto";
+      case app::VideoCodecSelection::h264:
+        return "H.264";
+      case app::VideoCodecSelection::mpeg2:
+        return "MPEG-2/H.262";
+      case app::VideoCodecSelection::h263p:
+        return "H.263+";
+    }
+
+    return "Auto";
+  }
+
+  /**
    * @brief Resolve the effective stream parameters for the next session.
    *
    * @param fallbackVideoMode Active shell output mode.
@@ -789,10 +814,20 @@ namespace {
     resolved.videoMode = select_effective_stream_video_mode(fallbackVideoMode, settings);
     resolved.fps = select_stream_fps(settings);
     resolved.bitrateKbps = select_stream_bitrate_kbps(settings);
+    resolved.videoCodec = settings.video.codec;
 
     return resolved;
   }
 
+  /**
+   * @brief Prepare connection settings and resolve the initial codec choice against the host's capabilities.
+   * @param launchResult Host capabilities and endpoint returned by launch or resume.
+   * @param remoteInputKey Encryption key for controller and keyboard traffic.
+   * @param remoteInputIv Initialization vector for remote input encryption.
+   * @param outputVideoMode Current Xbox scanout mode.
+   * @param streamParameters Requested video mode, frame rate, bitrate, and codec.
+   * @param context Stream startup context receiving the resolved settings.
+   */
   void configure_stream_start_context(
     const network::StreamLaunchResult &launchResult,
     const std::array<unsigned char, 16> &remoteInputKey,
@@ -832,7 +867,7 @@ namespace {
     context->streamConfiguration.packetSize = streamParameters.packetSize;
     context->streamConfiguration.streamingRemotely = streamParameters.streamingRemotely;
     context->streamConfiguration.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
-    context->streamConfiguration.supportedVideoFormats = VIDEO_FORMAT_H264;
+    context->streamConfiguration.supportedVideoFormats = streaming::supported_video_formats(streamParameters.videoCodec, launchResult.serverCodecModeSupport);
     context->streamConfiguration.clientRefreshRateX100 = select_client_refresh_rate_x100(outputVideoMode);
     context->streamConfiguration.colorSpace = COLORSPACE_REC_601;
     context->streamConfiguration.colorRange = COLOR_RANGE_LIMITED;
@@ -1353,18 +1388,42 @@ namespace {
     return false;
   }
 
-  bool should_retry_stream_without_rtsp_session_url(const StreamStartContext &startContext, const StreamConnectionState &connectionState) {
-    return !connectionState.stopRequested.load() && !connectionState.connectionStarted.load() && connectionState.failedStage.load() == STAGE_RTSP_HANDSHAKE && !startContext.rtspSessionUrl.empty();
+  /**
+   * @brief Check whether negotiation ended in RTSP before playback and without a local cancellation.
+   * @param connectionState Completed connection attempt.
+   * @return True when a retry is permissible.
+   */
+  bool can_retry_rtsp_handshake(const StreamConnectionState &connectionState) {
+    return !connectionState.stopRequested.load() && !connectionState.connectionStarted.load() && connectionState.failedStage.load() == STAGE_RTSP_HANDSHAKE;
   }
 
-  bool run_stream_start_with_rtsp_fallback(const StreamStartAttemptContext &attempt, bool *rtspFallbackAttempted) {
+  /**
+   * @brief Start transport with one retry per applicable RTSP fallback.
+   *
+   * A failed preferred MPEG-2 handshake can retry with standard codec negotiation.
+   *
+   * @param attempt Stream startup state and UI resources.
+   * @param videoCodec User's requested codec selection.
+   * @param rtspFallbackAttempted Receives whether default RTSP discovery was attempted.
+   * @return True when the transport thread ran, including connection failures reported in the state.
+   */
+  bool run_stream_start_with_rtsp_fallback(const StreamStartAttemptContext &attempt, app::VideoCodecSelection videoCodec, bool *rtspFallbackAttempted) {
     if (rtspFallbackAttempted != nullptr) {
       *rtspFallbackAttempted = false;
     }
     if (!run_stream_start_attempt(attempt)) {
       return false;
     }
-    if (!should_retry_stream_without_rtsp_session_url(attempt.startContext, attempt.connectionState)) {
+    if (auto &videoFormats = attempt.startContext.streamConfiguration.supportedVideoFormats; videoCodec == app::VideoCodecSelection::preferMpeg2 && videoFormats == VIDEO_FORMAT_MPEG2 && can_retry_rtsp_handshake(attempt.connectionState)) {
+      logging::warn("stream", "MPEG-2 handshake failed; retrying with standard codec negotiation");
+      attempt.resources.mediaBackend.shutdown();
+      videoFormats = streaming::supported_video_formats(app::VideoCodecSelection::autoDetect, attempt.startContext.serverInformation.serverCodecModeSupport);
+      reset_connection_state(&attempt.connectionState);
+      if (!run_stream_start_attempt(attempt)) {
+        return false;
+      }
+    }
+    if (!can_retry_rtsp_handshake(attempt.connectionState) || attempt.startContext.rtspSessionUrl.empty()) {
       return true;
     }
 
@@ -1573,7 +1632,7 @@ namespace streaming {
       resources.pendingVideoMode = streamPresentationVideoMode;
     }
     resources.startupTick = sessionStarted;
-    resources.statisticsEnabled = settings.presentation.showPerformanceStats;
+    resources.statisticsEnabled = settings.video.showPerformanceStats;
     std::string initializationError;
     const bool fontsReady = initialize_stream_fonts(startupVideoMode, resources, initializationError);
 #ifdef NXDK
@@ -1659,10 +1718,10 @@ namespace streaming {
     );
     logging::info(
       "stream",
-      std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps" + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
+      std::string("Requested stream configuration | resolution=") + std::to_string(startContext.streamConfiguration.width) + "x" + std::to_string(startContext.streamConfiguration.height) + " | fps=" + std::to_string(startContext.streamConfiguration.fps) + " | bitrate=" + std::to_string(startContext.streamConfiguration.bitrate) + " kbps | decoder=" + describe_video_codec_selection(settings.video.codec) + " | packetSize=" + std::to_string(startContext.streamConfiguration.packetSize) + " | networkProfile=" + describe_streaming_remotely_mode(startContext.streamConfiguration.streamingRemotely) + " | clientRefreshX100=" + std::to_string(startContext.streamConfiguration.clientRefreshRateX100)
     );
     resources.mediaBackend.audio_player().configure(settings.audio.mode, settings.audio.playOnXbox);
-    resources.mediaBackend.presentation().configure_gpu_presentation(settings.presentation.gpuPresentation, settings.presentation.gpuBufferCount);
+    resources.mediaBackend.presentation().configure_gpu_presentation(settings.video.gpuPresentation, settings.video.gpuBufferCount);
     logging::info("stream", std::string("Xbox audio mode: ") + (settings.audio.playOnXbox ? audio_mode_label(settings.audio.mode) : "Disabled"));
     logging::debug(
       "stream",
@@ -1682,7 +1741,7 @@ namespace streaming {
     startContext.connectionCallbacks.logMessage = on_log_message;
 
     bool rtspFallbackAttempted = false;
-    if (const StreamStartAttemptContext startAttempt {host, app, startContext, connectionState, resources, report.message}; !run_stream_start_with_rtsp_fallback(startAttempt, &rtspFallbackAttempted)) {
+    if (const StreamStartAttemptContext startAttempt {host, app, startContext, connectionState, resources, report.message}; !run_stream_start_with_rtsp_fallback(startAttempt, settings.video.codec, &rtspFallbackAttempted)) {
       return false;
     }
 

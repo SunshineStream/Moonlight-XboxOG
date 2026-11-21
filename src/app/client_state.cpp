@@ -34,6 +34,13 @@ namespace {
   constexpr std::array<char, 10> ADD_HOST_PORT_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr std::array<int, 6> STREAM_FRAMERATE_OPTIONS {15, 20, 24, 25, 30, 60};
   constexpr std::array<int, 24> STREAM_BITRATE_OPTIONS {500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000, 19000, 20000};
+  constexpr std::array<app::VideoCodecSelection, 5> VIDEO_CODEC_OPTIONS {
+    app::VideoCodecSelection::preferMpeg2,
+    app::VideoCodecSelection::autoDetect,
+    app::VideoCodecSelection::h264,
+    app::VideoCodecSelection::mpeg2,
+    app::VideoCodecSelection::h263p,
+  };
 
   /**
    * @brief Describes the keypad characters available for the active add-host field.
@@ -176,6 +183,29 @@ namespace {
   }
 
   /**
+   * @brief Return the settings label for one video codec preference.
+   *
+   * @param selection Codec preference to describe.
+   * @return User-facing codec preference label.
+   */
+  const char *video_codec_selection_label(app::VideoCodecSelection selection) {
+    switch (selection) {
+      case app::VideoCodecSelection::preferMpeg2:
+        return "Auto (Prefer MPEG-2)";
+      case app::VideoCodecSelection::autoDetect:
+        return "Auto";
+      case app::VideoCodecSelection::h264:
+        return "H.264";
+      case app::VideoCodecSelection::mpeg2:
+        return "MPEG-2/H.262";
+      case app::VideoCodecSelection::h263p:
+        return "H.263+";
+    }
+
+    return "Auto";
+  }
+
+  /**
    * @brief Return the selected stream-resolution index inside the detected mode list.
    *
    * @param state Current client state containing the preferred mode.
@@ -250,6 +280,22 @@ namespace {
   void cycle_stream_bitrate(app::ClientState &state) {
     const auto next = std::upper_bound(STREAM_BITRATE_OPTIONS.begin(), STREAM_BITRATE_OPTIONS.end(), state.settings.streamBitrateKbps);
     state.settings.streamBitrateKbps = next == STREAM_BITRATE_OPTIONS.end() ? STREAM_BITRATE_OPTIONS.front() : *next;
+  }
+
+  /**
+   * @brief Advance the preferred video codec to the next supported option.
+   *
+   * @param state Current client state containing the preferred codec.
+   */
+  void cycle_video_codec(app::ClientState &state) {
+    const auto current = std::find(VIDEO_CODEC_OPTIONS.begin(), VIDEO_CODEC_OPTIONS.end(), state.settings.video.codec);
+    if (current == VIDEO_CODEC_OPTIONS.end()) {
+      state.settings.video.codec = VIDEO_CODEC_OPTIONS.front();
+      return;
+    }
+
+    const std::size_t nextIndex = (static_cast<std::size_t>(std::distance(VIDEO_CODEC_OPTIONS.begin(), current)) + 1U) % VIDEO_CODEC_OPTIONS.size();
+    state.settings.video.codec = VIDEO_CODEC_OPTIONS[nextIndex];
   }
 
   std::string pairing_reset_endpoint_key(std::string_view address, uint16_t port) {
@@ -621,20 +667,26 @@ namespace {
             true,
           },
           {
+            "cycle-video-codec",
+            std::string("Video Codec: ") + video_codec_selection_label(state.settings.video.codec),
+            "Prefer MPEG-2 for faster decoding, use standard automatic negotiation, or request a specific codec.",
+            true,
+          },
+          {
             "toggle-gpu-presentation",
-            std::string("Video Presentation: ") + (state.settings.presentation.gpuPresentation ? "GPU" : "Software"),
+            std::string("Video Presentation: ") + (state.settings.video.gpuPresentation ? "GPU" : "Software"),
             "Choose how new streams display decoded video. GPU uses NV2A with automatic software fallback. Software can be faster in xemu.",
             true,
           },
           {
             "cycle-gpu-buffer-count",
-            std::string("GPU Video Buffers: ") + gpu_buffer_count_label(state.settings.presentation.gpuBufferCount),
+            std::string("GPU Video Buffers: ") + gpu_buffer_count_label(state.settings.video.gpuBufferCount),
             "Choose Auto, 2, or 3 buffers for GPU presentation on new streams. Auto tries three at 720p. The third buffer needs extra RAM.",
             true,
           },
           {
             "toggle-show-performance-stats",
-            std::string("Performance Stats: ") + (state.settings.presentation.showPerformanceStats ? "On" : "Off"),
+            std::string("Performance Stats: ") + (state.settings.video.showPerformanceStats ? "On" : "Off"),
             "Show performance statistics during playback and after the stream ends.",
             true,
           },
@@ -2508,7 +2560,7 @@ namespace app {
    * @return True when the activated row changed a presentation preference.
    */
   bool handle_presentation_setting_activation(ClientState &state, const std::string &itemId, AppUpdate &update) {
-    auto &presentation = state.settings.presentation;
+    auto &presentation = state.settings.video;
     if (itemId == "toggle-gpu-presentation") {
       presentation.gpuPresentation = !presentation.gpuPresentation;
       state.shell.statusMessage = std::string("Video presentation set to ") + (presentation.gpuPresentation ? "GPU" : "Software");
@@ -2594,6 +2646,14 @@ namespace app {
       update->persistence.settingsChanged = true;
       state.shell.statusMessage = std::string("Stream bitrate set to ") + app::format_stream_bitrate_mbps(state.settings.streamBitrateKbps);
       rebuild_menu(state, "cycle-stream-bitrate");
+      return;
+    }
+    if (detailUpdate.activatedItemId == "cycle-video-codec") {
+      cycle_video_codec(state);
+      state.settings.dirty = true;
+      update->persistence.settingsChanged = true;
+      state.shell.statusMessage = std::string("Video codec set to ") + video_codec_selection_label(state.settings.video.codec);
+      rebuild_menu(state, "cycle-video-codec");
       return;
     }
     if (handle_presentation_setting_activation(state, detailUpdate.activatedItemId, *update)) {
