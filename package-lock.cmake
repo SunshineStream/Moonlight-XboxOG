@@ -32,23 +32,28 @@
 # - `set(EXAMPLE_SHA256 <sha256>)`
 # - `CPMDeclarePackage(...)`
 
+# Use a fresh checkout when the upstream revision or a local patch changes.
+function(_moonlight_patched_source_dir out_var name revision patch)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${patch}")
+    file(SHA256 "${patch}" patch_hash)
+    string(SUBSTRING "${revision}" 0 12 revision_id)
+    string(SUBSTRING "${patch_hash}" 0 12 patch_id)
+    set(${out_var} "${FETCHCONTENT_BASE_DIR}/${name}-${revision_id}-${patch_id}-src" PARENT_SCOPE)
+endfunction()
+
 # FFmpeg, cross-compiled with its upstream configure script.
 # renovate: datasource=github-tags depName=FFmpeg/FFmpeg versioning=semver-coerced
 # extractVersion=^n(?<version>\d+\.\d+(?:\.\d+)?)$
 set(FFMPEG_VERSION 9.1)
 set(FFMPEG_NXDK_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch")
-# Keep each version and patch revision in a separate checkout so FetchContent
-# never reapplies patches on top of a previously patched source tree.
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${FFMPEG_NXDK_PATCH}")
-file(SHA256 "${FFMPEG_NXDK_PATCH}" ffmpeg_patch_hash)
-string(SUBSTRING "${ffmpeg_patch_hash}" 0 12 ffmpeg_patch_id)
+_moonlight_patched_source_dir(FFMPEG_XBOX_SOURCE_DIR ffmpeg "${FFMPEG_VERSION}" "${FFMPEG_NXDK_PATCH}")
 CPMDeclarePackage(ffmpeg
         NAME ffmpeg
         VERSION ${FFMPEG_VERSION}
         GIT_REPOSITORY https://github.com/FFmpeg/FFmpeg.git
         GIT_TAG n${FFMPEG_VERSION}
         GIT_SHALLOW TRUE
-        SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/ffmpeg-${FFMPEG_VERSION}-${ffmpeg_patch_id}-src"
+        SOURCE_DIR "${FFMPEG_XBOX_SOURCE_DIR}"
         # Preserve LF endings in the upstream shell scripts on Windows.
         GIT_CONFIG core.autocrlf=false
         UPDATE_DISCONNECTED YES
@@ -73,10 +78,12 @@ CPMDeclarePackage(lucide
 # ref=master
 set(NXDK_SDL3_COMMIT 62455b72ac80d318961c05c1230ffcb471e9f2d4)
 set(NXDK_SDL3_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/nxdk-sdl3.patch")
+_moonlight_patched_source_dir(NXDK_SDL3_SOURCE_DIR nxdk_sdl3 "${NXDK_SDL3_COMMIT}" "${NXDK_SDL3_PATCH}")
 CPMDeclarePackage(nxdk_sdl3
         NAME nxdk_sdl3
         GIT_REPOSITORY https://github.com/Ryzee119/nxdk-sdl3.git
         GIT_TAG ${NXDK_SDL3_COMMIT}
+        SOURCE_DIR "${NXDK_SDL3_SOURCE_DIR}"
         GIT_CONFIG core.autocrlf=false
         UPDATE_DISCONNECTED YES
         PATCHES "${NXDK_SDL3_PATCH}"
