@@ -250,16 +250,14 @@ namespace streaming {
     // leave smaller scanout modes and memory-constrained 1080i double-buffered.
     constexpr std::size_t MAX_SPARE_BYTES = 1280U * 720U * 2U + 64U;
     const bool allowSpare = XVideoGetMode().height == 720 && required <= MAX_SPARE_BYTES;
+    const std::size_t requiredBufferCount = buffers_.size() - 1;
+    const std::size_t bufferCount = allowSpare ? buffers_.size() : requiredBufferCount;
     decltype(MmGetPhysicalAddress(nullptr)) highestAddress = 0;
-    for (std::size_t index = 0; index < buffers_.size(); ++index) {
-      const bool spare = index == buffers_.size() - 1;
-      if (spare && !allowSpare) {
-        break;
-      }
+    for (std::size_t index = 0; index < bufferCount; ++index) {
       auto *&buffer = buffers_[index];
       buffer = static_cast<std::uint8_t *>(MmAllocateContiguousMemoryEx(required, 0, 0x03ffffff, 64, PAGE_READWRITE | PAGE_WRITECOMBINE));
       if (buffer == nullptr) {
-        if (!spare) {
+        if (index < requiredBufferCount) {
           failure = "Not enough contiguous memory for GPU presentation";
           return;
         }

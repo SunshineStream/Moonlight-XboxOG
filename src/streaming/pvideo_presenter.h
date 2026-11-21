@@ -82,7 +82,7 @@ namespace streaming {
 
 #ifdef NXDK
     /**
-     * @brief Replace the scanout surface and allocate two overlay buffers, plus a spare when supported.
+     * @brief Replace the scanout surface and allocate the required buffers plus an optional 720p spare.
      * @param required Bytes per buffer including DMA padding.
      * @param pitch Packed bytes per row.
      * @param failure Receives the reason setup failed, if any.
