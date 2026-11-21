@@ -67,13 +67,18 @@ namespace {
     std::uint32_t physicalAddress;  ///< Simulated bus address.
   };
 
+  /** @brief Store indexed VGA registers and their active selector together. */
+  struct IndexedVgaRegisters {
+    std::array<std::uint8_t, 256> values {};  ///< Indexed VGA register values.
+    std::uint8_t index = 0;  ///< Active VGA selector.
+  };
+
   /**
    * @brief Mutable fake hardware, reset independently for each lifecycle test.
    */
   struct Hardware {
     std::array<std::uint32_t, 0x700000 / 4> registers {};  ///< MMIO storage.
-    std::array<std::uint8_t, 256> crtc {};  ///< Indexed VGA registers.
-    std::uint8_t crtcIndex = 0;  ///< Active VGA selector.
+    IndexedVgaRegisters vga;  ///< Indexed VGA state.
     std::array<unsigned char, 640 * 480 * 4> framebuffer {};  ///< CPU-owned framebuffer.
     std::array<std::uint32_t, 640 * 480> gpuBuffer {};  ///< Separate GPU-owned scanout.
     VIDEO_MODE mode {640, 480, 32, 60};  ///< Active output mode.
@@ -113,8 +118,7 @@ namespace {
      */
     void SetUp() override {
       hardware().registers.fill(0);
-      hardware().crtc.fill(0);
-      hardware().crtcIndex = 0;
+      hardware().vga = {};
       hardware().mode = {640, 480, 32, 60};
       hardware().ticks = 0;
       hardware().gpuVblank = {};
@@ -166,7 +170,8 @@ std::uint32_t &pvideo_test_register(std::uint32_t address) {
 }
 
 std::uint8_t &pvideo_test_register8(std::uint32_t address) {
-  return address == 0x6013d4 ? hardware().crtcIndex : hardware().crtc.at(hardware().crtcIndex);
+  auto &vga = hardware().vga;
+  return address == 0x6013d4 ? vga.index : vga.values.at(vga.index);
 }
 
 VIDEO_MODE XVideoGetMode() {
@@ -229,10 +234,10 @@ extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout) {
   ++hardware().initializations;
   hardware().staticScanout = static_scanout;
   hardware().originalStart = VIDEOREG(CRTC_START);
-  hardware().crtc[31] = 87;
-  hardware().crtc[82] += 4;
-  hardware().crtc[32] = 41;
-  hardware().crtc[27] = 5;
+  hardware().vga.values[31] = 87;
+  hardware().vga.values[82] += 4;
+  hardware().vga.values[32] = 41;
+  hardware().vga.values[27] = 5;
   VIDEOREG(0x8910) = 0x1000;
   VIDEOREG(0x600804) = 2;
   if (hardware().initResult != 0) {
@@ -743,7 +748,7 @@ TEST_F(PvideoPresenterTest, RestoresOutputAndRegistersAcrossRepeatedSessions) {
   constexpr std::array<int, 4> crtcRegisters {31, 82, 32, 27};
   const std::array<std::uint8_t, 4> originalCrtc {13, 14, 15, 16};
   for (std::size_t index = 0; index < originalCrtc.size(); ++index) {
-    hardware().crtc[crtcRegisters[index]] = originalCrtc[index];
+    hardware().vga.values[crtcRegisters[index]] = originalCrtc[index];
   }
   VIDEOREG(0x8910) = 0x2000;
   VIDEOREG(0x600800) = 0x3eb4000;
@@ -764,7 +769,7 @@ TEST_F(PvideoPresenterTest, RestoresOutputAndRegistersAcrossRepeatedSessions) {
     EXPECT_TRUE(hardware().videoEnabled);
     EXPECT_TRUE(hardware().allocations.empty());
     for (std::size_t index = 0; index < originalCrtc.size(); ++index) {
-      EXPECT_EQ(hardware().crtc[crtcRegisters[index]], originalCrtc[index]);
+      EXPECT_EQ(hardware().vga.values[crtcRegisters[index]], originalCrtc[index]);
     }
   }
   EXPECT_EQ(hardware().initializations, 2);

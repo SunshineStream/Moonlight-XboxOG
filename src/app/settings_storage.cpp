@@ -328,6 +328,26 @@ namespace {
   }
 
   /**
+   * @brief Load a supported GPU buffer count and retain the default for missing or invalid values.
+   *
+   * @param node TOML node to parse.
+   * @param filePath Settings file path used in warnings.
+   * @param result Settings and warnings updated by the load.
+   */
+  void load_gpu_buffer_count(toml::node_view<const toml::node> node, const std::string &filePath, app::LoadAppSettingsResult &result) {
+    if (!node) {
+      return;
+    }
+
+    using streaming::GpuBufferCount;
+    if (const auto count = node.value_exact<std::int64_t>(); count && (*count == static_cast<int>(GpuBufferCount::automatic) || *count == static_cast<int>(GpuBufferCount::two) || *count == static_cast<int>(GpuBufferCount::three))) {
+      result.settings.gpuBufferCount = static_cast<GpuBufferCount>(*count);
+    } else {
+      append_invalid_value_warning(&result.warnings, filePath, "streaming.gpu_buffer_count", "<expected 0, 2 or 3>");
+    }
+  }
+
+  /**
    * @brief Serialize the saved settings, including the selected audio mode.
    * @param settings Settings snapshot to serialize.
    * @return TOML text for the settings file.
@@ -513,14 +533,7 @@ namespace app {
     load_integer_setting(settingsTable["streaming"]["bitrate_kbps"], filePath, "streaming.bitrate_kbps", &result.settings.streamBitrateKbps, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_pc"], filePath, "streaming.play_audio_on_pc", &result.settings.playAudioOnPc, &result.warnings);
     load_boolean_setting(settingsTable["streaming"]["gpu_presentation"], filePath, "streaming.gpu_presentation", &result.settings.gpuPresentation, &result.warnings);
-    if (const auto node = settingsTable["streaming"]["gpu_buffer_count"]; node) {
-      using streaming::GpuBufferCount;
-      if (const auto count = node.value_exact<std::int64_t>(); count && (*count == static_cast<int>(GpuBufferCount::automatic) || *count == static_cast<int>(GpuBufferCount::two) || *count == static_cast<int>(GpuBufferCount::three))) {
-        result.settings.gpuBufferCount = static_cast<GpuBufferCount>(*count);
-      } else {
-        append_invalid_value_warning(&result.warnings, filePath, "streaming.gpu_buffer_count", "<expected 0, 2 or 3>");
-      }
-    }
+    load_gpu_buffer_count(settingsTable["streaming"]["gpu_buffer_count"], filePath, result);
     load_boolean_setting(settingsTable["streaming"]["play_audio_on_xbox"], filePath, "streaming.play_audio_on_xbox", &result.settings.playAudioOnXbox, &result.warnings);
     if (const auto audioModeNode = settingsTable["streaming"]["audio_mode"]; audioModeNode) {
       const auto key = audioModeNode.value<std::string_view>();
