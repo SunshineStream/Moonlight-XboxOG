@@ -23,6 +23,7 @@
 
 // lib includes
 #include <Limelight.h>
+#include <openssl/asn1.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -75,28 +76,6 @@ using SOCKET = int;  ///< Native socket handle type used on nxdk and POSIX build
      */
     #define SOCKET_ERROR (-1)
   #endif
-#endif
-
-/**
- * @brief Suppress deprecated OpenSSL APIs used for compatibility with bundled dependencies.
- */
-#define OPENSSL_SUPPRESS_DEPRECATED
-
-#ifdef NXDK
-  /**
-   * @brief Request the rand_s prototype on nxdk builds.
-   */
-  #define _CRT_RAND_S
-#endif
-
-#ifdef NXDK
-/**
- * @brief Fill a buffer with secure random bytes using the nxdk compatibility entry point.
- *
- * @param randomValue Output integer populated with secure random bits.
- * @return Zero on success, or a non-zero platform error code on failure.
- */
-extern "C" int rand_s(unsigned int *randomValue);
 #endif
 
 namespace {
@@ -302,26 +281,6 @@ namespace {
       }
     }
   };
-
-#ifdef NXDK
-  /** @brief Release the RSA key used by the bundled Xbox pairing implementation. */
-  struct RsaDeleter {
-    void operator()(RSA *rsa) const {
-      if (rsa != nullptr) {
-        RSA_free(rsa);
-      }
-    }
-  };
-
-  /** @brief Release the RSA exponent used during Xbox key generation. */
-  struct BignumDeleter {
-    void operator()(BIGNUM *value) const {
-      if (value != nullptr) {
-        BN_free(value);
-      }
-    }
-  };
-#endif
 
   struct MdCtxDeleter {
     void operator()(EVP_MD_CTX *context) const {
@@ -721,86 +680,12 @@ namespace {
     return append_error(errorMessage, std::move(message));
   }
 
-  void initialize_openssl() {
-    static bool initialized = false;
-    if (!initialized) {
-      SSL_library_init();
-      SSL_load_error_strings();
-      OpenSSL_add_all_algorithms();
-      initialized = true;
-    }
-  }
-
-#ifdef NXDK
-  int nxdk_rand_seed(const void *, int) {  // NOSONAR(cpp:S5008) signature required by OpenSSL RAND_METHOD
-    return 1;
-  }
-
-  int nxdk_rand_bytes(unsigned char *buffer, int size) {
-    if (buffer == nullptr || size < 0) {
-      return 0;
-    }
-
-    int offset = 0;
-    while (offset < size) {
-      unsigned int randomWord = 0;
-      if (::rand_s(&randomWord) != 0) {
-        return 0;
-      }
-
-      const int chunkSize = std::min<int>(static_cast<int>(sizeof(randomWord)), size - offset);
-      std::memcpy(buffer + offset, &randomWord, static_cast<std::size_t>(chunkSize));
-      offset += chunkSize;
-    }
-
-    return 1;
-  }
-
-  void nxdk_rand_cleanup() {
-    // intentionally empty - no cleanup required for nxdk random method
-  }
-
-  int nxdk_rand_add(const void *, int, double) {  // NOSONAR(cpp:S5008) signature required by OpenSSL RAND_METHOD
-    return 1;
-  }
-
-  int nxdk_rand_status() {
-    return 1;
-  }
-
-  const RAND_METHOD g_nxdk_rand_method = {
-    &nxdk_rand_seed,
-    &nxdk_rand_bytes,
-    &nxdk_rand_cleanup,
-    &nxdk_rand_add,
-    &nxdk_rand_bytes,
-    &nxdk_rand_status,
-  };
-
-  bool ensure_nxdk_rand_method(std::string *errorMessage) {
-    static bool configured = false;
-    if (configured) {
-      return true;
-    }
-
-    ERR_clear_error();
-    if (RAND_set_rand_method(&g_nxdk_rand_method) != 1) {
-      return append_openssl_error(errorMessage, "Failed to install the Xbox OpenSSL random source");
-    }
-
-    configured = true;
-    take_openssl_error_queue();
-    return true;
-  }
-#endif
-
+  /**
+   * @brief Verify that OpenSSL seeded its random generator before pairing.
+   * @param errorMessage Optional destination for an entropy failure.
+   * @return True if OpenSSL can generate random bytes.
+   */
   bool ensure_pairing_entropy(std::string *errorMessage) {
-    initialize_openssl();
-
-#ifdef NXDK
-    return ensure_nxdk_rand_method(errorMessage);
-#else
-
     if (RAND_status() == 1) {
       return true;
     }
@@ -813,16 +698,22 @@ namespace {
     }
 
     return append_openssl_error(errorMessage, "OpenSSL could not gather enough entropy for pairing");
-#endif
   }
 
+  /**
+   * @brief Generate random bytes for the pairing identifiers and challenges.
+   * @param buffer Destination byte buffer.
+   * @param size Number of bytes to generate.
+   * @param errorMessage Optional destination for a random-generation failure.
+   * @return True if OpenSSL filled the buffer.
+   */
   bool fill_random_bytes(unsigned char *buffer, std::size_t size, std::string *errorMessage) {
     if (!ensure_pairing_entropy(errorMessage)) {
       return false;
     }
 
     ERR_clear_error();
-    if (RAND_bytes(buffer, static_cast<int>(size)) == 1) {
+    if (RAND_bytes_ex(nullptr, buffer, size, 0) == 1) {
       return true;
     }
 
@@ -987,6 +878,13 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Check that the TLS peer presents the expected pairing certificate.
+   * @param ssl Established TLS session.
+   * @param expectedCertificatePem Expected host certificate in PEM format, if available.
+   * @param errorMessage Optional destination for a certificate verification failure.
+   * @return True if the peer matches the expected certificate or no pin was supplied.
+   */
   bool verify_tls_peer_certificate(const SSL *ssl, std::string_view expectedCertificatePem, std::string *errorMessage) {
     if (ssl == nullptr || expectedCertificatePem.empty()) {
       return true;
@@ -997,7 +895,7 @@ namespace {
       return append_error(errorMessage, "The saved host pairing certificate was invalid before the TLS verification step");
     }
 
-    std::unique_ptr<X509, X509Deleter> peerCertificate(SSL_get_peer_certificate(ssl));
+    std::unique_ptr<X509, X509Deleter> peerCertificate(SSL_get1_peer_certificate(ssl));
     if (peerCertificate == nullptr) {
       return append_error(errorMessage, "The host did not present a TLS certificate during pairing");
     }
@@ -1009,6 +907,12 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Generate an RSA key and self-signed certificate for the pairing client.
+   * @param identity Destination for the PEM certificate and private key.
+   * @param errorMessage Optional destination for a certificate generation failure.
+   * @return True if both PEM values were generated.
+   */
   bool create_self_signed_certificate(network::PairingIdentity *identity, std::string *errorMessage) {
     if (!ensure_pairing_entropy(errorMessage)) {
       return false;
@@ -1016,38 +920,10 @@ namespace {
 
     ERR_clear_error();
 
-#ifdef NXDK
-    std::unique_ptr<BIGNUM, BignumDeleter> exponent(BN_new());
-    if (exponent == nullptr || BN_set_word(exponent.get(), RSA_F4) != 1) {
-      return append_openssl_error(errorMessage, "Failed to initialize the client key generation exponent for pairing");
-    }
-
-    std::unique_ptr<RSA, RsaDeleter> rsa(RSA_new());
-    if (rsa == nullptr || RSA_generate_key_ex(rsa.get(), 2048, exponent.get(), nullptr) != 1) {
+    std::unique_ptr<EVP_PKEY, PkeyDeleter> key(EVP_RSA_gen(2048));
+    if (key == nullptr) {
       return append_openssl_error(errorMessage, "Failed to generate the client key used for pairing");
     }
-
-    EVP_PKEY *rawKey = EVP_PKEY_new();
-    if (rawKey == nullptr) {
-      return append_openssl_error(errorMessage, "Failed to allocate the client key container used for pairing");
-    }
-
-    std::unique_ptr<EVP_PKEY, PkeyDeleter> key(rawKey);
-    if (EVP_PKEY_assign_RSA(key.get(), rsa.release()) != 1) {
-      return append_openssl_error(errorMessage, "Failed to attach the generated client RSA key for pairing");
-    }
-#else
-    std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> keyContext(EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr), &EVP_PKEY_CTX_free);
-    if (keyContext == nullptr || EVP_PKEY_keygen_init(keyContext.get()) != 1 || EVP_PKEY_CTX_set_rsa_keygen_bits(keyContext.get(), 2048) != 1) {
-      return append_openssl_error(errorMessage, "Failed to initialize client key generation for pairing");
-    }
-
-    EVP_PKEY *rawKey = nullptr;
-    if (EVP_PKEY_keygen(keyContext.get(), &rawKey) != 1 || rawKey == nullptr) {
-      return append_openssl_error(errorMessage, "Failed to generate the client key used for pairing");
-    }
-    std::unique_ptr<EVP_PKEY, PkeyDeleter> key(rawKey);
-#endif
 
     std::unique_ptr<X509, X509Deleter> certificate(X509_new());
     if (certificate == nullptr) {
@@ -1056,15 +932,13 @@ namespace {
 
     X509_set_version(certificate.get(), 2);
     ASN1_INTEGER_set(X509_get_serialNumber(certificate.get()), 1);
-    X509_gmtime_adj(X509_get_notBefore(certificate.get()), 0);
-    X509_gmtime_adj(X509_get_notAfter(certificate.get()), 60L * 60L * 24L * 365L * 10L);
+    X509_gmtime_adj(X509_getm_notBefore(certificate.get()), 0);
+    X509_gmtime_adj(X509_getm_notAfter(certificate.get()), 60L * 60L * 24L * 365L * 10L);
     X509_set_pubkey(certificate.get(), key.get());
 
-    if (auto *certificateSubject = X509_get_subject_name(certificate.get()); certificateSubject == nullptr) {
+    std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)> certificateSubject(X509_NAME_new(), &X509_NAME_free);
+    if (certificateSubject == nullptr || X509_NAME_add_entry_by_txt(certificateSubject.get(), "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char *>("NVIDIA GameStream Client"), -1, -1, 0) != 1 || X509_set_subject_name(certificate.get(), certificateSubject.get()) != 1 || X509_set_issuer_name(certificate.get(), certificateSubject.get()) != 1) {
       return append_openssl_error(errorMessage, "Failed to populate the client certificate subject for pairing");
-    } else {
-      X509_NAME_add_entry_by_txt(certificateSubject, "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char *>("NVIDIA GameStream Client"), -1, -1, 0);
-      X509_set_issuer_name(certificate.get(), certificateSubject);
     }
 
     if (X509_sign(certificate.get(), key.get(), EVP_sha256()) == 0) {
@@ -2093,15 +1967,24 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Read the certificate signature carried in the GameStream pairing challenge.
+   * @param certificate Certificate containing the signature.
+   * @param signature Optional destination for the raw signature bytes.
+   * @param errorMessage Optional destination for a missing or empty signature error.
+   * @return True if the certificate has a nonempty signature.
+   */
   bool load_certificate_signature(const X509 *certificate, std::vector<unsigned char> *signature, std::string *errorMessage) {
     const ASN1_BIT_STRING *asn1Signature = nullptr;
     X509_get0_signature(&asn1Signature, nullptr, certificate);
-    if (asn1Signature == nullptr || asn1Signature->data == nullptr || asn1Signature->length <= 0) {
+    const unsigned char *data = asn1Signature != nullptr ? ASN1_STRING_get0_data(asn1Signature) : nullptr;
+    const std::size_t size = data != nullptr ? ASN1_STRING_get_length(asn1Signature) : 0;
+    if (size == 0) {
       return append_error(errorMessage, "Failed to read the client certificate signature used for pairing");
     }
 
     if (signature != nullptr) {
-      signature->assign(asn1Signature->data, asn1Signature->data + asn1Signature->length);
+      signature->assign(data, data + size);
     }
     return true;
   }

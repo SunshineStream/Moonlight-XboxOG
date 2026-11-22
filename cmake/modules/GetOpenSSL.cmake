@@ -7,8 +7,6 @@ set(MOONLIGHT_OPENSSL_MODE "BUNDLED" CACHE STRING "How to provide OpenSSL for Mo
 set_property(CACHE MOONLIGHT_OPENSSL_MODE PROPERTY STRINGS BUNDLED)
 
 CPMGetPackage(openssl)
-string(REGEX REPLACE "^(OpenSSL_|openssl-)" "" OPENSSL_VERSION "${OPENSSL_TAG}")
-string(REPLACE "_" "." OPENSSL_VERSION "${OPENSSL_VERSION}")
 set(OPENSSL_SOURCE_DIR "${openssl_SOURCE_DIR}")
 set(OPENSSL_BUILD_ROOT "${CMAKE_BINARY_DIR}/third-party/openssl/${OPENSSL_VERSION}")
 set(OPENSSL_BUILD_DIR "${OPENSSL_BUILD_ROOT}/build")
@@ -56,7 +54,8 @@ function(_moonlight_join_shell_command out_var)
     set(${out_var} "${command}" PARENT_SCOPE)
 endfunction()
 
-file(MAKE_DIRECTORY "${OPENSSL_BUILD_DIR}")
+# OpenSSL 4.1 generates the application configuration header even with no-apps.
+file(MAKE_DIRECTORY "${OPENSSL_BUILD_DIR}/apps/include")
 file(MAKE_DIRECTORY "${OPENSSL_INSTALL_DIR}/include")
 file(MAKE_DIRECTORY "${OPENSSL_INSTALL_DIR}/lib")
 
@@ -67,18 +66,18 @@ endif()
 find_program(PERL_EXECUTABLE perl REQUIRED)
 set(OPENSSL_CONFIGURE_OPTIONS
         no-shared
+        no-apps
         no-tests
         no-asm
         no-comp
-        no-threads
-        no-afalgeng
-        no-capieng
+        no-quic
         no-ui-console
         no-ocsp
         no-srp
         no-pic
         no-async
-        no-dso)
+        no-dso
+        --libdir=lib)
 
 set(OPENSSL_ENV
         ${CMAKE_COMMAND} -E env
@@ -98,7 +97,8 @@ if(MOONLIGHT_OPENSSL_WINDOWS_HOST
 endif()
 set(OPENSSL_MAKE_ARGS)
 if(MOONLIGHT_OPENSSL_WINDOWS_HOST)
-    list(APPEND OPENSSL_MAKE_ARGS -j1)
+    # The MSYS2 make runs separately from MinGW Makefiles and cannot use its jobserver.
+    list(APPEND OPENSSL_MAKE_ARGS -j4)
 endif()
 
 if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
@@ -109,13 +109,19 @@ if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
             no-sock
             no-dgram
             no-posix-io
-            --with-rand-seed=none)
+            no-autoload-config
+            no-makedepend
+            no-secure-memory
+            no-thread-pool
+            --with-rand-seed=getrandom)
 
     set(OPENSSL_CPPFLAGS_LIST
             -UWIN32
             -U_WIN32
             -DNO_SYSLOG
             -DOPENSSL_NO_SYSLOG
+            # OpenSSL's poll backend otherwise defaults to select even with no-sock.
+            -DRIO_POLL_METHOD=RIO_POLL_METHOD_NONE
             -Dstrcasecmp=_stricmp
             -Dstrncasecmp=_strnicmp
             -D_exit=_Exit
@@ -152,7 +158,6 @@ if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
     set(OPENSSL_INSTALL_COMMAND
             ${OPENSSL_ENV}
             ${OPENSSL_MAKE_EXECUTABLE}
-            ${OPENSSL_MAKE_ARGS}
             "LIBS=libcrypto.a libssl.a"
             install_dev)
 else()
@@ -200,6 +205,9 @@ else()
         string(CONCAT _openssl_configure_script
                 "cd ${_openssl_build_dir_msys_quoted} && "
                 "${_openssl_tool_prefix} exec ${_openssl_configure_command}")
+        string(CONCAT _openssl_build_script
+                "cd ${_openssl_build_dir_msys_quoted} && "
+                "${_openssl_tool_prefix} exec make ${OPENSSL_MAKE_ARGS} build_libs")
         set(OPENSSL_CONFIGURE_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
                 -defterm -here -no-start -mingw64
@@ -207,7 +215,7 @@ else()
         set(OPENSSL_BUILD_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
                 -defterm -here -no-start -mingw64
-                -c "cd ${_openssl_build_dir_msys_quoted} && ${_openssl_tool_prefix} exec make -j1 build_libs")
+                -c "${_openssl_build_script}")
         set(OPENSSL_INSTALL_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
                 -defterm -here -no-start -mingw64
@@ -305,6 +313,7 @@ if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
             DEPENDEES configure
             DEPENDERS build
             DEPENDS
+                "${OPENSSL_NXDK_PATCH}"
                 "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/openssl_compat.h"
                 "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/include/dirent.h"
                 "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/include/sys/stat.h"
@@ -329,8 +338,14 @@ if(NOT TARGET OpenSSL::Crypto)
     set_target_properties(OpenSSL::Crypto PROPERTIES
             IMPORTED_LOCATION "${OPENSSL_CRYPTO_LIBRARY}"
             INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INCLUDE_DIR}")
-    if(WIN32 AND MOONLIGHT_OPENSSL_PLATFORM STREQUAL "HOST")
-        target_link_libraries(OpenSSL::Crypto INTERFACE ws2_32)
+    if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "HOST")
+        if(WIN32)
+            # OpenSSL's MinGW static libraries leave the platform imports to the consumer.
+            target_link_libraries(OpenSSL::Crypto INTERFACE ws2_32 gdi32 crypt32 bcrypt)
+        else()
+            find_package(Threads REQUIRED)
+            target_link_libraries(OpenSSL::Crypto INTERFACE Threads::Threads)
+        endif()
     endif()
     add_dependencies(OpenSSL::Crypto ${MOONLIGHT_OPENSSL_EXTERNAL_TARGET})
 endif()

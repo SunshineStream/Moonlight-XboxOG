@@ -22,6 +22,7 @@
 #include <lizardbyte/common/testing.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+#include <openssl/x509.h>
 
 // test includes
 #include "tests/support/network_test_constants.h"
@@ -411,6 +412,7 @@ namespace {
     }
   }
 
+  /** @brief Keep generated pairing identities compatible with GameStream hosts. */
   TEST(HostPairingTest, CreatesAValidClientIdentity) {
     std::string errorMessage;
     const network::PairingIdentity identity = network::create_pairing_identity(&errorMessage);
@@ -420,6 +422,20 @@ namespace {
     EXPECT_EQ(identity.uniqueId.size(), 16U);
     EXPECT_NE(identity.certificatePem.find("BEGIN CERTIFICATE"), std::string::npos);
     EXPECT_NE(identity.privateKeyPem.find("BEGIN PRIVATE KEY"), std::string::npos);
+
+    std::unique_ptr<BIO, BioDeleter> certificateBio(BIO_new_mem_buf(identity.certificatePem.data(), static_cast<int>(identity.certificatePem.size())));
+    std::unique_ptr<BIO, BioDeleter> privateKeyBio(BIO_new_mem_buf(identity.privateKeyPem.data(), static_cast<int>(identity.privateKeyPem.size())));
+    ASSERT_NE(certificateBio, nullptr);
+    ASSERT_NE(privateKeyBio, nullptr);
+
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(PEM_read_bio_X509(certificateBio.get(), nullptr, nullptr, nullptr), &X509_free);
+    std::unique_ptr<EVP_PKEY, PkeyDeleter> privateKey(PEM_read_bio_PrivateKey(privateKeyBio.get(), nullptr, nullptr, nullptr));
+    ASSERT_NE(certificate, nullptr);
+    ASSERT_NE(privateKey, nullptr);
+    EXPECT_EQ(EVP_PKEY_is_a(privateKey.get(), "RSA"), 1);
+    EXPECT_EQ(EVP_PKEY_get_bits(privateKey.get()), 2048);
+    EXPECT_EQ(X509_check_private_key(certificate.get(), privateKey.get()), 1);
+    EXPECT_EQ(X509_verify(certificate.get(), privateKey.get()), 1);
   }
 
   TEST(HostPairingTest, GeneratesSecureFourDigitPins) {
