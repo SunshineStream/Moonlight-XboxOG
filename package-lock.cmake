@@ -96,7 +96,7 @@ CPMDeclarePackage(openssl
 # SDL3_image
 # renovate: datasource=github-tags depName=libsdl-org/SDL_image versioning=semver
 # extractVersion=^release-(?<version>\d+\.\d+\.\d+)$
-set(SDL3_IMAGE_VERSION 3.2.6)
+set(SDL3_IMAGE_VERSION 3.4.8)
 CPMDeclarePackage(sdl3_image
         NAME sdl3_image
         VERSION ${SDL3_IMAGE_VERSION}
