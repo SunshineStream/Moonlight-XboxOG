@@ -133,11 +133,12 @@ CPMDeclarePackage(tomlplusplus
 )
 
 # moonlight-common-c
-# The fork exposes the codec negotiation from upstream PR #175 as a branch until it lands upstream.
-set(MOONLIGHT_COMMON_C_COMMIT ed6b2da643e5c16c315c4e4a93f0ac601c5cb32c)
+# renovate: datasource=git-refs depName=moonlight-stream/moonlight-common-c
+# ref=master
+set(MOONLIGHT_COMMON_C_COMMIT b4ee1cea3d19e13c0b37c26585e6b1ee174effcb)
 CPMDeclarePackage(moonlight-common-c
         NAME moonlight-common-c
-        GIT_REPOSITORY https://github.com/ReenigneArcher/moonlight-common-c.git
+        GIT_REPOSITORY https://github.com/moonlight-stream/moonlight-common-c.git
         GIT_TAG ${MOONLIGHT_COMMON_C_COMMIT}
         GIT_SUBMODULES enet nanors
         EXCLUDE_FROM_ALL YES
