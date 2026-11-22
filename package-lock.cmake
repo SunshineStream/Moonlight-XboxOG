@@ -72,13 +72,24 @@ CPMDeclarePackage(nxdk_sdl3
 
 # OpenSSL
 # renovate: datasource=github-tags depName=openssl/openssl
-# versioning=regex:^(?:OpenSSL_|openssl-)(?<major>\d+)[._](?<minor>\d+)[._](?<patch>\d+)[a-z]*$
-set(OPENSSL_TAG OpenSSL_1_1_1w)
+# versioning=regex:^openssl-(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$
+set(OPENSSL_TAG openssl-4.1.0)
+string(REGEX REPLACE "^openssl-" "" OPENSSL_VERSION "${OPENSSL_TAG}")
+set(OPENSSL_XBOX_SOURCE_OPTIONS)
+if(MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
+    set(OPENSSL_NXDK_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/openssl-nxdk.patch")
+    _moonlight_patched_source_dir(OPENSSL_XBOX_SOURCE_DIR openssl "${OPENSSL_VERSION}" "${OPENSSL_NXDK_PATCH}")
+    set(OPENSSL_XBOX_SOURCE_OPTIONS
+            SOURCE_DIR "${OPENSSL_XBOX_SOURCE_DIR}"
+            PATCHES "${OPENSSL_NXDK_PATCH}"
+            NO_CACHE YES)
+endif()
 CPMDeclarePackage(openssl
         NAME openssl
         TLS_VERIFY TRUE
         # The source snapshot omits the upstream test submodules.
         URL https://github.com/openssl/openssl/archive/refs/tags/${OPENSSL_TAG}.tar.gz
+        ${OPENSSL_XBOX_SOURCE_OPTIONS}
         DOWNLOAD_ONLY YES
 )
 

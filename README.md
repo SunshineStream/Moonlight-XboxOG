@@ -392,9 +392,11 @@ and metadata queries fail explicitly with `ENOSYS`. Moonlight's Win32 file APIs,
 standard stdio and custom OpenSSL socket BIO continue to handle saved data and pairing.
 FFmpeg configure probes still link actual Xbox libraries and the local timing helpers.
 
-OpenSSL disables POSIX descriptor I/O; its socket BIO leaves socket ownership with
-the caller. FFmpeg builds its original file helpers through its generic platform
-path, with memory mapping and temporary-file creation disabled.
+On Xbox, OpenSSL uses nxdk's random source to seed its generator and nxdk's
+threading primitives for concurrent pairing and stream encryption. OpenSSL
+disables POSIX descriptor I/O, and its custom socket BIO leaves socket ownership
+with the caller. FFmpeg builds its original file helpers through its generic
+platform path, with memory mapping and temporary-file creation disabled.
 
 ### CLion on Windows
 

@@ -1,0 +1,132 @@
+--- a/crypto/thread/arch/thread_win.c
++++ b/crypto/thread/arch/thread_win.c
+@@ -12,6 +12,9 @@
+ 
+ #if defined(OPENSSL_THREADS_WINNT)
+ #include <process.h>
++#ifdef NXDK
++#include <windows.h>
++#endif
+ 
+ static unsigned __stdcall thread_start_thunk(LPVOID vthread)
+ {
+--- a/crypto/threads_pthread.c
++++ b/crypto/threads_pthread.c
+@@ -67,7 +67,7 @@
+ #include <atomic.h>
+ #endif
+ 
+-#if defined(OPENSSL_THREADS) && !defined(CRYPTO_TDEBUG) && !defined(OPENSSL_SYS_WINDOWS)
++#if defined(OPENSSL_THREADS) && !defined(CRYPTO_TDEBUG) && !defined(OPENSSL_SYS_WINDOWS) && !defined(NXDK)
+ 
+ #if defined(OPENSSL_SYS_UNIX)
+ #include <sys/types.h>
+--- a/crypto/threads_win.c
++++ b/crypto/threads_win.c
+@@ -22,7 +22,12 @@
+ #include "internal/rcu.h"
+ #include "rcu_internal.h"
+ 
+-#if defined(OPENSSL_THREADS) && !defined(CRYPTO_TDEBUG) && defined(OPENSSL_SYS_WINDOWS)
++#if defined(OPENSSL_THREADS) && !defined(CRYPTO_TDEBUG) && (defined(OPENSSL_SYS_WINDOWS) || defined(NXDK))
++
++#ifdef NXDK
++#include <threads.h>
++#include <windows.h>
++#endif
+ 
+ #ifdef USE_RWLOCK
+ typedef struct {
+@@ -551,11 +556,16 @@
+ 
+ int CRYPTO_THREAD_init_local(CRYPTO_THREAD_LOCAL *key, void (*cleanup)(void *))
+ {
++#ifdef NXDK
++    /* C11 storage runs OpenSSL's destructors when nxdk worker threads exit. */
++    return tss_create(key, cleanup) == thrd_success;
++#else
+     *key = TlsAlloc();
+     if (*key == TLS_OUT_OF_INDEXES)
+         return 0;
+ 
+     return 1;
++#endif
+ }
+ 
+ void *CRYPTO_THREAD_get_local(CRYPTO_THREAD_LOCAL *key)
+@@ -592,8 +602,12 @@
+ 
+ int CRYPTO_THREAD_cleanup_local(CRYPTO_THREAD_LOCAL *key)
+ {
++#ifdef NXDK
++    tss_delete(*key);
++#else
+     if (TlsFree(*key) == 0)
+         return 0;
++#endif
+ 
+     return 1;
+ }
+--- a/include/internal/thread_arch.h
++++ b/include/internal/thread_arch.h
+@@ -14,7 +14,11 @@
+ #include "internal/e_os.h"
+ #include "internal/time.h"
+ 
+-#if defined(OPENSSL_THREADS) && defined(OPENSSL_SYS_UNIX)
++#if defined(OPENSSL_THREADS) && defined(NXDK)
++/* Reuse the Win32 backend with condition variables built from semaphores. */
++#define OPENSSL_THREADS_WINNT
++#define OPENSSL_THREADS_WINNT_LEGACY
++#elif defined(OPENSSL_THREADS) && defined(OPENSSL_SYS_UNIX)
+ #define OPENSSL_THREADS_POSIX
+ #elif defined(OPENSSL_THREADS) && defined(OPENSSL_SYS_VMS)
+ #define OPENSSL_THREADS_POSIX
+--- a/include/openssl/crypto.h.in
++++ b/include/openssl/crypto.h.in
+@@ -537,7 +537,13 @@
+ void OPENSSL_INIT_free(OPENSSL_INIT_SETTINGS *settings);
+ 
+ #if defined(OPENSSL_THREADS) && !defined(CRYPTO_TDEBUG)
+-#if defined(_WIN32)
++#if defined(NXDK)
++/* Match nxdk's Win32 thread IDs and C11 thread-local storage keys. */
++typedef unsigned long CRYPTO_THREAD_ID;
++typedef unsigned int CRYPTO_THREAD_LOCAL;
++typedef long CRYPTO_ONCE;
++#define CRYPTO_ONCE_STATIC_INIT 0
++#elif defined(_WIN32)
+ #if defined(BASETYPES) || defined(_WINDEF_H)
+ /* application has to include <windows.h> in order to use this */
+ typedef DWORD CRYPTO_THREAD_LOCAL;
+--- a/include/openssl/e_ostime.h
++++ b/include/openssl/e_ostime.h
+@@ -22,7 +22,8 @@
+  */
+ 
+ /* IWYU pragma: begin_exports */
+-#if defined(OPENSSL_SYS_WINDOWS)
++/* nxdk consumers get timeval from the Xbox sys/time.h adapter. */
++#if defined(OPENSSL_SYS_WINDOWS) && !defined(NXDK)
+ #if !defined(_WINSOCKAPI_)
+ /*
+  * winsock2.h defines _WINSOCK2API_ and both winsock2.h and winsock.h define
+--- a/providers/implementations/rands/seeding/rand_unix.c
++++ b/providers/implementations/rands/seeding/rand_unix.c
+@@ -331,6 +331,9 @@
+  */
+ static ssize_t syscall_random(void *buf, size_t buflen)
+ {
++#ifdef NXDK
++    return moonlight_openssl_getentropy(buf, buflen) == 0 ? (ssize_t)buflen : -1;
++#else
+     /*
+      * Note: 'buflen' equals the size of the buffer which is used by the
+      * get_entropy() callback of the RAND_DRBG. It is roughly bounded by
+@@ -404,5 +407,6 @@
+     errno = ENOSYS;
+     return -1;
+ #endif
++#endif /* NXDK */
+ }
+ #endif /* defined(OPENSSL_RAND_SEED_GETRANDOM) */
