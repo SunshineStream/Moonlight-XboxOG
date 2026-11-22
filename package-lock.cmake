@@ -120,13 +120,14 @@ CPMDeclarePackage(sdl3_ttf
 )
 
 # toml++
-# renovate: datasource=git-refs depName=marzer/tomlplusplus
-# ref=master
-set(TOMLPLUSPLUS_COMMIT c38c9b922a68fc9772b25d7f606133d3ec4decfd)
+# renovate: datasource=github-tags depName=marzer/tomlplusplus versioning=semver
+# extractVersion=^v(?<version>\d+\.\d+\.\d+)$
+set(TOMLPLUSPLUS_VERSION 3.5.0)
 CPMDeclarePackage(tomlplusplus
         NAME tomlplusplus
+        VERSION ${TOMLPLUSPLUS_VERSION}
         GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
-        GIT_TAG ${TOMLPLUSPLUS_COMMIT}
+        GIT_TAG v${TOMLPLUSPLUS_VERSION}
         # nxdk's compiler wrappers do not report CMake compile features.
         DOWNLOAD_ONLY YES
 )
