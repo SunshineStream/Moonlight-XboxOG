@@ -122,7 +122,7 @@ CPMDeclarePackage(sdl3_ttf
 # toml++
 # renovate: datasource=git-refs depName=marzer/tomlplusplus
 # ref=master
-set(TOMLPLUSPLUS_COMMIT c38c9b922a68fc9772b25d7f606133d3ec4decfd)
+set(TOMLPLUSPLUS_COMMIT b3f4f173e4a8f1306e314b641658ee7ae4cee79a)
 CPMDeclarePackage(tomlplusplus
         NAME tomlplusplus
         GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
