@@ -908,7 +908,7 @@ namespace {
   }
 
   /**
-   * @brief Generate an RSA key and self-signed certificate for the pairing client.
+   * @brief Generate an RSA key and a self-signed X.509 certificate for the pairing client.
    * @param identity Destination for the PEM certificate and private key.
    * @param errorMessage Optional destination for a certificate generation failure.
    * @return True if both PEM values were generated.
@@ -936,8 +936,7 @@ namespace {
     X509_gmtime_adj(X509_getm_notAfter(certificate.get()), 60L * 60L * 24L * 365L * 10L);
     X509_set_pubkey(certificate.get(), key.get());
 
-    std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)> certificateSubject(X509_NAME_new(), &X509_NAME_free);
-    if (certificateSubject == nullptr || X509_NAME_add_entry_by_txt(certificateSubject.get(), "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char *>("NVIDIA GameStream Client"), -1, -1, 0) != 1 || X509_set_subject_name(certificate.get(), certificateSubject.get()) != 1 || X509_set_issuer_name(certificate.get(), certificateSubject.get()) != 1) {
+    if (std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)> certificateSubject(X509_NAME_new(), &X509_NAME_free); certificateSubject == nullptr || X509_NAME_add_entry_by_txt(certificateSubject.get(), "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char *>("NVIDIA GameStream Client"), -1, -1, 0) != 1 || X509_set_subject_name(certificate.get(), certificateSubject.get()) != 1 || X509_set_issuer_name(certificate.get(), certificateSubject.get()) != 1) {
       return append_openssl_error(errorMessage, "Failed to populate the client certificate subject for pairing");
     }
 
