@@ -14,20 +14,20 @@
 namespace splash {
 
   /**
-   * @brief Show the splash screen for a fixed duration.
+   * @brief Play the splash animation and show the complete logo within a fixed duration.
    *
    * @param window SDL window used for splash rendering.
    * @param videoMode Active video mode used to size the splash layout.
-   * @param durationMilliseconds Splash duration in milliseconds.
+   * @param durationMilliseconds Visible splash duration in milliseconds.
    */
   void show_splash_screen(SDL_Window *window, const VIDEO_MODE &videoMode, unsigned int durationMilliseconds = 1500U);
 
   /**
-   * @brief Show the splash screen until the supplied callback reports completion.
+   * @brief Play the clockwise wave until startup completes, then briefly show the complete logo.
    *
    * @param window SDL window used for splash rendering.
    * @param videoMode Active video mode used to size the splash layout.
-   * @param keepShowing Callback that returns true while the splash screen should remain visible.
+   * @param keepShowing Callback that returns true while startup is still in progress.
    */
   void show_splash_screen(SDL_Window *window, const VIDEO_MODE &videoMode, const std::function<bool()> &keepShowing);
 
