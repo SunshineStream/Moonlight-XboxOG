@@ -122,7 +122,7 @@ CPMDeclarePackage(sdl3_ttf
 # toml++
 # renovate: datasource=github-tags depName=marzer/tomlplusplus versioning=semver
 # extractVersion=^v(?<version>\d+\.\d+\.\d+)$
-set(TOMLPLUSPLUS_VERSION 3.5.0)
+set(TOMLPLUSPLUS_VERSION 3.5.1)
 CPMDeclarePackage(tomlplusplus
         NAME tomlplusplus
         VERSION ${TOMLPLUSPLUS_VERSION}
