@@ -51,10 +51,11 @@ namespace {
     state.settings.preferredVideoModeSet = settings.preferredVideoModeSet;
     state.settings.streamFramerate = settings.streamFramerate;
     state.settings.streamBitrateKbps = settings.streamBitrateKbps;
-    state.settings.presentation.gpuPresentation = settings.gpuPresentation;
-    state.settings.presentation.gpuBufferCount = settings.gpuBufferCount;
+    state.settings.video.codec = settings.videoCodec;
+    state.settings.video.gpuPresentation = settings.gpuPresentation;
+    state.settings.video.gpuBufferCount = settings.gpuBufferCount;
     state.settings.audio.playOnPc = settings.playAudioOnPc;
-    state.settings.presentation.showPerformanceStats = settings.showPerformanceStats;
+    state.settings.video.showPerformanceStats = settings.showPerformanceStats;
     state.settings.audio.playOnXbox = settings.playAudioOnXbox;
     state.settings.audio.mode = settings.audioMode;
     state.settings.controls.screenshotDirectory = settings.screenshotDirectory;
