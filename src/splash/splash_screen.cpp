@@ -64,8 +64,8 @@ namespace {
    */
   SDL_Rect scale_first_wedge(const SDL_Rect &destination, float scale) {
     // The dimensions are positive, and nxdk's lroundf() is an unimplemented stub.
-    const int width = static_cast<int>(destination.w * scale + 0.5f);
-    const int height = static_cast<int>(destination.h * scale + 0.5f);
+    const auto width = static_cast<int>(destination.w * scale + 0.5f);
+    const auto height = static_cast<int>(destination.h * scale + 0.5f);
     return {destination.x + destination.w - width, destination.y + destination.h - height, width, height};
   }
 

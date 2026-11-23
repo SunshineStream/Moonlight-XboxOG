@@ -78,16 +78,16 @@ namespace splash {
       holdStart_(durationMilliseconds - holdDuration_) {}
 
   SplashAnimationFrame SplashAnimation::advance(std::uint64_t elapsedMilliseconds, bool startupComplete) {
-    if (!fadeStart_ && startupComplete && elapsedMilliseconds >= MINIMUM_WAVE_END_MS) {
+    if (!fadeStart_.has_value() && startupComplete && elapsedMilliseconds >= MINIMUM_WAVE_END_MS) {
       fadeStart_ = elapsedMilliseconds;
     }
 
     SplashAnimationFrame frame;
     float motionStrength = 1.0f;
-    if (fadeStart_ && elapsedMilliseconds >= *fadeStart_) {
+    if (fadeStart_.has_value() && elapsedMilliseconds >= *fadeStart_) {
       const auto fadeAge = elapsedMilliseconds - *fadeStart_;
       if (fadeAge >= fadeDuration_) {
-        if (!holdStart_) {
+        if (!holdStart_.has_value()) {
           holdStart_ = elapsedMilliseconds;
         }
         frame.brightness.fill(FULL_BRIGHTNESS);
