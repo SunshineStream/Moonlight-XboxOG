@@ -10,9 +10,9 @@ usage() {
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_SYSTEM="$(uname -s)"
-BUILD_DIR="cmake-build-release"
 case "${HOST_SYSTEM}" in
   MINGW*|MSYS*|CYGWIN*) BUILD_DIR="cmake-build-release-ucrt64" ;;
+  *) BUILD_DIR="cmake-build-release" ;;
 esac
 CLEAN_BUILD=0
 POSITIONAL_BUILD_DIR_SET=0
