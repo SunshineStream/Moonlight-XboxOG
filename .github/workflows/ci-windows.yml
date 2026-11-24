@@ -86,22 +86,18 @@ jobs:
           if-no-files-found: error
 
   sign:
-    name: Sign ${{ matrix.arch }}
+    name: Sign release binaries
     if: inputs.publish_release
     needs: build
     # The Azure signing client runs on x64 and can sign PE files for both architectures.
     runs-on: windows-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [AMD64, ARM64]
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          name: Windows-signing-input-${{ matrix.arch }}
-          path: artifacts/bin
+          pattern: Windows-signing-input-*
+          path: artifacts
       - name: Sign Windows executable
         uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
         with:
@@ -111,15 +107,26 @@ jobs:
           endpoint: ${{ inputs.azure_signing_endpoint }}
           signing-account-name: ${{ inputs.azure_signing_account }}
           certificate-profile-name: ${{ inputs.azure_signing_cert_profile }}
-          files-folder: ${{ github.workspace }}\artifacts\bin
+          files-folder: ${{ github.workspace }}\artifacts
           files-folder-filter: exe
-      - name: Package Windows client
-        working-directory: artifacts/bin
-        env:
-          PACKAGE_NAME: Moonlight-Windows-${{ matrix.arch }}
-        run: cmake -E tar c "../${env:PACKAGE_NAME}.zip" --format=zip Moonlight.exe assets
+          files-folder-recurse: true
+      - name: Package signed clients
+        working-directory: artifacts
+        shell: bash
+        run: |
+          for arch in AMD64 ARM64; do
+            (
+              cd "Windows-signing-input-${arch}"
+              cmake -E tar c "../Moonlight-Windows-${arch}.zip" --format=zip Moonlight.exe assets
+            )
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: Moonlight-Windows-${{ matrix.arch }}
-          path: artifacts/*.zip
+          name: Moonlight-Windows-AMD64
+          path: artifacts/Moonlight-Windows-AMD64.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-Windows-ARM64
+          path: artifacts/Moonlight-Windows-ARM64.zip
           if-no-files-found: error
