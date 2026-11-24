@@ -1,0 +1,47 @@
+---
+name: CI-Apple
+permissions: {}
+
+on:
+  workflow_call:
+    inputs:
+      publish_release:
+        required: true
+        type: boolean
+    secrets:
+      APPLE_ID:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+      APPLE_NOTARYTOOL_PASSWORD:
+        required: false
+      APPLE_CODESIGN_IDENTITY:
+        required: false
+      APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64:
+        required: false
+      APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD:
+        required: false
+
+jobs:
+  ios:
+    name: iOS
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-apple-mobile.yml
+
+  macos:
+    name: macOS
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-macos.yml
+    with:
+      publish_release: ${{ inputs.publish_release }}
+    secrets:
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_NOTARYTOOL_PASSWORD: ${{ secrets.APPLE_NOTARYTOOL_PASSWORD }}
+      APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+      APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64: >-
+        ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
+      APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD: >-
+        ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD }}

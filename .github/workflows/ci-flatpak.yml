@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.arch }})
+    name: ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -32,9 +32,13 @@ jobs:
           flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak --user install -y --or-update flathub org.flatpak.Builder \
             "org.freedesktop.Platform/${FLATPAK_ARCH}/25.08" "org.freedesktop.Sdk/${FLATPAK_ARCH}/25.08"
+          # Sandboxed Builder restricts local sources to the manifest's directory.
+          manifest=dev.lizardbyte.app.Moonlight.yml
+          sed 's|path: \.\./\.\./\.\.|path: .|' \
+            "packaging/linux/flatpak/${manifest}" > "${manifest}"
           sudo su "$(whoami)" -c "flatpak run org.flatpak.Builder \
             --arch=${FLATPAK_ARCH} --force-clean --repo=flatpak-repo --sandbox \
-            cmake-build-flatpak packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.yml"
+            cmake-build-flatpak ${manifest}"
           sudo su "$(whoami)" -c "flatpak build-bundle --arch=${FLATPAK_ARCH} \
             flatpak-repo Moonlight-${FLATPAK_ARCH}.flatpak dev.lizardbyte.app.Moonlight"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2

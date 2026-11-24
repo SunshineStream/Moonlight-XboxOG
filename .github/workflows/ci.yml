@@ -36,7 +36,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   build-xbox:
-    name: Original Xbox
+    name: Xbox
     permissions:
       contents: read
     uses: ./.github/workflows/ci-xbox.yml
@@ -59,12 +59,12 @@ jobs:
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
-  build-macos:
-    name: macOS
+  build-apple:
+    name: Apple
     needs: setup_release
     permissions:
       contents: read
-    uses: ./.github/workflows/ci-macos.yml
+    uses: ./.github/workflows/ci-apple.yml
     with:
       publish_release: ${{ needs.setup_release.outputs.publish_release == 'true' }}
     secrets:
@@ -77,23 +77,17 @@ jobs:
       APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD: >-
         ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD }}
 
-  build-flatpak:
-    name: Linux Flatpak
+  build-linux:
+    name: Linux
     permissions:
       contents: read
-    uses: ./.github/workflows/ci-flatpak.yml
+    uses: ./.github/workflows/ci-linux.yml
 
   build-android:
     name: Android
     permissions:
       contents: read
     uses: ./.github/workflows/ci-android.yml
-
-  build-apple-mobile:
-    name: Apple simulators
-    permissions:
-      contents: read
-    uses: ./.github/workflows/ci-apple-mobile.yml
 
   release:
     name: Draft release
@@ -102,10 +96,9 @@ jobs:
       - setup_release
       - build-xbox
       - build-windows
-      - build-macos
-      - build-flatpak
+      - build-apple
+      - build-linux
       - build-android
-      - build-apple-mobile
     permissions:
       contents: read
     runs-on: ubuntu-latest

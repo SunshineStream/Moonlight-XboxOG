@@ -27,10 +27,24 @@ on:
 
 jobs:
   build:
-    name: Build
-    runs-on: windows-latest
+    name: ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: AMD64
+            runner: windows-latest
+            msystem: MINGW64
+            packages: mingw-w64-x86_64
+            runtime: mingw-w64-x86_64-gcc
+          - arch: ARM64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+            packages: mingw-w64-clang-aarch64
+            runtime: mingw-w64-clang-aarch64-compiler-rt
     defaults:
       run:
         shell: msys2 {0}
@@ -40,19 +54,55 @@ jobs:
           submodules: recursive
       - uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c  # v2.34.0
         with:
-          msystem: MINGW64
+          msystem: ${{ matrix.msystem }}
           update: true
           install: >-
             git make patch perl
-            mingw-w64-x86_64-clang mingw-w64-x86_64-cmake mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-make mingw-w64-x86_64-pkgconf
+            ${{ matrix.packages }}-clang ${{ matrix.packages }}-cmake ${{ matrix.packages }}-lld
+            ${{ matrix.packages }}-ninja ${{ matrix.packages }}-pkgconf ${{ matrix.runtime }}
       - name: Build and stage
         run: |
-          cmake --preset client-mingw64
-          cmake --build --preset client-mingw64 --parallel
+          # Use Ninja in CI to avoid missing MinGW Makefiles dependency stamps on clean builds.
+          cmake --preset client -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON
+          cmake --build --preset client --parallel
           cmake --install cmake-build-client --prefix "$PWD/artifacts" --strip
-      - name: Sign Windows executable
+      - name: Package Windows client
+        if: '!inputs.publish_release'
+        working-directory: artifacts/bin
+        env:
+          PACKAGE_NAME: Moonlight-Windows-${{ matrix.arch }}
+        run: cmake -E tar c "../${PACKAGE_NAME}.zip" --format=zip Moonlight.exe assets
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: '!inputs.publish_release'
+        with:
+          name: Moonlight-Windows-${{ matrix.arch }}
+          path: artifacts/*.zip
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: inputs.publish_release
+        with:
+          name: Windows-signing-input-${{ matrix.arch }}
+          path: artifacts/bin/
+          if-no-files-found: error
+
+  sign:
+    name: Sign ${{ matrix.arch }}
+    if: inputs.publish_release
+    needs: build
+    # The Azure signing client runs on x64 and can sign PE files for both architectures.
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [AMD64, ARM64]
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: Windows-signing-input-${{ matrix.arch }}
+          path: artifacts/bin
+      - name: Sign Windows executable
         uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
         with:
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -65,8 +115,11 @@ jobs:
           files-folder-filter: exe
       - name: Package Windows client
         working-directory: artifacts/bin
-        run: cmake -E tar c ../Moonlight-Windows-AMD64.zip --format=zip Moonlight.exe assets
+        env:
+          PACKAGE_NAME: Moonlight-Windows-${{ matrix.arch }}
+        run: cmake -E tar c "../${env:PACKAGE_NAME}.zip" --format=zip Moonlight.exe assets
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: Moonlight-Windows-AMD64
+          name: Moonlight-Windows-${{ matrix.arch }}
           path: artifacts/*.zip
+          if-no-files-found: error

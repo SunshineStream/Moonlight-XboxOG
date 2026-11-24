@@ -37,6 +37,7 @@ checkout https://github.com/FFmpeg/FFmpeg.git "${ffmpeg_tag}" "${ffmpeg_src}"
 checkout https://github.com/videolan/dav1d.git "${dav1d_tag}" "${dav1d_src}"
 
 openssl_options=(no-shared no-tests no-apps)
+openssl_env=("CFLAGS=${CFLAGS:-}" "LDFLAGS=${LDFLAGS:-}")
 target_flags='[]'
 ffmpeg_options=(
   --arch=aarch64 --enable-cross-compile --enable-pic
@@ -87,7 +88,10 @@ case "${target}" in
     system=darwin
     target_flags="['-target', '${triple}', '-isysroot', '${sysroot}']"
     openssl_target=darwin64-arm64-cc
-    openssl_options+=(no-asm no-async "-target" "${triple}" "-isysroot" "${sysroot}")
+    openssl_options+=(no-asm no-async)
+    # Configure treats a bare target triple as a second OpenSSL platform name.
+    sdk_flags="-target ${triple} -isysroot ${sysroot}"
+    openssl_env=("CFLAGS=${sdk_flags} ${CFLAGS:-}" "LDFLAGS=${sdk_flags} ${LDFLAGS:-}")
     ffmpeg_options+=(--target-os=darwin --enable-videotoolbox
       '--enable-hwaccel=h264_videotoolbox,hevc_videotoolbox,av1_videotoolbox'
       "--extra-cflags=-target ${triple} -isysroot ${sysroot}"
@@ -124,7 +128,8 @@ meson install -C "${work_dir}/dav1d-build"
 mkdir -p -- "${work_dir}/openssl-build/apps/include" "${work_dir}/ffmpeg-build"
 (
   cd -- "${work_dir}/openssl-build"
-  CC="${cc}" perl "${openssl_src}/Configure" "${openssl_target}" --prefix="${prefix}" --libdir=lib "${openssl_options[@]}"
+  env CC="${cc}" "${openssl_env[@]}" perl "${openssl_src}/Configure" "${openssl_target}" \
+    --prefix="${prefix}" --libdir=lib "${openssl_options[@]}"
   make -j "${jobs}" build_libs
   make install_dev
 )

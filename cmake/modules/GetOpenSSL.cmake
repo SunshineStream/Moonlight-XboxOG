@@ -162,7 +162,12 @@ if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
             install_dev)
 else()
     if(MOONLIGHT_OPENSSL_WINDOWS_HOST)
-        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_openssl_msystem -mingw64)
+        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _openssl_processor)
+        if(_openssl_processor MATCHES "^(arm64|aarch64)$")
+            set(OPENSSL_CONFIGURE_TARGET mingwarm64)
+            set(_openssl_msystem -clangarm64)
+        elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
             set(OPENSSL_CONFIGURE_TARGET mingw64)
         else()
             set(OPENSSL_CONFIGURE_TARGET mingw)
@@ -210,15 +215,15 @@ else()
                 "${_openssl_tool_prefix} exec make ${OPENSSL_MAKE_ARGS} build_libs")
         set(OPENSSL_CONFIGURE_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
-                -defterm -here -no-start -mingw64
+                -defterm -here -no-start "${_openssl_msystem}"
                 -c "${_openssl_configure_script}")
         set(OPENSSL_BUILD_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
-                -defterm -here -no-start -mingw64
+                -defterm -here -no-start "${_openssl_msystem}"
                 -c "${_openssl_build_script}")
         set(OPENSSL_INSTALL_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
-                -defterm -here -no-start -mingw64
+                -defterm -here -no-start "${_openssl_msystem}"
                 -c "cd ${_openssl_build_dir_msys_quoted} && ${_openssl_tool_prefix} exec make -j1 install_dev")
     elseif(APPLE)
         find_program(OPENSSL_MAKE_EXECUTABLE NAMES gmake make REQUIRED)

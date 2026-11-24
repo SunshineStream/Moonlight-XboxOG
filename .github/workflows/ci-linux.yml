@@ -1,0 +1,13 @@
+---
+name: CI-Linux
+permissions: {}
+
+on:
+  workflow_call:
+
+jobs:
+  flatpak:
+    name: Flatpak
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-flatpak.yml

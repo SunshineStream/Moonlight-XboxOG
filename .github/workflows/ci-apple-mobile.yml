@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: ${{ matrix.system }} simulator
+    name: ${{ matrix.system }}
     runs-on: macos-latest
     permissions:
       contents: read

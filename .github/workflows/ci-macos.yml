@@ -24,7 +24,7 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.arch }})
+    name: ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
