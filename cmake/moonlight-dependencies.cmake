@@ -351,6 +351,11 @@ function(_moonlight_configure_common_warnings)
         return()
     endif()
 
+    if(CMAKE_GENERATOR STREQUAL "Xcode")
+        # Xcode enables this warning for the pinned dependency's SDP integer conversions.
+        target_compile_options(moonlight-common-c PRIVATE -Wno-error=shorten-64-to-32)
+    endif()
+
     # Clang 23 diagnoses upstream's debug counters when NDEBUG removes their assertion reads.
     # Probe the warning directly because nxdk wrappers can have an unknown CMake compiler ID.
     include(CheckCCompilerFlag)
