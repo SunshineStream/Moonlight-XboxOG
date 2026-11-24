@@ -1,0 +1,72 @@
+---
+name: CI-Windows
+permissions: {}
+
+on:
+  workflow_call:
+    inputs:
+      publish_release:
+        required: true
+        type: boolean
+      azure_signing_endpoint:
+        required: false
+        type: string
+      azure_signing_account:
+        required: false
+        type: string
+      azure_signing_cert_profile:
+        required: false
+        type: string
+    secrets:
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_CLIENT_SECRET:
+        required: false
+      AZURE_TENANT_ID:
+        required: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+      - uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c  # v2.34.0
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git make patch perl
+            mingw-w64-x86_64-clang mingw-w64-x86_64-cmake mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make mingw-w64-x86_64-pkgconf
+      - name: Build and stage
+        run: |
+          cmake --preset client-mingw64
+          cmake --build --preset client-mingw64 --parallel
+          cmake --install cmake-build-client --prefix "$PWD/artifacts" --strip
+      - name: Sign Windows executable
+        if: inputs.publish_release
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          endpoint: ${{ inputs.azure_signing_endpoint }}
+          signing-account-name: ${{ inputs.azure_signing_account }}
+          certificate-profile-name: ${{ inputs.azure_signing_cert_profile }}
+          files-folder: ${{ github.workspace }}\artifacts\bin
+          files-folder-filter: exe
+      - name: Package Windows client
+        working-directory: artifacts/bin
+        run: cmake -E tar c ../Moonlight-Windows-AMD64.zip --format=zip Moonlight.exe assets
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-Windows-AMD64
+          path: artifacts/*.zip

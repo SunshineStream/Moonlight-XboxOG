@@ -1,0 +1,30 @@
+---
+name: CI-Android
+permissions: {}
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+      - name: Build Android APK
+        run: |
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+          sudo apt-get install -y meson ninja-build pkg-config
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.2.13676358"
+          bash scripts/build-client-deps.sh android "${PWD}/cmake-build-android-deps"
+          sdl_sources=( "${PWD}"/cmake-build-android-deps/sources/sdl-release-* )
+          bash "${sdl_sources[0]}/android-project/gradlew" -p packaging/android :app:assembleDebug \
+            "-PmoonlightSdlSource=${sdl_sources[0]}" "-PmoonlightAndroidDeps=${PWD}/cmake-build-android-deps"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-Android-debug
+          path: packaging/android/app/build/outputs/apk/debug/*.apk

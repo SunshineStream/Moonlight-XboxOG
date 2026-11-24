@@ -29,6 +29,8 @@ endfunction()
 
 # Build the pinned SDL libraries with the portable client's platform backends.
 function(moonlight_prepare_portable_sdl3)
+    # CMake and SDL define these option names.
+    # cmake-lint: disable=C0103
     # Android's Java glue loads SDL3 by name. Native desktop and Apple targets link it statically.
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     if(ANDROID)
@@ -45,7 +47,6 @@ function(moonlight_prepare_portable_sdl3)
     add_subdirectory("${SDL3_SOURCE_DIR}" "${SDL3_BINARY_DIR}" EXCLUDE_FROM_ALL)
 
     # Use the same image formats and font source as the original Xbox.
-    # cmake-lint: disable=C0103
     set(BUILD_SHARED_LIBS OFF)
     set(SDLIMAGE_VENDORED OFF)
     set(SDLIMAGE_BACKEND_STB ON)

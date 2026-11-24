@@ -244,7 +244,7 @@ grants device access so SDL can use raw HID for advanced controller features.
 The release build workflow signs the Windows executable with Azure Artifact Signing and signs,
 notarizes, and staples the macOS DMG.
 
-#### Android and Android TV
+#### Android
 
 Install Java 17, Android SDK and Build Tools 35, NDK 28.2.13676358, and CMake 3.22.1. Build the
 ARM64 dependencies from Linux or macOS with Meson, Ninja, pkg-config, Perl, and Make installed.
@@ -278,8 +278,9 @@ cmake -S . -B "cmake-build-$target" -G Xcode \
 cmake --build "cmake-build-$target" --config Release --target moonlight_client
 ```
 
-CI builds iOS and tvOS simulator targets. Device installation requires a provisioning profile
-for the bundle identifier selected in the Xcode project.
+CI builds the iOS and tvOS simulator targets in parallel in the Apple simulators workflow. Each target
+uses its own SDK and dependency build. Device installation requires a provisioning profile for the
+bundle identifier selected in the Xcode project.
 
 ## 🛠️ Original Xbox build
 

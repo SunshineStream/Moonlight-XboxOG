@@ -43,8 +43,8 @@ ffmpeg_options=(
   --disable-autodetect --disable-debug --disable-doc --disable-programs
   --disable-shared --enable-static --disable-everything
   --disable-avdevice --disable-avformat --disable-avfilter --disable-network
-  --enable-libdav1d --enable-decoder=h264,hevc,av1,libdav1d,opus
-  --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,av1_frame_split
+  --enable-libdav1d '--enable-decoder=h264,hevc,av1,libdav1d,opus'
+  '--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,av1_frame_split'
 )
 
 case "${target}" in
@@ -64,7 +64,7 @@ case "${target}" in
     openssl_target=android-arm64
     openssl_options+=(-D__ANDROID_API__=26)
     ffmpeg_options+=(--target-os=android --enable-jni --enable-mediacodec
-      --enable-decoder=h264_mediacodec,hevc_mediacodec,av1_mediacodec)
+      '--enable-decoder=h264_mediacodec,hevc_mediacodec,av1_mediacodec')
     sdl_tag="release-$(lock_value SDL3_VERSION)"
     sdl_src="${work_dir}/sdl-${sdl_tag}"
     checkout https://github.com/libsdl-org/SDL.git "${sdl_tag}" "${sdl_src}"
@@ -89,7 +89,7 @@ case "${target}" in
     openssl_target=darwin64-arm64-cc
     openssl_options+=(no-asm no-async "-target" "${triple}" "-isysroot" "${sysroot}")
     ffmpeg_options+=(--target-os=darwin --enable-videotoolbox
-      --enable-hwaccel=h264_videotoolbox,hevc_videotoolbox,av1_videotoolbox
+      '--enable-hwaccel=h264_videotoolbox,hevc_videotoolbox,av1_videotoolbox'
       "--extra-cflags=-target ${triple} -isysroot ${sysroot}"
       "--extra-ldflags=-target ${triple} -isysroot ${sysroot}")
     ;;

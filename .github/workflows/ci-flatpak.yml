@@ -1,0 +1,43 @@
+---
+name: CI-Flatpak
+permissions: {}
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+      - name: Build Flatpak
+        env:
+          FLATPAK_ARCH: ${{ matrix.arch }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --or-update flathub org.flatpak.Builder \
+            "org.freedesktop.Platform/${FLATPAK_ARCH}/25.08" "org.freedesktop.Sdk/${FLATPAK_ARCH}/25.08"
+          sudo su "$(whoami)" -c "flatpak run org.flatpak.Builder \
+            --arch=${FLATPAK_ARCH} --force-clean --repo=flatpak-repo --sandbox \
+            cmake-build-flatpak packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.yml"
+          sudo su "$(whoami)" -c "flatpak build-bundle --arch=${FLATPAK_ARCH} \
+            flatpak-repo Moonlight-${FLATPAK_ARCH}.flatpak dev.lizardbyte.app.Moonlight"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-Flatpak-${{ matrix.arch }}
+          path: Moonlight-*.flatpak
