@@ -661,7 +661,7 @@ namespace {
 
     const std::string fontPath = build_font_path();
     resources.titleFont = TTF_OpenFont(fontPath.c_str(), std::max(22, videoMode.height / 18));
-    resources.bodyFont = TTF_OpenFont(fontPath.c_str(), std::max(16, videoMode.height / streaming::controls_raster_scale(videoMode.height) / 28));
+    resources.bodyFont = TTF_OpenFont(fontPath.c_str(), ui::control_hint_font_size(videoMode.height / streaming::controls_raster_scale(videoMode.height)));
     if (resources.titleFont == nullptr || resources.bodyFont == nullptr) {
       errorMessage = "Failed to load the streaming session font from " + fontPath + ": " + SDL_GetError();
       return false;
@@ -1471,7 +1471,7 @@ namespace {
       }
     };
     resizeFont(resources.titleFont, std::max(22, outputHeight / 18));
-    resizeFont(resources.bodyFont, std::max(16, outputHeight / streaming::controls_raster_scale(outputHeight) / 28));
+    resizeFont(resources.bodyFont, ui::control_hint_font_size(outputHeight / streaming::controls_raster_scale(outputHeight)));
     resizeFont(resources.statisticsFont, std::max(12, outputHeight / 45));
   }
 
@@ -1487,6 +1487,7 @@ namespace {
       newOutputHeight = activate_pending_stream_video_mode(loopContext);
     }
     const bool statisticsChanged = update_stream_statistics_overlay(loopContext.startContext, loopContext.connectionState, &loopContext.resources);
+    loopContext.resources.mediaBackend.presentation().update_save_indicator(SDL_GetTicks());
     if (const bool shouldRenderFrame = !hasDecodedVideo || statisticsChanged || loopContext.resources.mediaBackend.presentation().has_pending_overlay() || loopContext.resources.mediaBackend.has_unrendered_video_frame(); shouldRenderFrame) {
       render_stream_frame(
         loopContext.host,

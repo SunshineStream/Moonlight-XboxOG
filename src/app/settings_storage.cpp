@@ -32,6 +32,7 @@ extern "C" FILE *_wfopen(const wchar_t *path, const wchar_t *mode);
 #include <toml++/toml.hpp>
 
 // local includes
+#include "src/app/file_save_activity.h"
 #include "src/app/stream_bitrate.h"
 #include "src/platform/error_utils.h"
 #include "src/platform/filesystem_utils.h"
@@ -661,6 +662,7 @@ namespace app {
   }
 
   SaveAppSettingsResult save_app_settings(const AppSettings &settings, const std::string &filePath) {
+    const FileSaveActivity saving;
     if (std::string errorMessage; !write_text_file(filePath, format_settings_toml(settings), &errorMessage)) {
       return {false, errorMessage};
     }

@@ -26,6 +26,7 @@ set(MOONLIGHT_TEST_EXCLUDED_SOURCES
         "${MOONLIGHT_SOURCE_ROOT}/src/streaming/stream_controls.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/platform/usb_input.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/ui/shell_screen.cpp"
+        "${MOONLIGHT_SOURCE_ROOT}/src/ui/save_indicator.cpp"
         "${MOONLIGHT_SOURCE_ROOT}/src/ui/svg_assets.cpp"
 )
 

@@ -7,6 +7,7 @@
 
 // standard includes
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <cmath>
@@ -14,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -29,6 +31,7 @@
 #include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
 
 // local includes
+#include "src/app/file_save_activity.h"
 #include "src/app/settings_storage.h"
 #include "src/input/navigation_input.h"
 #include "src/input/shell_controller.h"
@@ -47,9 +50,11 @@
 #include "src/startup/host_storage.h"
 #include "src/startup/saved_files.h"
 #include "src/streaming/session.h"
+#include "src/streaming/video_overlay.h"
 #include "src/ui/asset_path.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/host_probe_result_queue.h"
+#include "src/ui/save_indicator.h"
 #include "src/ui/screenshot_image.h"
 #include "src/ui/sdl_render.h"
 #include "src/ui/shell_layout.h"
@@ -316,14 +321,22 @@ namespace {
   };
 
   /**
+   * @brief Geometry shared by measuring and drawing shell hints.
+   */
+  struct FooterHintStyle {
+    int glyphSize;  ///< Stream control glyph size in output pixels.
+    bool compact = false;  ///< Use tighter spacing for dense keypad actions.
+  };
+
+  /**
    * @brief Measure wrapped input helper rows before laying out a modal.
    * @param font Footer font.
    * @param actions Input helper actions.
    * @param width Footer width.
-   * @param compact Use compact spacing.
+   * @param style Glyph size and horizontal spacing.
    * @return Required footer height.
    */
-  int measure_footer_actions_height(TTF_Font *font, const std::vector<ui::ShellFooterAction> &actions, int width, bool compact = false);
+  int measure_footer_actions_height(TTF_Font *font, const std::vector<ui::ShellFooterAction> &actions, int width, FooterHintStyle style);
 
   bool render_footer_actions(
     SDL_Renderer *renderer,
@@ -331,7 +344,7 @@ namespace {
     AssetTextureCache *assetCache,
     const std::vector<ui::ShellFooterAction> &actions,
     const SDL_Rect &footerRect,
-    bool compact = false
+    FooterHintStyle style
   );
 
   void clear_cover_art_texture_cache(CoverArtTextureCache *cache) {
@@ -1455,6 +1468,7 @@ namespace {
    * @param screenWidth Logical display width.
    * @param screenHeight Framebuffer height.
    * @param outerMargin Television-safe inset.
+   * @param hints Shared input hint size and spacing.
    * @return True when the viewer rendered successfully.
    */
   bool render_log_viewer_modal(  // NOSONAR(cpp:S107) modal rendering keeps the layout inputs explicit
@@ -1465,7 +1479,8 @@ namespace {
     const ui::ShellViewModel &viewModel,
     int screenWidth,
     int screenHeight,
-    int outerMargin
+    int outerMargin,
+    FooterHintStyle hints
   ) {
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     fill_rect(renderer, {0, 0, screenWidth, screenHeight}, 0x00, 0x00, 0x00, 0xA6);
@@ -1482,8 +1497,8 @@ namespace {
       return false;
     }
 
-    const int hintHeight = measure_footer_actions_height(smallFont, viewModel.modal.footerActions, modalRect.w - 36);
-    if (const SDL_Rect hintRect {modalRect.x + 18, modalRect.y + 64 + pathHeight + 8, modalRect.w - 36, hintHeight}; !render_footer_actions(renderer, smallFont, assetCache, viewModel.modal.footerActions, hintRect)) {
+    const int hintHeight = measure_footer_actions_height(smallFont, viewModel.modal.footerActions, modalRect.w - 36, hints);
+    if (const SDL_Rect hintRect {modalRect.x + 18, modalRect.y + 64 + pathHeight + 8, modalRect.w - 36, hintHeight}; !render_footer_actions(renderer, smallFont, assetCache, viewModel.modal.footerActions, hintRect, hints)) {
       return false;
     }
 
@@ -1760,147 +1775,110 @@ namespace {
   }
 
   /**
-   * @brief Measured controller hint with spacing suited to its available row width.
+   * @brief Measured widths of an unboxed input hint.
    */
-  struct FooterActionChipLayout {
-    int labelWidth = 0;  ///< Width of the action label.
-    int iconSize = 0;  ///< Height of controller glyphs or keyboard keycaps.
-    int iconBlockWidth = 0;  ///< Combined input glyph width.
-    int chipWidth = 0;  ///< Total width including content and padding.
-    int horizontalPadding = 10;  ///< Inset at each horizontal edge.
-    int iconLabelGap = 8;  ///< Space between the glyphs and action label.
-    int primaryIconWidth = 0;  ///< Primary glyph width, including wide keyboard labels.
-    int secondaryIconWidth = 0;  ///< Optional secondary glyph width.
+  struct FooterHintWidths {
+    int primary;  ///< Primary glyph or keycap width.
+    int secondary;  ///< Optional secondary glyph or keycap width.
+    int total;  ///< Width of glyphs, spacing and the label.
   };
 
-  int measure_footer_action_label_width(TTF_Font *font, const std::string &label) {
-    int labelWidth = 0;
-    if (int labelHeight = 0; !TTF_GetStringSize(font, label.c_str(), 0, &labelWidth, &labelHeight)) {
-      return static_cast<int>(label.size()) * 8;
-    }
-    return labelWidth;
+  constexpr int HINT_GLYPH_GAP = 4;  ///< Spacing between glyphs or between the last glyph and label.
+  constexpr int HINT_ROW_GAP = 6;  ///< Spacing between wrapped rows.
+
+  /**
+   * @brief Measure text used in an input hint or keyboard keycap.
+   * @param font Hint font.
+   * @param label Null-terminated UTF-8 text to size.
+   * @param length Label length in bytes, excluding the terminator.
+   * @return Text width, with an approximate width if SDL_ttf cannot measure it.
+   */
+  int measure_footer_action_label_width(TTF_Font *font, const char *label, std::size_t length) {
+    int width = 0;
+    return TTF_GetStringSize(font, label, length, &width, nullptr) ? width : static_cast<int>(length) * 8;
   }
 
   /**
-   * @brief Measure a compact controller-action button so dialog controls fit SD output.
-   *
-   * @param font Action label font.
-   * @param action Controller glyphs and label.
-   * @param chipHeight Available button height.
-   * @param compact Reduce horizontal spacing to fit five keypad controls at SD resolutions.
-   * @return Measured icon, label and button widths.
+   * @brief Measure the button glyphs and label as one action.
+   * @param font Hint font.
+   * @param action Controller glyphs or keyboard labels and the action name.
+   * @param glyphSize Height of the controller glyphs and keycaps.
+   * @return Widths for rendering and wrapping.
    */
-  FooterActionChipLayout measure_footer_action_chip(TTF_Font *font, const ui::ShellFooterAction &action, int chipHeight, bool compact) {
-    FooterActionChipLayout layout;
-    const bool keyboard = !action.keyLabel.empty() || !action.secondaryKeyLabel.empty();
-    layout.iconSize = keyboard ? std::max(18, TTF_GetFontHeight(font) + 6) : std::max(18, chipHeight - 14);
-    layout.primaryIconWidth = action.iconAssetPath.empty() ? 0 : layout.iconSize;
-    if (!action.keyLabel.empty()) {
-      layout.primaryIconWidth = measure_footer_action_label_width(font, action.keyLabel) + 12;
-    }
-    layout.secondaryIconWidth = action.secondaryIconAssetPath.empty() ? 0 : layout.iconSize;
-    if (!action.secondaryKeyLabel.empty()) {
-      layout.secondaryIconWidth = measure_footer_action_label_width(font, action.secondaryKeyLabel) + 12;
-    }
-    layout.iconBlockWidth = layout.primaryIconWidth + layout.secondaryIconWidth + (layout.primaryIconWidth > 0 && layout.secondaryIconWidth > 0 ? 4 : 0);
-    layout.horizontalPadding = compact ? 6 : 10;
-    layout.iconLabelGap = compact ? 4 : 8;
-    layout.labelWidth = measure_footer_action_label_width(font, action.label);
-    layout.chipWidth = layout.horizontalPadding * 2 + layout.iconBlockWidth + (layout.iconBlockWidth > 0 ? layout.iconLabelGap : 0) + layout.labelWidth;
-    return layout;
+  FooterHintWidths measure_footer_hint(TTF_Font *font, const ui::ShellFooterAction &action, int glyphSize) {
+    const auto glyph_width = [font, glyphSize](const std::string &key, bool hasAsset) {
+      if (key.empty()) {
+        return hasAsset ? glyphSize : 0;
+      }
+      return std::max(glyphSize, measure_footer_action_label_width(font, key.c_str(), key.size()) + 12);
+    };
+    const int primary = glyph_width(action.keyLabel, !action.iconAssetPath.empty());
+    const int secondary = glyph_width(action.secondaryKeyLabel, !action.secondaryIconAssetPath.empty());
+    const int label = measure_footer_action_label_width(font, action.label.c_str(), action.label.size());
+    return {primary, secondary, primary + secondary + label + (primary > 0 ? HINT_GLYPH_GAP : 0) + (secondary > 0 ? HINT_GLYPH_GAP : 0)};
   }
 
-  /**
-   * @brief Reserve enough footer rows to keep wide keyboard keycaps and every action visible.
-   * @param font Footer font.
-   * @param actions Ordered input hints.
-   * @param width Available footer width, including its horizontal inset.
-   * @param compact Use compact keypad spacing.
-   * @return Height including vertical padding and wrapped rows.
-   */
-  int measure_footer_actions_height(TTF_Font *font, const std::vector<ui::ShellFooterAction> &actions, int width, bool compact) {
-    const int chipHeight = std::max(30, TTF_GetFontLineSkip(font) + 12);
-    const int available = std::max(1, width - 32);
-    const int gap = compact ? 6 : 12;
-    int rows = 1;
+  int measure_footer_actions_height(TTF_Font *font, const std::vector<ui::ShellFooterAction> &actions, int width, FooterHintStyle style) {
+    if (width <= 0) {
+      return 0;
+    }
+    const int rowHeight = std::max(style.glyphSize, TTF_GetFontLineSkip(font));
+    const int gap = style.compact ? 10 : 18;
+    int rows = 0;
     int used = 0;
     for (const auto &action : actions) {
-      const int chipWidth = std::min(available, measure_footer_action_chip(font, action, chipHeight, compact).chipWidth);
-      if (used != 0 && used + gap + chipWidth > available) {
+      const int actionWidth = std::min(width, measure_footer_hint(font, action, style.glyphSize).total);
+      if (rows == 0 || (used > 0 && used + gap + actionWidth > width)) {
         ++rows;
         used = 0;
       }
-      used += (used == 0 ? 0 : gap) + chipWidth;
+      used += (used == 0 ? 0 : gap) + actionWidth;
     }
-    return rows * chipHeight + (rows - 1) * 6 + 16;
+    return rows == 0 ? 0 : rows * rowHeight + (rows - 1) * HINT_ROW_GAP;
   }
 
   /**
-   * @brief Draw controller glyphs using the same spacing as the measured action chip.
-   *
+   * @brief Draw one unboxed input hint with centered glyphs and keycap outlines.
    * @param renderer Active renderer.
-   * @param font Font for keyboard keycaps.
-   * @param assetCache Cached controller icons.
-   * @param action Controller glyph paths or keyboard labels.
-   * @param chipRect Action bounds.
-   * @param layout Measured icon sizes and spacing.
-   * @return Horizontal starting point for the action label.
+   * @param font Hint font.
+   * @param assets Cached controller glyphs.
+   * @param action Input and action label.
+   * @param widths Measured glyph and label widths.
+   * @param bounds Bounded region for the whole hint.
+   * @param glyphSize Controller and keycap height.
+   * @return True when the hint rendered successfully.
    */
-  int render_footer_action_icons(SDL_Renderer *renderer, TTF_Font *font, AssetTextureCache *assetCache, const ui::ShellFooterAction &action, const SDL_Rect &chipRect, const FooterActionChipLayout &layout) {
-    int contentX = chipRect.x + layout.horizontalPadding;
-    const auto render_glyph = [&](const std::string &assetPath, const std::string &keyLabel, int width) {
+  bool render_footer_hint(SDL_Renderer *renderer, TTF_Font *font, AssetTextureCache *assets, const ui::ShellFooterAction &action, const FooterHintWidths &widths, const SDL_Rect &bounds, int glyphSize) {
+    int x = bounds.x;
+    const int right = bounds.x + bounds.w;
+    const auto draw_glyph = [&](const std::string &asset, const std::string &key, int requestedWidth) {
+      const int width = std::min(requestedWidth, right - x);
       if (width <= 0) {
         return;
       }
-      const SDL_Rect rect {contentX, chipRect.y + (chipRect.h - layout.iconSize) / 2, width, layout.iconSize};
-      if (!keyLabel.empty()) {
-        fill_rounded_rect(renderer, rect, {0x2C, 0x32, 0x3B, 0xFF}, 3);
+      const SDL_Rect rect {x, bounds.y + (bounds.h - glyphSize) / 2, width, glyphSize};
+      if (!key.empty()) {
         draw_rounded_rect_outline(renderer, rect, {0xB8, 0xC2, 0xD0, 0xFF}, 3);
-        render_text_centered_simple(renderer, font, keyLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, rect);
+        render_text_centered_simple(renderer, font, key, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, rect);
       } else {
-        render_asset_icon(renderer, assetCache, assetPath, rect);
+        render_asset_icon(renderer, assets, asset, rect);
       }
-      contentX += width + 4;
+      x += width + HINT_GLYPH_GAP;
     };
-    render_glyph(action.iconAssetPath, action.keyLabel, layout.primaryIconWidth);
-    render_glyph(action.secondaryIconAssetPath, action.secondaryKeyLabel, layout.secondaryIconWidth);
-    return chipRect.x + layout.horizontalPadding + layout.iconBlockWidth + (layout.iconBlockWidth > 0 ? layout.iconLabelGap : 0);
+    draw_glyph(action.iconAssetPath, action.keyLabel, widths.primary);
+    draw_glyph(action.secondaryIconAssetPath, action.secondaryKeyLabel, widths.secondary);
+    return x >= right || render_text_line_simple(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, x, bounds.y + (bounds.h - TTF_GetFontLineSkip(font)) / 2, right - x);
   }
 
   /**
-   * @brief Draw a rounded action button containing its controller glyph and label.
-   *
+   * @brief Draw wrapped actions using the same sizes as the footer measurement.
    * @param renderer Active renderer.
-   * @param font Action label font.
+   * @param font Hint font.
    * @param assetCache Cached controller glyphs.
-   * @param action Action represented by the button.
-   * @param layout Measured icon and label layout.
-   * @param chipRect Button bounds.
-   * @return True when its label rendered successfully.
-   */
-  bool render_footer_action_chip(
-    SDL_Renderer *renderer,
-    TTF_Font *font,
-    AssetTextureCache *assetCache,
-    const ui::ShellFooterAction &action,
-    const FooterActionChipLayout &layout,
-    const SDL_Rect &chipRect
-  ) {
-    fill_rounded_rect(renderer, chipRect, {PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xFF}, 6);
-    const int contentX = render_footer_action_icons(renderer, font, assetCache, action, chipRect, layout);
-    return render_text_line(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, contentX, chipRect.y + std::max(6, (chipRect.h - TTF_GetFontLineSkip(font)) / 2), chipRect.w - (contentX - chipRect.x) - layout.horizontalPadding);
-  }
-
-  /**
-   * @brief Draw a controller-hint row with optional compact spacing for numeric entry.
-   *
-   * @param renderer Active renderer.
-   * @param font Action-label font.
-   * @param assetCache Cached controller glyphs.
-   * @param actions Ordered controller hints.
+   * @param actions Ordered input hints.
    * @param footerRect Available row bounds.
-   * @param compact Use compact padding and gaps while preserving label and icon sizes.
-   * @return True when the visible action chips rendered successfully.
+   * @param style Glyph size and spacing.
+   * @return True when the visible hints rendered successfully.
    */
   bool render_footer_actions(
     SDL_Renderer *renderer,
@@ -1908,28 +1886,31 @@ namespace {
     AssetTextureCache *assetCache,
     const std::vector<ui::ShellFooterAction> &actions,
     const SDL_Rect &footerRect,
-    bool compact
+    FooterHintStyle style
   ) {
-    int cursorX = footerRect.x + 16;
-    const int availableRight = footerRect.x + footerRect.w - 16;
-    const int chipHeight = std::max(30, TTF_GetFontLineSkip(font) + 12);
-    int cursorY = footerRect.y + std::max(0, std::min(8, (footerRect.h - chipHeight) / 2));
+    if (footerRect.w <= 0) {
+      return true;
+    }
+    const int right = footerRect.x + footerRect.w;
+    const int rowHeight = std::max(style.glyphSize, TTF_GetFontLineSkip(font));
+    const int gap = style.compact ? 10 : 18;
+    int x = footerRect.x;
+    int y = footerRect.y;
     for (const auto &action : actions) {
-      auto layout = measure_footer_action_chip(font, action, chipHeight, compact);
-      layout.chipWidth = std::min(layout.chipWidth, std::max(1, footerRect.w - 32));
-      if (cursorX + layout.chipWidth > availableRight && cursorX > footerRect.x + 16) {
-        cursorX = footerRect.x + 16;
-        cursorY += chipHeight + 6;
+      const auto widths = measure_footer_hint(font, action, style.glyphSize);
+      const int width = std::min(footerRect.w, widths.total);
+      if (x + width > right && x > footerRect.x) {
+        x = footerRect.x;
+        y += rowHeight + HINT_ROW_GAP;
       }
-      if (cursorY + chipHeight > footerRect.y + footerRect.h) {
+      if (y + rowHeight > footerRect.y + footerRect.h) {
         break;
       }
-      if (!render_footer_action_chip(renderer, font, assetCache, action, layout, {cursorX, cursorY, layout.chipWidth, chipHeight})) {
+      if (!render_footer_hint(renderer, font, assetCache, action, widths, {x, y, width, rowHeight}, style.glyphSize)) {
         return false;
       }
-      cursorX += layout.chipWidth + (compact ? 6 : 12);
+      x += width + gap;
     }
-
     return true;
   }
 
@@ -1942,6 +1923,7 @@ namespace {
    * @param assetCache Cached Lucide and controller glyphs.
    * @param notifications Outstanding notifications in arrival order.
    * @param area Safe notification column above the footer.
+   * @param hints Shared input hint size and spacing.
    * @return True when all visible notification cards rendered successfully.
    */
   bool render_notifications(
@@ -1950,7 +1932,8 @@ namespace {
     TTF_Font *bodyFont,
     AssetTextureCache *assetCache,
     const std::vector<ui::ShellNotification> &notifications,
-    const SDL_Rect &area
+    const SDL_Rect &area,
+    FooterHintStyle hints
   ) {
     if (notifications.empty()) {
       return true;
@@ -1959,12 +1942,13 @@ namespace {
     const int innerWidth = area.w - padding * 2;
     const int titleHeight = TTF_GetFontLineSkip(titleFont);
     const int iconSize = std::max(20, titleHeight - 2);
-    const int actionHeight = std::max(36, TTF_GetFontLineSkip(bodyFont) + 18);
+    std::array<int, ui::MAX_VISIBLE_NOTIFICATIONS> actionHeights {};
     std::vector<int> heights;
     for (std::size_t offset = 0; offset < std::min(notifications.size(), ui::MAX_VISIBLE_NOTIFICATIONS); ++offset) {
       const auto &notification = notifications[notifications.size() - offset - 1U];
       const int messageHeight = std::min(measure_wrapped_text_height(bodyFont, notification.message, innerWidth), TTF_GetFontLineSkip(bodyFont) * 3);
-      heights.push_back(28 + titleHeight + 8 + messageHeight + padding + (notification.actions.empty() ? 0 : actionHeight + 12));
+      actionHeights[offset] = measure_footer_actions_height(bodyFont, notification.actions, innerWidth, hints);
+      heights.push_back(28 + titleHeight + 8 + messageHeight + padding + (actionHeights[offset] == 0 ? 0 : actionHeights[offset] + 12));
     }
     const auto cards = ui::calculate_notification_stack({area.x, area.y, area.w, area.h}, heights);
     for (std::size_t offset = 0; offset < cards.size(); ++offset) {
@@ -1979,7 +1963,7 @@ namespace {
       if (!render_text_line_simple(renderer, titleFont, notification.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, titleX, card.y + 28, card.x + card.w - padding - titleX)) {
         return false;
       }
-      const int footerY = card.y + card.h - padding - (notification.actions.empty() ? 0 : actionHeight);
+      const int footerY = card.y + card.h - padding - actionHeights[offset];
       const int bodyY = card.y + 28 + titleHeight + 8;
       const int bodyBottom = footerY - (notification.actions.empty() ? 0 : 12);
       if (!render_bounded_text(renderer, bodyFont, notification.message, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {card.x + padding, bodyY, innerWidth, bodyBottom - bodyY})) {
@@ -1987,7 +1971,7 @@ namespace {
       }
       if (!notification.actions.empty()) {
         draw_line(renderer, card.x + padding, footerY - 6, card.x + card.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
-        if (!render_footer_actions(renderer, bodyFont, assetCache, notification.actions, {card.x + padding - 16, footerY, innerWidth + 32, actionHeight})) {
+        if (!render_footer_actions(renderer, bodyFont, assetCache, notification.actions, {card.x + padding, footerY, innerWidth, actionHeights[offset]}, hints)) {
           return false;
         }
       }
@@ -2443,7 +2427,54 @@ namespace {
     return true;
   }
 
-  bool persist_hosts(app::ClientState &state) {
+  /**
+   * @brief Keep repainting on the render thread while a synchronous shell action awaits its save.
+   */
+  struct ShellSaveFeedback {
+    std::function<void()> redraw;  ///< Repaint the current shell without processing new commands.
+
+    /**
+     * @brief Save on a worker while preserving the caller's synchronous result and ordering.
+     * @tparam Save Callable returning a save result.
+     * @param operation File operation using the caller's retained data.
+     * @return Result of the save operation.
+     */
+    template<typename Save>
+    auto run(Save operation) const {
+      const std::unique_ptr<SDL_Semaphore, decltype(&SDL_DestroySemaphore)> completed(SDL_CreateSemaphore(0), SDL_DestroySemaphore);
+      decltype(operation()) result {};
+      auto write = [&] {
+        result = operation();
+        SDL_SignalSemaphore(completed.get());
+        return 0;
+      };
+      const app::FileSaveActivity saving;
+      redraw();
+      if (completed) {
+        if (auto *thread = SDL_CreateThread([](auto *context) {
+              return (*static_cast<decltype(write) *>(context))();
+            },
+                                            "save-file",
+                                            &write);
+            thread != nullptr) {
+          while (!SDL_WaitSemaphoreTimeout(completed.get(), 60)) {
+            redraw();
+          }
+          SDL_WaitThread(thread, nullptr);
+          return result;
+        }
+      }
+      return operation();
+    }
+  };
+
+  /**
+   * @brief Save the current host records and clear their dirty flag on success.
+   * @param state Client state supplying the host records.
+   * @param feedback Repaints the shell during the save.
+   * @return True when the records were persisted.
+   */
+  bool persist_hosts(app::ClientState &state, const ShellSaveFeedback &feedback) {
     std::vector<app::HostRecord> hostsToSave;
     if (state.hosts.loaded) {
       hostsToSave = state.hosts.items;
@@ -2462,7 +2493,9 @@ namespace {
       hostsToSave = state.hosts.items;
     }
 
-    const startup::SaveSavedHostsResult saveResult = startup::save_saved_hosts(hostsToSave);
+    const auto saveResult = feedback.run([&hostsToSave] {
+      return startup::save_saved_hosts(hostsToSave);
+    });
     if (saveResult.success) {
       state.hosts.dirty = false;
       logging::info("hosts", "Saved host records");
@@ -2478,13 +2511,14 @@ namespace {
    *
    * @param state Mutable client state.
    * @param update Requested persistence operation.
+   * @param feedback Repaints the shell during the save.
    */
-  void persist_hosts_if_needed(app::ClientState &state, const app::AppUpdate &update) {
+  void persist_hosts_if_needed(app::ClientState &state, const app::AppUpdate &update, const ShellSaveFeedback &feedback) {
     if (!update.persistence.hostsChanged) {
       return;
     }
 
-    if (!persist_hosts(state)) {
+    if (!persist_hosts(state, feedback)) {
       app::show_notification(state, app::NotificationKind::error, "PC changes not saved", "Your changes could not be saved. Check the available storage and try again.");
     } else if (update.persistence.hostDeleteCleanupRequested) {
       app::show_notification(state, app::NotificationKind::success, "PC removed", "Removed the saved PC at " + update.persistence.deletedHostAddress + ":" + std::to_string(app::effective_host_port(update.persistence.deletedHostPort)) + ".", 5000U);
@@ -2558,13 +2592,17 @@ namespace {
    *
    * @param state Mutable client state.
    * @param update Requested settings operation.
+   * @param feedback Repaints the shell during the save.
    */
-  void persist_settings_if_needed(app::ClientState &state, const app::AppUpdate &update) {
+  void persist_settings_if_needed(app::ClientState &state, const app::AppUpdate &update, const ShellSaveFeedback &feedback) {
     if (!update.persistence.settingsChanged || !state.settings.dirty) {
       return;
     }
 
-    const app::SaveAppSettingsResult saveResult = app::save_app_settings(persistent_settings_from_state(state));
+    const auto settings = persistent_settings_from_state(state);
+    const auto saveResult = feedback.run([&settings] {
+      return app::save_app_settings(settings);
+    });
     if (saveResult.success) {
       state.settings.dirty = false;
       logging::info("settings", "Saved Moonlight settings");
@@ -3010,8 +3048,9 @@ namespace {
    *
    * @param state Client state receiving the result, or null when discarding it.
    * @param attempt Completed pairing worker to join and release.
+   * @param feedback Repaints the shell if the accepted result must be saved.
    */
-  void finalize_pairing_attempt(app::ClientState *state, std::unique_ptr<PairingAttemptState> attempt) {
+  void finalize_pairing_attempt(app::ClientState *state, std::unique_ptr<PairingAttemptState> attempt, const ShellSaveFeedback &feedback = {}) {
     if (attempt == nullptr || attempt->thread == nullptr) {
       return;
     }
@@ -3044,7 +3083,7 @@ namespace {
     );
 
     logging::log(result.success || result.alreadyPaired ? logging::LogLevel::info : logging::LogLevel::warning, "pairing", result.message);
-    if (hostsChanged && !persist_hosts(*state)) {
+    if (hostsChanged && !persist_hosts(*state, feedback)) {
       app::show_notification(*state, app::NotificationKind::error, "Pairing not saved", "Pairing succeeded, but the PC could not be saved. Check the available storage.");
     }
   }
@@ -3213,7 +3252,13 @@ namespace {
     return 0;
   }
 
-  void finish_pairing_task_if_ready(app::ClientState &state, PairingTaskState *task) {
+  /**
+   * @brief Apply a ready pairing result and persist the changed host record.
+   * @param state Client state receiving the pairing result.
+   * @param task Pairing worker state.
+   * @param feedback Repaints the shell during the save.
+   */
+  void finish_pairing_task_if_ready(app::ClientState &state, PairingTaskState *task, const ShellSaveFeedback &feedback) {
     if (task == nullptr) {
       return;
     }
@@ -3223,7 +3268,7 @@ namespace {
       return;
     }
 
-    finalize_pairing_attempt(&state, std::move(task->activeAttempt));
+    finalize_pairing_attempt(&state, std::move(task->activeAttempt), feedback);
   }
 
   void cancel_pairing_if_requested(app::ClientState &state, const app::AppUpdate &update, PairingTaskState *task) {
@@ -3259,6 +3304,7 @@ namespace {
    * @param state Client state receiving thread-start failures.
    * @param update Requested endpoint to test.
    * @param task Worker storage owned by the shell runtime.
+   * @param feedback Repaints the shell if the host changes are saved.
    */
   void test_host_connection_if_requested(app::ClientState &state, const app::AppUpdate &update, ConnectionTestTaskState *task) {
     if (!update.requests.connectionTestRequested || task == nullptr || task->thread != nullptr) {
@@ -3283,7 +3329,7 @@ namespace {
    * @param state Client state receiving the completed result.
    * @param task Worker storage owned by the shell runtime.
    */
-  void finish_connection_test_if_ready(app::ClientState &state, ConnectionTestTaskState *task) {
+  void finish_connection_test_if_ready(app::ClientState &state, ConnectionTestTaskState *task, const ShellSaveFeedback &feedback) {
     if (task == nullptr || task->thread == nullptr || !task->completed.load()) {
       return;
     }
@@ -3295,7 +3341,7 @@ namespace {
     app::apply_connection_test_result(state, task->success, task->message);
     logging::log(task->success ? logging::LogLevel::info : logging::LogLevel::warning, "hosts", task->message);
     if (state.hosts.dirty) {
-      persist_hosts(state);
+      persist_hosts(state, feedback);
     }
   }
 
@@ -3304,8 +3350,9 @@ namespace {
    *
    * @param state Mutable client state.
    * @param update Requested library navigation.
+   * @param feedback Repaints the shell while saving refreshed host details.
    */
-  void browse_host_apps_if_requested(app::ClientState &state, const app::AppUpdate &update) {
+  void browse_host_apps_if_requested(app::ClientState &state, const app::AppUpdate &update, const ShellSaveFeedback &feedback) {
     if (!update.requests.appsBrowseRequested) {
       return;
     }
@@ -3343,7 +3390,7 @@ namespace {
 
     apply_server_info_to_host(state, address, port, serverInfo);
     if (state.hosts.dirty) {
-      persist_hosts(state);
+      persist_hosts(state, feedback);
     }
 
     host = app::selected_host(state);
@@ -3395,7 +3442,14 @@ namespace {
     return 0;
   }
 
-  void finish_host_discovery_task_if_ready(app::ClientState &state, HostDiscoveryTaskState *task, Uint32 *nextHostProbeTick) {
+  /**
+   * @brief Apply discovered hosts and save any changes to persistent host records.
+   * @param state Client state receiving discovered hosts.
+   * @param task Discovery worker state.
+   * @param nextHostProbeTick Receives the next scheduled probe time.
+   * @param feedback Repaints the shell during the save.
+   */
+  void finish_host_discovery_task_if_ready(app::ClientState &state, HostDiscoveryTaskState *task, Uint32 *nextHostProbeTick, const ShellSaveFeedback &feedback) {
     if (task == nullptr || task->thread == nullptr || !task->completed.load()) {
       return;
     }
@@ -3434,7 +3488,7 @@ namespace {
       logging::info("hosts", "Auto discovery completed without finding any Moonlight-compatible hosts. If you are using xemu's default user-mode network, use TAP networking or add the host manually.");
     }
     if (persistedHostCount > 0U && state.hosts.dirty) {
-      persist_hosts(state);
+      persist_hosts(state, feedback);
     }
   }
 
@@ -3480,7 +3534,13 @@ namespace {
     }
   }
 
-  void finish_host_probe_task_if_ready(app::ClientState &state, HostProbeTaskState *task) {
+  /**
+   * @brief Merge completed probes and persist changed host details.
+   * @param state Client state receiving the probe results.
+   * @param task Worker handles and published results.
+   * @param feedback Repaints the shell during the save.
+   */
+  void finish_host_probe_task_if_ready(app::ClientState &state, HostProbeTaskState *task, const ShellSaveFeedback &feedback) {
     if (task == nullptr) {
       return;
     }
@@ -3497,7 +3557,7 @@ namespace {
       "Refreshed " + std::to_string(task->onlineCount + task->offlineCount) + " saved host(s): " + std::to_string(task->onlineCount) + " online, " + std::to_string(task->offlineCount) + " offline"
     );
     if (task->metadataChanged) {
-      persist_hosts(state);
+      persist_hosts(state, feedback);
     }
     reset_host_probe_task(task);
   }
@@ -3563,12 +3623,19 @@ namespace {
     }
   }
 
-  void pair_host_if_requested(app::ClientState &state, const app::AppUpdate &update, PairingTaskState *task) {
+  /**
+   * @brief Start a requested pairing worker after handling any completed attempt.
+   * @param state Client state to update.
+   * @param update Pairing request from the shell.
+   * @param task Pairing worker state.
+   * @param feedback Repaints the shell if processing the previous attempt saves a host.
+   */
+  void pair_host_if_requested(app::ClientState &state, const app::AppUpdate &update, PairingTaskState *task, const ShellSaveFeedback &feedback) {
     if (!update.requests.pairingRequested || task == nullptr) {
       return;
     }
 
-    finish_pairing_task_if_ready(state, task);
+    finish_pairing_task_if_ready(state, task, feedback);
 
     if (pairing_task_is_active(*task)) {
       retire_active_pairing_attempt(task, true);
@@ -3652,7 +3719,13 @@ namespace {
     return 0;
   }
 
-  void finish_app_list_task_if_ready(app::ClientState &state, AppListTaskState *task) {
+  /**
+   * @brief Publish a completed app list and persist any changed host details.
+   * @param state Client state receiving the list.
+   * @param task App-list worker state.
+   * @param feedback Repaints the shell during the save.
+   */
+  void finish_app_list_task_if_ready(app::ClientState &state, AppListTaskState *task, const ShellSaveFeedback &feedback) {
     if (task == nullptr || task->thread == nullptr || !task->completed.load()) {
       return;
     }
@@ -3681,7 +3754,7 @@ namespace {
       app::apply_app_list_result(state, address, port, std::move(apps), appListContentHash, true, message);
       logging::info("apps", "Fetched app list from " + address + ":" + std::to_string(serverInfo.httpPort));
       if (state.hosts.dirty) {
-        persist_hosts(state);
+        persist_hosts(state, feedback);
       }
       return;
     }
@@ -4038,18 +4111,19 @@ namespace {
   }
 
   /**
-   * @brief Fonts shared by the title, content and actions of a shell dialog.
+   * @brief Fonts and input hint styling shared by the shell and its dialogs.
    */
   struct DialogFonts {
     TTF_Font *titleFont;  ///< Dialog heading font.
     TTF_Font *bodyFont;  ///< Dialog body font.
     TTF_Font *smallFont;  ///< Helper and action font.
+    FooterHintStyle hints;  ///< Sizes for controller glyphs and keyboard hints.
   };
 
   /**
    * @brief Render a shell modal and optionally retain its folder-list viewport.
    * @param renderer Dialog renderer.
-   * @param fonts Heading, body and helper fonts.
+   * @param fonts Heading, body and helper fonts and input hint styling.
    * @param assetCache Cached action icons.
    * @param modal Dialog content.
    * @param width Logical display width.
@@ -4058,13 +4132,18 @@ namespace {
    * @return True when the dialog rendered successfully.
    */
   bool render_shell_dialog(SDL_Renderer *renderer, const DialogFonts &fonts, AssetTextureCache *assetCache, const ui::ShellModalView &modal, int width, int height, FolderDialogCache *folder = nullptr) {
-    const auto &[titleFont, bodyFont, smallFont] = fonts;
+    const auto &[titleFont, bodyFont, smallFont, hints] = fonts;
     const int padding = std::max(18, height / 40);
     const int dialogWidth = std::min(760, width * 3 / 4);
     const int innerWidth = dialogWidth - padding * 2;
     const int statusIconSize = modal.iconAssetPath.empty() ? 0 : std::max(28, TTF_GetFontLineSkip(titleFont));
     const int titleHeight = std::max(TTF_GetFontLineSkip(titleFont), statusIconSize) + 18;
-    const int footerHeight = std::max(40, TTF_GetFontLineSkip(smallFont) + 18);
+    const std::vector<ui::ShellFooterAction> defaultActions = modal.actions.empty() ?
+                                                                std::vector<ui::ShellFooterAction> {{"close", "Close", "icons\\button-b.svg", {}, false}} :
+                                                                std::vector<ui::ShellFooterAction> {{"select", "Select", "icons\\button-a.svg", {}, true}, {"back", "Back", "icons\\button-b.svg", {}, false}};
+    const auto &footerActions = modal.footerActions.empty() ? defaultActions : modal.footerActions;
+    const int hintHeight = measure_footer_actions_height(smallFont, footerActions, innerWidth, hints);
+    const int footerHeight = std::max({40, TTF_GetFontLineSkip(smallFont) + 18, hintHeight});
     const int rowHeight = std::max(36, TTF_GetFontLineSkip(bodyFont) + 16);
     const int lineGap = modal.compactBody ? 3 : 8;
     const int textHeight = measure_body_lines_height(smallFont, modal.lines, innerWidth, lineGap);
@@ -4107,28 +4186,27 @@ namespace {
       return true;
     }
     draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
-    const std::vector<ui::ShellFooterAction> defaultActions = modal.actions.empty() ?
-                                                                std::vector<ui::ShellFooterAction> {{"close", "Close", "icons\\button-b.svg", {}, false}} :
-                                                                std::vector<ui::ShellFooterAction> {{"select", "Select", "icons\\button-a.svg", {}, true}, {"back", "Back", "icons\\button-b.svg", {}, false}};
     if (modal.busy) {
       return render_text_line_simple(renderer, smallFont, "Please wait...", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, bounds.x + padding, footerY + 8, innerWidth);
     }
-    return render_footer_actions(renderer, smallFont, assetCache, modal.footerActions.empty() ? defaultActions : modal.footerActions, {bounds.x + padding - 6, footerY, innerWidth + 12, footerHeight});
+    return render_footer_actions(renderer, smallFont, assetCache, footerActions, {bounds.x + padding, footerY + (footerHeight - hintHeight) / 2, innerWidth, hintHeight}, hints);
   }
 
   /**
    * @brief Render local numeric or text entry with cached labels and optional shared keyboard geometry.
    *
    * @param renderer Active renderer.
-   * @param bodyFont Heading, input and key font.
-   * @param smallFont Guidance and action font.
+   * @param fonts Keypad text fonts and shared controller glyph size.
    * @param assetCache Cached button glyphs.
    * @param viewModel Current keypad state.
    * @param displayBounds Logical display rectangle.
    * @param cache Reusable keypad text and measurements.
    * @return True when the complete keypad rendered.
    */
-  bool render_keypad_dialog(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &displayBounds, KeypadModalLayoutCache *cache) {
+  bool render_keypad_dialog(SDL_Renderer *renderer, const DialogFonts &fonts, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &displayBounds, KeypadModalLayoutCache *cache) {
+    auto *bodyFont = fonts.bodyFont;
+    auto *smallFont = fonts.smallFont;
+    const FooterHintStyle hints {fonts.hints.glyphSize, true};
     const int width = displayBounds.w;
     const int height = displayBounds.h;
     const int padding = std::max(18, height / 40);
@@ -4141,7 +4219,7 @@ namespace {
     const int titleHeight = TTF_GetFontLineSkip(bodyFont) + 14;
     const int hintHeight = keypad_modal_text_height(renderer, smallFont, viewModel, innerWidth, cache);
     const int valueHeight = TTF_GetFontLineSkip(bodyFont) + 20;
-    const int footerHeight = measure_footer_actions_height(smallFont, viewModel.keypad.footerActions, innerWidth + 12, true);
+    const int footerHeight = measure_footer_actions_height(smallFont, viewModel.keypad.footerActions, innerWidth, hints);
     const int preferredKeyHeight = std::max(36, TTF_GetFontLineSkip(bodyFont) + 18);
     const int desiredHeight = padding * 2 + 12 + titleHeight + hintHeight + valueHeight + 20 + rows * (preferredKeyHeight + gap) + footerHeight;
     const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, desiredHeight));
@@ -4206,7 +4284,7 @@ namespace {
     }
     draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
     const auto &actions = viewModel.keypad.footerActions;
-    return render_footer_actions(renderer, smallFont, assetCache, actions, {bounds.x + padding - 12, footerY, innerWidth + 24, footerHeight}, true);
+    return render_footer_actions(renderer, smallFont, assetCache, actions, {bounds.x + padding, footerY, innerWidth, footerHeight}, hints);
   }
 
 #ifdef NXDK
@@ -4330,20 +4408,18 @@ namespace {
    * @param renderer Active software renderer, also used by the Xbox framebuffer path.
    * @param bodyFont Heading and error font.
    * @param smallFont Caption and helper font.
-   * @param assets Shared main-menu SVG textures.
    * @param view Current capture, metadata and input hints.
    * @param bounds Television-safe logical content area.
    * @param cache Single retained capture texture.
-   * @return True when the viewer frame was presented successfully.
+   * @return True when the viewer frame was drawn successfully.
    */
-  bool render_screenshot_viewer(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assets, const ui::ShellViewModel &view, const SDL_Rect &bounds, ScreenshotTextureCache &cache) {
+  bool render_screenshot_viewer(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, const ui::ShellViewModel &view, const SDL_Rect &bounds, ScreenshotTextureCache &cache) {
     load_screenshot_texture(renderer, view.screenshot.path, cache);
     const SDL_Color text {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
     const SDL_Color muted {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
     const int heading = TTF_GetFontLineSkip(bodyFont) + 8;
     const int caption = TTF_GetFontLineSkip(smallFont) + 6;
-    const int footer = measure_footer_actions_height(smallFont, view.modal.footerActions, bounds.w);
-    const SDL_Rect picture {bounds.x, bounds.y + heading + caption, bounds.w, std::max(1, bounds.h - heading - caption * 2 - footer - 12)};
+    const SDL_Rect picture {bounds.x, bounds.y + heading + caption, bounds.w, std::max(1, bounds.h - heading - caption * 2 - 12)};
     if (!render_text_line_simple(renderer, bodyFont, view.modal.title, text, bounds.x, bounds.y, bounds.w) || !render_text_line_simple(renderer, smallFont, view.screenshot.caption, muted, bounds.x, bounds.y + heading, bounds.w)) {
       return false;
     }
@@ -4357,11 +4433,23 @@ namespace {
         return false;
       }
     }
-    if (const std::string details = !view.screenshot.status.empty() && !view.screenshot.path.empty() ? view.screenshot.status : view.screenshot.path; !render_text_line_simple(renderer, smallFont, details, muted, bounds.x, picture.y + picture.h + 6, bounds.w) || !render_footer_actions(renderer, smallFont, assets, view.modal.footerActions, {bounds.x, bounds.y + bounds.h - footer, bounds.w, footer})) {
+    if (const std::string details = !view.screenshot.status.empty() && !view.screenshot.path.empty() ? view.screenshot.status : view.screenshot.path; !render_text_line_simple(renderer, smallFont, details, muted, bounds.x, picture.y + picture.h + 6, bounds.w)) {
       return false;
     }
-    SDL_RenderPresent(renderer);
     return true;
+  }
+
+  /**
+   * @brief Draw the save indicator in its reserved place below the footer divider.
+   * @param renderer Active shell renderer.
+   * @param indicator Cached save artwork.
+   * @param frame Sampled save animation time, or no active save.
+   * @param bounds Save indicator rectangle from the shared page layout.
+   */
+  void draw_shell_save_indicator(SDL_Renderer *renderer, ui::SaveIndicator &indicator, const std::optional<Uint64> &frame, ui::ShellRect bounds) {
+    if (frame.has_value()) {
+      indicator.draw(renderer, sdl_rect(bounds), *frame);
+    }
   }
 
   /**
@@ -4370,27 +4458,28 @@ namespace {
    * @param renderer Active SDL renderer, including the software fallback.
    * @param videoMode Output resolution and pixel aspect information.
    * @param encoderSettings Encoder flags used for widescreen correction.
-   * @param titleFont Page heading font.
-   * @param bodyFont Primary label font.
-   * @param smallFont Supporting text font.
+   * @param fonts Shell fonts and control hint styling.
    * @param viewModel Render-ready page and modal state.
    * @param textureCache Cached host artwork.
    * @param assetCache Cached SVG icons.
    * @param keypadModalLayoutCache Reusable keypad layout and text textures.
+   * @param saveIndicator Cached save artwork.
+   * @param saveFrame Sampled save animation time, or no active save.
    * @return True when the complete frame was presented successfully.
    */
   bool draw_shell(  // NOSONAR(cpp:S107) one-frame shell rendering keeps layout dependencies explicit
     SDL_Renderer *renderer,
     const VIDEO_MODE &videoMode,
     unsigned long encoderSettings,
-    TTF_Font *titleFont,
-    TTF_Font *bodyFont,
-    TTF_Font *smallFont,
+    const DialogFonts &fonts,
     const ui::ShellViewModel &viewModel,
     CoverArtTextureCache *textureCache,
     AssetTextureCache *assetCache,
-    KeypadModalLayoutCache *keypadModalLayoutCache
+    KeypadModalLayoutCache *keypadModalLayoutCache,
+    ui::SaveIndicator &saveIndicator,
+    const std::optional<Uint64> &saveFrame
   ) {
+    const auto &[titleFont, bodyFont, smallFont, hints] = fonts;
     int framebufferWidth = 0;
     int framebufferHeight = 0;
     if (!SDL_GetCurrentRenderOutputSize(renderer, &framebufferWidth, &framebufferHeight) || framebufferWidth <= 0 || framebufferHeight <= 0) {
@@ -4405,7 +4494,7 @@ namespace {
     auto *folder = keypadModalLayoutCache != nullptr && keypadModalLayoutCache->window != nullptr ? &keypadModalLayoutCache->folder : nullptr;
     const bool folderBrowser = viewModel.modal.visible && !viewModel.modal.busy && !viewModel.modal.actions.empty() && !viewModel.logViewer.visible && !viewModel.screenshot.visible && !viewModel.overlay.visible && !viewModel.keypad.visible;
     if (folder != nullptr) {
-      if (const bool reusable = folderBrowser && folder->valid && folder->logicalWidth == screenWidth && folder->framebufferWidth == framebufferWidth && folder->framebufferHeight == framebufferHeight && folder->titleFont == titleFont && folder->bodyFont == bodyFont && folder->smallFont == smallFont && ui::same_action_dialog_content(folder->content, viewModel.modal); reusable) {
+      if (const bool reusable = !saveFrame.has_value() && folderBrowser && folder->valid && folder->logicalWidth == screenWidth && folder->framebufferWidth == framebufferWidth && folder->framebufferHeight == framebufferHeight && folder->titleFont == titleFont && folder->bodyFont == bodyFont && folder->smallFont == smallFont && ui::same_action_dialog_content(folder->content, viewModel.modal); reusable) {
         const auto selected = selected_action_index(viewModel.modal.actions);
         if (selected == folder->selected) {
           return true;
@@ -4429,7 +4518,12 @@ namespace {
     }
     SDL_SetRenderScale(renderer, 1.0f, 1.0f);
 
-    const ui::ShellLayout layout = ui::calculate_shell_layout(screenWidth, screenHeight);
+    const bool screenshotViewer = viewModel.screenshot.visible && !viewModel.overlay.visible && keypadModalLayoutCache != nullptr;
+    const auto &footerActions = screenshotViewer ? viewModel.modal.footerActions : viewModel.frame.footerActions;
+    auto layout = ui::calculate_shell_layout(screenWidth, screenHeight, hints.glyphSize);
+    if (const int hintsHeight = measure_footer_actions_height(smallFont, footerActions, layout.footerHints.w, hints); hintsHeight > layout.footerHints.h) {
+      layout = ui::calculate_shell_layout(screenWidth, screenHeight, hints.glyphSize, hintsHeight);
+    }
     const int outerMargin = layout.navigation.x;
     const int panelGap = layout.gap;
     const SDL_Rect headerRect = sdl_rect(layout.navigation);
@@ -4441,8 +4535,18 @@ namespace {
       return false;
     }
 
-    if (viewModel.screenshot.visible && !viewModel.overlay.visible && keypadModalLayoutCache != nullptr) {
-      return render_screenshot_viewer(renderer, bodyFont, smallFont, assetCache, viewModel, {outerMargin, outerMargin, screenWidth - outerMargin * 2, screenHeight - outerMargin * 2}, keypadModalLayoutCache->screenshot);
+    const int footerDividerY = footerRect.y - 1;
+    const int contentBottom = contentRect.y + contentRect.h;
+    draw_line(renderer, footerRect.x, footerDividerY, footerRect.x + footerRect.w, footerDividerY, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
+    if (screenshotViewer) {
+      const SDL_Rect viewerBounds {headerRect.x, headerRect.y, headerRect.w, contentBottom - headerRect.y};
+      if (!render_screenshot_viewer(renderer, bodyFont, smallFont, viewModel, viewerBounds, keypadModalLayoutCache->screenshot) || !render_footer_actions(renderer, smallFont, assetCache, footerActions, sdl_rect(layout.footerHints), hints)) {
+        return false;
+      }
+      draw_shell_save_indicator(renderer, saveIndicator, saveFrame, layout.saveIndicator);
+      SDL_RenderPresent(renderer);
+      SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+      return true;
     }
 
     const int logoSize = std::max(26, headerRect.h - 12);
@@ -4466,7 +4570,6 @@ namespace {
     if (!render_text_line_simple(renderer, titleFont, viewModel.frame.pageTitle, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.heading.x, layout.heading.y, layout.heading.w) || !render_text_line_simple(renderer, smallFont, viewModel.frame.subtitle, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.heading.x, layout.heading.y + TTF_GetFontLineSkip(titleFont) + 5, layout.heading.w)) {
       return false;
     }
-    draw_line(renderer, footerRect.x, footerRect.y - 6, footerRect.x + footerRect.w, footerRect.y - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
 
     if (viewModel.frame.screen == app::ScreenId::hosts) {
       if (!viewModel.content.hostTiles.empty()) {
@@ -4532,14 +4635,14 @@ namespace {
       }
     }
 
-    if (!viewModel.modal.visible && !viewModel.keypad.visible && !render_footer_actions(renderer, smallFont, assetCache, viewModel.frame.footerActions, footerRect)) {
+    if (!viewModel.modal.visible && !viewModel.keypad.visible && !render_footer_actions(renderer, smallFont, assetCache, footerActions, sdl_rect(layout.footerHints), hints)) {
       return false;
     }
 
     if (viewModel.notification.visible) {
       const int notificationWidth = std::min(420, std::max(300, screenWidth / 3));
-      const SDL_Rect notificationArea {screenWidth - outerMargin - notificationWidth, outerMargin, notificationWidth, footerRect.y - outerMargin - 14};
-      if (!render_notifications(renderer, bodyFont, smallFont, assetCache, viewModel.notification.items, notificationArea)) {
+      const SDL_Rect notificationArea {screenWidth - outerMargin - notificationWidth, outerMargin, notificationWidth, contentBottom + panelGap - outerMargin - 14};
+      if (!render_notifications(renderer, bodyFont, smallFont, assetCache, viewModel.notification.items, notificationArea, hints)) {
         return false;
       }
     }
@@ -4571,7 +4674,7 @@ namespace {
     }
 
     if (viewModel.modal.visible && viewModel.logViewer.visible) {
-      if (!render_log_viewer_modal(renderer, bodyFont, smallFont, assetCache, viewModel, screenWidth, screenHeight, outerMargin)) {
+      if (!render_log_viewer_modal(renderer, bodyFont, smallFont, assetCache, viewModel, screenWidth, screenHeight, outerMargin, hints)) {
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         fill_rect(renderer, {0, 0, screenWidth, screenHeight}, 0x00, 0x00, 0x00, 0xA6);
         const SDL_Rect modalRect {
@@ -4586,15 +4689,16 @@ namespace {
         render_text_line_simple(renderer, smallFont, "The full log viewer could not be rendered safely.", {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54, modalRect.w - 32);
         render_text_line_simple(renderer, smallFont, (viewModel.modal.footerActions.empty() || viewModel.modal.footerActions.back().keyLabel.empty() ? "Press B to close." : "Press Esc to close."), {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_GetFontLineSkip(smallFont) + 8, modalRect.w - 32);
       }
-    } else if (viewModel.modal.visible && !render_shell_dialog(renderer, {titleFont, bodyFont, smallFont}, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
+    } else if (viewModel.modal.visible && !render_shell_dialog(renderer, fonts, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
       return false;
     }
-    if (viewModel.keypad.visible && !render_keypad_dialog(renderer, bodyFont, smallFont, assetCache, viewModel, {0, 0, screenWidth, screenHeight}, keypadModalLayoutCache)) {
+    if (viewModel.keypad.visible && !render_keypad_dialog(renderer, fonts, assetCache, viewModel, {0, 0, screenWidth, screenHeight}, keypadModalLayoutCache)) {
       return false;
     }
 
+    draw_shell_save_indicator(renderer, saveIndicator, saveFrame, layout.saveIndicator);
     SDL_RenderPresent(renderer);
-    if (folder != nullptr && folderBrowser) {
+    if (folder != nullptr && folderBrowser && !saveFrame.has_value()) {
       folder->content = viewModel.modal;
       folder->logicalWidth = screenWidth;
       folder->framebufferWidth = framebufferWidth;
@@ -5060,8 +5164,9 @@ namespace {
    * @brief Apply and persist a completed host quit without waiting on unfinished workers.
    * @param state Local host library and progress dialog.
    * @param task Runtime-owned quit worker.
+   * @param feedback Repaints the shell if the result must be saved.
    */
-  void finish_app_quit_task(app::ClientState &state, AppQuitTaskState &task) {
+  void finish_app_quit_task(app::ClientState &state, AppQuitTaskState &task, const ShellSaveFeedback &feedback) {
     if (task.thread == nullptr || !task.completed.load()) {
       return;
     }
@@ -5070,7 +5175,7 @@ namespace {
     app::apply_app_quit_result(state, task.success, task.message);
     app::AppUpdate update;
     update.persistence.hostsChanged = task.success;
-    persist_hosts_if_needed(state, update);
+    persist_hosts_if_needed(state, update, feedback);
   }
 
   /**
@@ -5081,9 +5186,11 @@ namespace {
     TTF_Font *titleFont = nullptr;  ///< Large font used for screen titles.
     TTF_Font *bodyFont = nullptr;  ///< Standard body font.
     TTF_Font *smallFont = nullptr;  ///< Small font for secondary labels.
+    int hintGlyphSize = 0;  ///< Stream controller glyph height measured for the current output.
     SDL_Gamepad *controller = nullptr;  ///< Primary open game controller, when available.
     CoverArtTextureCache coverArtTextureCache;  ///< Cached cover-art textures.
     AssetTextureCache assetTextureCache;  ///< Cached UI asset textures.
+    ui::SaveIndicator saveIndicator;  ///< Small reusable indicator raster independent of the current renderer.
     KeypadModalLayoutCache keypadModalLayoutCache;  ///< Cached keypad modal layout artifacts.
     unsigned long encoderSettings = 0;  ///< Active video encoder settings for layout calculations.
     bool ttfInitialized = false;  ///< Whether SDL_ttf was initialized in this shell session.
@@ -5099,6 +5206,8 @@ namespace {
     Uint32 nextHostDiscoveryTick = 0;  ///< Next scheduled host auto-discovery time.
     Uint32 nextHostProbeTick = 0;  ///< Next scheduled host probe time.
     Uint32 notificationTick = 0;  ///< Last clock sample used to advance visible notification lifetimes.
+    std::optional<Uint64> lastSaveFrame;  ///< Indicator actually drawn by the last shell frame.
+    ShellSaveFeedback saveFeedback;  ///< Repaints the shell while a file save is pending.
     PairingTaskState pairingTask {};  ///< Background pairing workflow state.
     ConnectionTestTaskState connectionTestTask {};  ///< Background manual connection test.
     AppListTaskState appListTask {};  ///< Background app-list fetch state.
@@ -5244,6 +5353,12 @@ namespace {
       return false;
     }
 
+    const int controlsScale = streaming::controls_raster_scale(videoMode.height);
+    const int rasterHeight = videoMode.height / controlsScale;
+    const std::unique_ptr<TTF_Font, decltype(&TTF_CloseFont)> controlsFont(TTF_OpenFont(fontPath.c_str(), ui::control_hint_font_size(rasterHeight)), &TTF_CloseFont);
+    const int lineHeight = TTF_GetFontLineSkip(controlsFont ? controlsFont.get() : resources->smallFont);
+    resources->hintGlyphSize = ui::control_hint_glyph_size(lineHeight, rasterHeight) * controlsScale;
+
     if (resources->controller == nullptr || !SDL_GamepadConnected(resources->controller)) {
       close_controller(resources->controller);
       resources->controller = open_primary_controller();
@@ -5290,7 +5405,10 @@ namespace {
 
     const std::vector<logging::LogEntry> retainedEntries = logging::snapshot(logging::LogLevel::info);
     const auto viewModel = ui::build_shell_view_model(state, retainedEntries);
-    if (draw_shell(resources->renderer, videoMode, resources->encoderSettings, resources->titleFont, resources->bodyFont, resources->smallFont, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache)) {
+    const auto saveFrame = ui::save_indicator_frame(SDL_GetTicks());
+    const DialogFonts fonts {resources->titleFont, resources->bodyFont, resources->smallFont, {resources->hintGlyphSize}};
+    if (draw_shell(resources->renderer, videoMode, resources->encoderSettings, fonts, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache, resources->saveIndicator, saveFrame)) {
+      runtime->lastSaveFrame = saveFrame;
       runtime->keypadRedrawRequested = false;
       return true;
     }
@@ -5325,13 +5443,13 @@ namespace {
     }
     runtime->keypadRedrawRequested = runtime->keypadRedrawRequested || changed;
 
-    finish_pairing_task_if_ready(state, &runtime->pairingTask);
-    finish_connection_test_if_ready(state, &runtime->connectionTestTask);
-    finish_app_list_task_if_ready(state, &runtime->appListTask);
-    finish_app_quit_task(state, runtime->appQuitTask);
+    finish_pairing_task_if_ready(state, &runtime->pairingTask, runtime->saveFeedback);
+    finish_connection_test_if_ready(state, &runtime->connectionTestTask, runtime->saveFeedback);
+    finish_app_list_task_if_ready(state, &runtime->appListTask, runtime->saveFeedback);
+    finish_app_quit_task(state, runtime->appQuitTask, runtime->saveFeedback);
     collect_app_art_task(state, &runtime->appArtTask, &resources->coverArtTextureCache);
-    finish_host_discovery_task_if_ready(state, &runtime->hostDiscoveryTask, &runtime->nextHostProbeTick);
-    finish_host_probe_task_if_ready(state, &runtime->hostProbeTask);
+    finish_host_discovery_task_if_ready(state, &runtime->hostDiscoveryTask, &runtime->nextHostProbeTick, runtime->saveFeedback);
+    finish_host_probe_task_if_ready(state, &runtime->hostProbeTask, runtime->saveFeedback);
   }
 
   /**
@@ -5442,11 +5560,11 @@ namespace {
     }
 
     initialize_shell_runtime(state, runtime);
-    finish_host_discovery_task_if_ready(state, &runtime->hostDiscoveryTask, &runtime->nextHostProbeTick);
-    finish_host_probe_task_if_ready(state, &runtime->hostProbeTask);
+    finish_host_discovery_task_if_ready(state, &runtime->hostDiscoveryTask, &runtime->nextHostProbeTick, runtime->saveFeedback);
+    finish_host_probe_task_if_ready(state, &runtime->hostProbeTask, runtime->saveFeedback);
     app::AppUpdate settingsUpdate {};
     settingsUpdate.persistence.settingsChanged = state.settings.dirty;
-    persist_settings_if_needed(state, settingsUpdate);
+    persist_settings_if_needed(state, settingsUpdate, runtime->saveFeedback);
     if (streamStarted && state.hosts.activeLoaded) {
       state.hosts.active.appListState = app::HostAppListState::loading;
       state.hosts.active.appListStatusMessage = "Refreshing host apps after the stream session...";
@@ -5498,7 +5616,9 @@ namespace {
       auto &viewer = state.screenshotViewer;
       const auto &entry = viewer.entries[std::min(viewer.selectedIndex, viewer.entries.size() - 1)];
       std::string error;
-      const bool deleted = app::delete_screenshot(entry, app::screenshot_library_path(), error);
+      const bool deleted = runtime->saveFeedback.run([&entry, &error] {
+        return app::delete_screenshot(entry, app::screenshot_library_path(), error);
+      });
       if (deleted) {
         destroy_texture(resources->keypadModalLayoutCache.screenshot.texture);
         resources->keypadModalLayoutCache.screenshot = {};
@@ -5519,14 +5639,14 @@ namespace {
     show_log_file_if_requested(state, update);
     cancel_pairing_if_requested(state, update, &runtime->pairingTask);
     test_host_connection_if_requested(state, update, &runtime->connectionTestTask);
-    browse_host_apps_if_requested(state, update);
-    pair_host_if_requested(state, update, &runtime->pairingTask);
+    browse_host_apps_if_requested(state, update, runtime->saveFeedback);
+    pair_host_if_requested(state, update, &runtime->pairingTask, runtime->saveFeedback);
     delete_host_data_if_requested(state, update, &resources->coverArtTextureCache);
     delete_saved_file_if_requested(state, update, &resources->coverArtTextureCache);
     factory_reset_if_requested(state, update, &resources->coverArtTextureCache);
     refresh_saved_files_if_needed(state);
-    persist_settings_if_needed(state, update);
-    persist_hosts_if_needed(state, update);
+    persist_settings_if_needed(state, update, runtime->saveFeedback);
+    persist_hosts_if_needed(state, update, runtime->saveFeedback);
 
     const VIDEO_MODE activeVideoMode = videoMode != nullptr ? *videoMode : VIDEO_MODE {};
     if (!launch_stream_if_requested(window, activeVideoMode, state, update, resources, runtime)) {
@@ -5604,7 +5724,8 @@ namespace {
     finish_shell_background_tasks(state, resources, runtime);
     start_shell_background_tasks_if_needed(state, runtime, SDL_GetTicks());
 
-    if ((runtime->keypadRedrawRequested || ui::shell_requires_animation(state)) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
+    const bool saveFrameChanged = runtime->lastSaveFrame != ui::save_indicator_frame(SDL_GetTicks());
+    if ((runtime->keypadRedrawRequested || saveFrameChanged || ui::shell_requires_animation(state)) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
       return false;
     }
 
@@ -5673,6 +5794,12 @@ namespace ui {
 
     ShellRuntimeState runtime {};
     initialize_shell_runtime(state, &runtime);
+    runtime.saveFeedback.redraw = [&] {
+      if (runtime.running && resources.renderer != nullptr) {
+        draw_current_shell_frame(activeVideoMode, state, &resources, &runtime);
+        runtime.keypadRedrawRequested = true;
+      }
+    };
 
     while (runtime.running && !state.shell.shouldExit) {
       if (!run_shell_frame(window, &activeVideoMode, state, &resources, &runtime)) {

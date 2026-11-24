@@ -500,6 +500,45 @@ TEST_F(PvideoPresenterTest, CompositesStatisticsIntoSubmittedVideoBuffer) {
   EXPECT_EQ(static_cast<const std::uint8_t *>(next->first)[2], 81);
 }
 
+/**
+ * @brief Compose the transparent save icon over an existing panel and remove it on the next submission.
+ */
+TEST_F(PvideoPresenterTest, CompositesAndClearsAnIndependentSaveIcon) {
+  constexpr int width = 64;
+  constexpr int height = 48;
+  const std::vector<std::uint8_t> y(width * height, 81);
+  const std::vector<std::uint8_t> uv(width * height / 4, 128);
+  const streaming::Yuv420FrameView source {width, height, {y.data(), uv.data(), uv.data()}, {y.size(), uv.size(), uv.size()}, {width, width / 2, width / 2}};
+  constexpr streaming::VideoRectangle target {0, 0, width, height};
+  streaming::VideoOverlay panel;
+  panel.set_bitmap(width, height, std::vector<std::uint8_t>(width * height, 64), streaming::VideoOverlayPlacement::full_screen);
+  constexpr std::uint8_t panelLuma = 71;
+  streaming::VideoOverlay indicator;
+  std::vector<std::uint8_t> icon(8 * 8 * 4, 255);
+  std::fill_n(icon.begin(), 4, 0);
+  ASSERT_TRUE(indicator.set_argb_surface(8, 8, icon.data(), icon.size(), 32, streaming::VideoOverlayPlacement::bottom_right));
+  const auto bounds = indicator.rectangle(target);
+  const auto pixelOffset = (bounds.y * width + bounds.x) * 2;
+  const auto submitted = [] {
+    const auto allocation = std::find_if(hardware().allocations.begin(), hardware().allocations.end(), [](const auto &entry) {
+      return entry.second.physicalAddress == VIDEOREG(0x8920);
+    });
+    return allocation == hardware().allocations.end() ? nullptr : static_cast<const std::uint8_t *>(allocation->first);
+  };
+  streaming::PvideoPresenter presenter;
+  std::string error;
+  ASSERT_TRUE(presenter.present(source, target, &error, {}, &panel, &indicator)) << error;
+  ASSERT_NE(submitted(), nullptr);
+  EXPECT_EQ(submitted()[pixelOffset], panelLuma);
+  EXPECT_EQ(submitted()[pixelOffset + 2], 235);
+  EXPECT_EQ(submitted()[pixelOffset - 2], panelLuma);
+
+  indicator.set_bitmap(0, 0, {});
+  ASSERT_TRUE(presenter.present(source, target, &error, {}, &panel, &indicator)) << error;
+  ASSERT_NE(submitted(), nullptr);
+  EXPECT_EQ(submitted()[pixelOffset + 2], panelLuma);
+}
+
 /** @brief Return to the CPU framebuffer if the GPU compositor cannot draw the panel. */
 TEST_F(PvideoPresenterTest, ReleasesGpuResourcesWhenOverlayCompositionFails) {
   streaming::PvideoPresenter presenter;

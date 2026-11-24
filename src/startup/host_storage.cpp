@@ -13,6 +13,7 @@
 #include <vector>
 
 // local includes
+#include "src/app/file_save_activity.h"
 #include "src/platform/filesystem_utils.h"
 #include "src/startup/storage_paths.h"
 
@@ -69,6 +70,7 @@ namespace startup {
   }
 
   SaveSavedHostsResult save_saved_hosts(const std::vector<app::HostRecord> &hosts, const std::string &filePath) {
+    const app::FileSaveActivity saving;
     if (std::string errorMessage; !platform::ensure_directory_exists(platform::parent_directory(filePath), &errorMessage)) {
       return {false, errorMessage};
     }

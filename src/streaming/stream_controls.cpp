@@ -22,6 +22,7 @@
 #include "src/ui/asset_path.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/sdl_render.h"
+#include "src/ui/shell_layout.h"
 #include "src/ui/svg_assets.h"
 
 namespace {
@@ -1218,7 +1219,7 @@ namespace streaming {
       return;
     }
     const bool keyboard = navigation_.inputDevice == input::UiInputDevice::keyboard;
-    const int size = std::min(bounds.h, compact ? std::max(12, TTF_GetFontLineSkip(font) * 3 / 4) : TTF_GetFontLineSkip(font) + 12);
+    const int size = ui::control_hint_glyph_size(TTF_GetFontLineSkip(font), bounds.h, compact);
     int textWidth = 0;
     int textHeight = 0;
     TTF_GetStringSize(font, text, 0, &textWidth, &textHeight);

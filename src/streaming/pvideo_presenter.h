@@ -53,10 +53,11 @@ namespace streaming {
      * @param error Receives the reason acceleration could not be used.
      * @param sampling Optional crop used by the standalone prediction experiment.
      * @param overlay Optional cached UI or statistics, composited using the frame's color matrix before GPU scanout.
+     * @param saveIndicator Optional save icon composited on top of the cached UI.
      *
      * @return True after the first overlay frame has latched or a subsequent frame has been submitted.
      */
-    bool present(const Yuv420FrameView &frame, const VideoRectangle &destination, std::string *error, const OverlaySamplingRegion &sampling = {}, VideoOverlay *overlay = nullptr);
+    bool present(const Yuv420FrameView &frame, const VideoRectangle &destination, std::string *error, const OverlaySamplingRegion &sampling = {}, VideoOverlay *overlay = nullptr, VideoOverlay *saveIndicator = nullptr);
 
     /**
      * @brief Stop DMA and release buffers only after a bounded scanout synchronization.
@@ -109,9 +110,10 @@ namespace streaming {
      * @param frame Decoded video to pack.
      * @param destination Visible output rectangle used for UI placement.
      * @param overlay Optional UI to composite into the packed video.
+     * @param saveIndicator Optional save icon to compose on top of the UI.
      * @param failure Receives an explicit fallback reason if preparation fails.
      */
-    void prepare_overlay_frame(const Yuv420FrameView &frame, const VideoRectangle &destination, VideoOverlay *overlay, std::string &failure);
+    void prepare_overlay_frame(const Yuv420FrameView &frame, const VideoRectangle &destination, VideoOverlay *overlay, VideoOverlay *saveIndicator, std::string &failure);
 
     /**
      * @brief Program and verify the registers for the next packed picture.

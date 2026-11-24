@@ -8,6 +8,7 @@
 // standard includes
 #include <cstdlib>
 #include <limits>
+#include <tuple>
 #include <utility>
 
 // lib includes
@@ -20,7 +21,7 @@ namespace {
    */
   TEST(ShellLayoutTest, AnchorsSettingsOptionsIndependentlyOfTextWidth) {
     for (const auto [width, height] : {std::pair {640, 480}, {1280, 720}, {1920, 1080}}) {
-      const auto shell = ui::calculate_shell_layout(width, height);
+      const auto shell = ui::calculate_shell_layout(width, height, 36);
       const auto panel = ui::calculate_settings_panel(shell);
       const int padding = 14;
       const ui::ShellRect interior {panel.x + padding, panel.y + padding, panel.w - padding * 2, panel.h - padding * 2};
@@ -112,8 +113,8 @@ namespace {
    */
   TEST(ShellLayoutTest, StacksRecentNotificationsWithinTheirSafeColumn) {
     for (const auto [width, height] : {std::pair {640, 480}, {1280, 720}}) {
-      const auto layout = ui::calculate_shell_layout(width, height);
-      const ui::ShellRect area {width - 332, layout.navigation.y, 300, layout.footer.y - layout.navigation.y - 14};
+      const auto layout = ui::calculate_shell_layout(width, height, 36);
+      const ui::ShellRect area {width - 332, layout.navigation.y, 300, layout.content.y + layout.content.h + layout.gap - layout.navigation.y - 14};
       const auto cards = ui::calculate_notification_stack(area, {140, 100, 100, 100});
       ASSERT_GE(cards.size(), 2U);
       EXPECT_LE(cards.size(), ui::MAX_VISIBLE_NOTIFICATIONS);
@@ -171,13 +172,13 @@ namespace {
    */
   TEST(ShellLayoutTest, ExtendsSettingsAboveTheContentGrid) {
     for (const auto [width, height] : {std::pair {640, 480}, {1280, 720}, {1920, 1080}}) {
-      const auto layout = ui::calculate_shell_layout(width, height);
+      const auto layout = ui::calculate_shell_layout(width, height, 36);
       const auto panel = ui::calculate_settings_panel(layout);
       EXPECT_EQ(panel.y, layout.navigation.y);
       EXPECT_LT(panel.y, layout.content.y);
       EXPECT_GT(panel.x, layout.content.x + layout.content.w / 4);
       EXPECT_EQ(panel.x + panel.w, layout.content.x + layout.content.w);
-      EXPECT_EQ(panel.y + panel.h, layout.footer.y - layout.gap);
+      EXPECT_EQ(panel.y + panel.h, layout.content.y + layout.content.h);
     }
   }
 
@@ -237,23 +238,65 @@ namespace {
   }
 
   /**
-   * @brief Keep navigation, headings, cards and controls inside the overscan inset.
+   * @brief Center both footer items between the divider and bottom in standard and widescreen modes.
    */
   TEST(ShellLayoutTest, FitsStandardAndWidescreenDisplayModes) {
-    for (const auto [width, height] : {std::pair {640, 480}, {720, 480}, {854, 480}, {1280, 720}, {1920, 1080}}) {
-      const auto layout = ui::calculate_shell_layout(width, height);
+    for (const auto [width, height, glyphSize] : {std::tuple {640, 480, 32}, {720, 480, 32}, {854, 480, 32}, {1280, 720, 41}, {1920, 1080, 68}}) {
+      const auto layout = ui::calculate_shell_layout(width, height, glyphSize);
       EXPECT_EQ(layout.navigation.x, width / 20);
       EXPECT_EQ(layout.navigation.y, height / 20);
       EXPECT_GE(layout.heading.y, layout.navigation.y + layout.navigation.h + layout.gap);
       EXPECT_GE(layout.content.y, layout.heading.y + layout.heading.h + layout.gap);
-      EXPECT_GE(layout.footer.y, layout.content.y + layout.content.h + layout.gap);
-      EXPECT_EQ(layout.footer.y + layout.footer.h, height - height / 20);
+      EXPECT_GT(layout.footer.y - 1, layout.content.y + layout.content.h);
+      EXPECT_EQ(layout.footer.y + layout.footer.h, height);
       EXPECT_GT(layout.content.h, height / 2 - 30);
       for (const auto rect : {layout.navigation, layout.heading, layout.content, layout.footer}) {
         EXPECT_EQ(rect.w, width - (width / 20) * 2);
         EXPECT_GT(rect.h, 0);
       }
+      EXPECT_EQ(layout.footerHints.x, layout.footer.x);
+      EXPECT_EQ(layout.footerHints.h, glyphSize);
+      EXPECT_EQ(layout.saveIndicator.x + layout.saveIndicator.w, layout.footer.x + layout.footer.w);
+      EXPECT_LE(layout.footerHints.x + layout.footerHints.w + layout.gap, layout.saveIndicator.x);
+      for (const auto rect : {layout.footerHints, layout.saveIndicator}) {
+        const int above = rect.y - layout.footer.y;
+        const int below = height - (rect.y + rect.h);
+        EXPECT_GT(above, 0);
+        EXPECT_GE(below, above);
+        EXPECT_LE(below - above, 1);
+      }
     }
+  }
+
+  /**
+   * @brief Keep wrapped hints and the save indicator centered and separate as the footer grows.
+   */
+  TEST(ShellLayoutTest, ReservesTheSaveSlotAcrossWrappedHints) {
+    const auto oneRow = ui::calculate_shell_layout(640, 480, 32);
+    const auto twoRows = ui::calculate_shell_layout(640, 480, 32, 70);
+    EXPECT_EQ(twoRows.footerHints.h, 70);
+    EXPECT_EQ(twoRows.footer.y + twoRows.footer.h, oneRow.footer.y + oneRow.footer.h);
+    EXPECT_LT(twoRows.footer.y, oneRow.footer.y);
+    EXPECT_LT(twoRows.content.h, oneRow.content.h);
+    EXPECT_EQ(twoRows.footerHints.w, oneRow.footerHints.w);
+    EXPECT_EQ(twoRows.saveIndicator.x, oneRow.saveIndicator.x);
+    for (const auto rect : {twoRows.footerHints, twoRows.saveIndicator}) {
+      EXPECT_EQ(rect.y, twoRows.footer.y + (twoRows.footer.h - rect.h) / 2);
+    }
+  }
+
+  /**
+   * @brief Keep the shared controls sizing consistent for a full-size footer and a compact keyboard shortcut.
+   */
+  TEST(ShellLayoutTest, SharesControllerHintSizingWithStreamControls) {
+    EXPECT_EQ(ui::control_hint_font_size(400), 16);
+    EXPECT_EQ(ui::control_hint_font_size(480), 17);
+    EXPECT_EQ(ui::control_hint_font_size(720), 25);
+    EXPECT_EQ(ui::control_hint_font_size(540), 19);
+    EXPECT_EQ(ui::control_hint_glyph_size(30, 60), 42);
+    EXPECT_EQ(ui::control_hint_glyph_size(30, 35), 35);
+    EXPECT_EQ(ui::control_hint_glyph_size(30, 35, true), 22);
+    EXPECT_EQ(ui::control_hint_glyph_size(12, 35, true), 12);
   }
 
   /**

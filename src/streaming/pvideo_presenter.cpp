@@ -306,11 +306,10 @@ namespace streaming {
     VIDEOREG(0x808c) = (VIDEOREG(0x808c) & 0xf40ff40fU) | 0x04000400U;
   }
 
-  void PvideoPresenter::prepare_overlay_frame(const Yuv420FrameView &frame, const VideoRectangle &destination, VideoOverlay *overlay, std::string &failure) {
+  void PvideoPresenter::prepare_overlay_frame(const Yuv420FrameView &frame, const VideoRectangle &destination, VideoOverlay *overlay, VideoOverlay *saveIndicator, std::string &failure) {
     // The previous submission must cross a vblank before the old scanout
     // buffer can be reused. With a spare, pack before waiting for that latch.
-    const bool hasSpare = buffers_.back() != nullptr;
-    if (active_ && !hasSpare && !wait_for_scanout_after(bufferReuseVblank_)) {
+    if (const bool hasSpare = buffers_.back() != nullptr; active_ && !hasSpare && !wait_for_scanout_after(bufferReuseVblank_)) {
       failure = "Timed out waiting for GPU scanout; using software presentation";
     } else if (!pack_overlay_yuy2(frame, buffers_[nextBuffer_], bufferSize_, pitch_)) {
       failure = "Failed to pack the GPU overlay frame";
@@ -319,6 +318,9 @@ namespace streaming {
     } else if (active_ && hasSpare && !wait_for_scanout_after(bufferReuseVblank_)) {
       // The single overlay bank still holds the pending request until vblank.
       failure = "Timed out waiting for GPU scanout; using software presentation";
+    }
+    if (failure.empty() && saveIndicator != nullptr) {
+      saveIndicator->draw_yuy2(buffers_[nextBuffer_], bufferSize_, pitch_, frame.width, frame.height, destination, frame.matrix);
     }
   }
 
@@ -366,7 +368,7 @@ namespace streaming {
   }
 #endif
 
-  bool PvideoPresenter::present(const Yuv420FrameView &frame, const VideoRectangle &destination, std::string *error, const OverlaySamplingRegion &sampling, VideoOverlay *overlay) {
+  bool PvideoPresenter::present(const Yuv420FrameView &frame, const VideoRectangle &destination, std::string *error, const OverlaySamplingRegion &sampling, VideoOverlay *overlay, VideoOverlay *saveIndicator) {
     std::string failure = overlay_frame_error(frame);
     auto source = sampling;
     source.width = sampling.width == 0 ? frame.width : sampling.width;
@@ -388,7 +390,7 @@ namespace streaming {
       configure_overlay_buffers(required, pitch, failure);
     }
     if (failure.empty()) {
-      prepare_overlay_frame(frame, destination, overlay, failure);
+      prepare_overlay_frame(frame, destination, overlay, saveIndicator, failure);
     }
     if (failure.empty() && !program_overlay_registers(frame, destination, source)) {
       failure = "GPU overlay register verification failed";
@@ -400,6 +402,8 @@ namespace streaming {
       failure = "Timed out waiting for the first GPU frame; using software presentation";
     }
 #else
+    (void) overlay;
+    (void) saveIndicator;
     if (failure.empty()) {
       failure = "GPU overlay is unavailable on this platform";
     }

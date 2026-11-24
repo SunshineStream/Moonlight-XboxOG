@@ -67,6 +67,16 @@ namespace {
 
 namespace splash {
 
+  std::array<std::uint8_t, SPLASH_WEDGE_COUNT> logo_wave_brightness(std::uint64_t elapsedMilliseconds) {
+    // Sample the already-running part of the same wave used by the boot splash.
+    const auto sample = WAVE_START_MS + WAVE_PERIOD_MS + elapsedMilliseconds % WAVE_PERIOD_MS;
+    std::array<std::uint8_t, SPLASH_WEDGE_COUNT> brightness {};
+    for (std::size_t i = 0; i < brightness.size(); ++i) {
+      brightness[i] = looping_brightness(sample, i);
+    }
+    return brightness;
+  }
+
   SplashAnimation::SplashAnimation():
       holdDuration_(HOLD_DURATION_MS),
       fadeDuration_(FADE_DURATION_MS) {}

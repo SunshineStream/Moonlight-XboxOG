@@ -33,29 +33,36 @@ namespace ui {
     return selected - first >= visible ? selected - visible + 1 : first;
   }
 
-  ShellLayout calculate_shell_layout(int width, int height) {
-    // A five-percent inset keeps controls clear of overscan on CRT televisions.
+  ShellLayout calculate_shell_layout(int width, int height, int hintGlyphSize, int hintRowsHeight) {
+    constexpr int dividerOffset = 6;
     const int marginX = width / 20;
     const int marginY = height / 20;
     const int gap = std::max(10, height / 40);
     const int navigationHeight = std::max(38, height / 12);
     const int headingHeight = std::max(60, height / 8);
-    const int footerHeight = std::max(36, height / 14);
     const int innerWidth = std::max(1, width - marginX * 2);
+    const int saveSize = std::clamp(hintGlyphSize + 6, 1, innerWidth);
+    const int hintsHeight = std::max(hintGlyphSize, hintRowsHeight);
+    const int controlsHeight = std::max(saveSize, hintsHeight);
     const int contentTop = marginY + navigationHeight + gap + headingHeight + gap;
-    const int footerTop = height - marginY - footerHeight;
+    // Place the divider above the overscan-safe area and center the controls in all rows below it.
+    const int footerSafeTop = height - std::max(8, height / 40) - controlsHeight;
+    const int footerTop = footerSafeTop - dividerOffset + 1;
+    const int footerHeight = height - footerTop;
     return {
       {marginX, marginY, innerWidth, navigationHeight},
       {marginX, marginY + navigationHeight + gap, innerWidth, headingHeight},
-      {marginX, contentTop, innerWidth, std::max(1, footerTop - gap - contentTop)},
+      {marginX, contentTop, innerWidth, std::max(1, footerSafeTop - gap - contentTop)},
       {marginX, footerTop, innerWidth, footerHeight},
+      {marginX, footerTop + (footerHeight - hintsHeight) / 2, std::max(0, innerWidth - saveSize - gap), hintsHeight},
+      {marginX + innerWidth - saveSize, footerTop + (footerHeight - saveSize) / 2, saveSize, saveSize},
       gap,
     };
   }
 
   ShellRect calculate_settings_panel(const ShellLayout &layout) {
     const int x = layout.content.x + layout.content.w * 30 / 100 + layout.gap;
-    return {x, layout.navigation.y, layout.content.x + layout.content.w - x, layout.footer.y - layout.gap - layout.navigation.y};
+    return {x, layout.navigation.y, layout.content.x + layout.content.w - x, layout.content.y + layout.content.h - layout.navigation.y};
   }
 
   ShellSettingsDetailLayout calculate_settings_detail_layout(ShellRect bounds, int lineHeight) {

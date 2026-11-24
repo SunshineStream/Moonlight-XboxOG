@@ -28,6 +28,7 @@ extern "C" {
 }
 
 // local includes
+#include "src/app/file_save_activity.h"
 #include "src/logging/logger.h"
 #include "src/platform/filesystem_utils.h"
 
@@ -459,14 +460,16 @@ namespace streaming {
     job.frame.clear();
     bool saved = false;
     if (surface != nullptr) {
+      const app::FileSaveActivity saving;
       job.progress.store(10);
       saved = save_screenshot_bitmap(*surface, path, job.progress);
+      SDL_DestroySurface(surface);
+      if (saved) {
+        job.progress.store(99);
+        job.result = app::append_screenshot({job.source, path, job.capturedAt}, app::screenshot_library_path(), error) ? "Saved " + path : "Saved " + path + "; could not update the screenshot library: " + error;
+      }
     }
-    SDL_DestroySurface(surface);
-    if (saved) {
-      job.progress.store(99);
-      job.result = app::append_screenshot({job.source, path, job.capturedAt}, app::screenshot_library_path(), error) ? "Saved " + path : "Saved " + path + "; could not update the screenshot library: " + error;
-    } else {
+    if (!saved) {
       job.result = "Screenshot failed: " + (error.empty() ? std::string(SDL_GetError()) : error);
     }
     job.complete.store(true);
