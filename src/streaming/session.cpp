@@ -1551,7 +1551,11 @@ namespace {
   int activate_pending_stream_video_mode(const ActiveStreamLoopContext &loopContext) {
     auto &resources = loopContext.resources;
     const int previousHeight = loopContext.videoMode.active_video_mode().height;
+#ifdef NXDK
     loopContext.videoMode.switch_to(*resources.pendingVideoMode);
+#else
+    ScopedStreamVideoMode::switch_to(*resources.pendingVideoMode);
+#endif
     resources.pendingVideoMode.reset();
     const int outputHeight = loopContext.videoMode.active_video_mode().height;
     if (outputHeight == previousHeight) {

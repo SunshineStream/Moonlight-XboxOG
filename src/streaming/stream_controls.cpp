@@ -1752,12 +1752,12 @@ namespace streaming {
     }
   }
 
-  bool StreamControls::PanelCache::prepare(FfmpegStreamBackend &backend, int width, int height) {
-    if (!surface || surface->w != width || surface->h != height) {
+  bool StreamControls::PanelCache::prepare(FfmpegStreamBackend &backend, int panelWidth, int panelHeight) {
+    if (!surface || surface->w != panelWidth || surface->h != panelHeight) {
       // Release both owners before allocating another full-size raster.
       backend.presentation().set_statistics_bitmap(0, 0, {});
       clear();
-      if (auto *createdSurface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_ARGB8888); createdSurface != nullptr) {
+      if (auto *createdSurface = SDL_CreateSurface(panelWidth, panelHeight, SDL_PIXELFORMAT_ARGB8888); createdSurface != nullptr) {
         surface.reset(createdSurface, SDL_DestroySurface);
       }
     }

@@ -145,16 +145,31 @@ namespace {
     SocketGuard &operator=(SocketGuard &&) = delete;
 
     ~SocketGuard() {
-      if (handle != INVALID_SOCKET) {
+      if (handle_ != INVALID_SOCKET) {
 #if defined(_WIN32) && !defined(NXDK)
-        closesocket(handle);
+        closesocket(handle_);
 #else
-        close(handle);
+        close(handle_);
 #endif
       }
     }
 
-    SOCKET handle = INVALID_SOCKET;
+    /**
+     * @brief Open and take ownership of the TCP socket for this request.
+     * @return The socket handle, or INVALID_SOCKET on failure.
+     */
+    SOCKET open_tcp_socket() {
+      handle_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+      return handle_;
+    }
+
+    /**
+     * @brief Borrow the socket without transferring ownership.
+     * @return The current socket handle.
+     */
+    SOCKET handle() const {
+      return handle_;
+    }
 
     /**
      * @brief Check whether socket support was initialized for the request.
@@ -165,6 +180,7 @@ namespace {
     }
 
   private:
+    SOCKET handle_ = INVALID_SOCKET;  ///< Request socket closed by this guard.
     WsaGuard winsock_;  ///< Released after the socket is closed in the destructor.
   };
 
@@ -1434,8 +1450,8 @@ namespace {
     }
 
     trace_pairing_phase("creating socket");
-    socketGuard->handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (socketGuard->handle == INVALID_SOCKET) {
+    const SOCKET socketHandle = socketGuard->open_tcp_socket();
+    if (socketHandle == INVALID_SOCKET) {
       return append_error(errorMessage, "Failed to create the host pairing socket");
     }
     trace_pairing_phase("socket created");
@@ -1446,7 +1462,7 @@ namespace {
     }
 
     trace_pairing_phase("setting non-blocking connect mode");
-    if (!set_socket_non_blocking(socketGuard->handle, true, errorMessage)) {
+    if (!set_socket_non_blocking(socketHandle, true, errorMessage)) {
       return false;
     }
 
@@ -1455,16 +1471,16 @@ namespace {
     static_assert(sizeof(connectAddress) == sizeof(socketAddress), "The socket API address must hold the full IPv4 address");
     // Preserve the complete IPv4 socket address in the type accepted by connect().
     std::memcpy(&connectAddress, &socketAddress, sizeof(connectAddress));
-    if (const int connectResult = connect(socketGuard->handle, &connectAddress, sizeof(connectAddress)); connectResult == SOCKET_ERROR) {
+    if (const int connectResult = connect(socketHandle, &connectAddress, sizeof(connectAddress)); connectResult == SOCKET_ERROR) {
       if (const int connectError = last_socket_error(); !is_connect_in_progress_error(connectError)) {
         return append_error(errorMessage, "Failed to connect to the host pairing endpoint at " + address + ":" + std::to_string(port) + " (socket error " + std::to_string(connectError) + ")");
       }
-      if (!wait_for_socket_connect_completion(socketGuard->handle, address, port, errorMessage, cancelRequested)) {
+      if (!wait_for_socket_connect_completion(socketHandle, address, port, errorMessage, cancelRequested)) {
         return false;
       }
     }
 
-    return finalize_connected_socket(socketGuard->handle, socketIoTimeoutMilliseconds, errorMessage);
+    return finalize_connected_socket(socketHandle, socketIoTimeoutMilliseconds, errorMessage);
   }
 
   bool recv_all_plain(SOCKET socketHandle, std::string *response, std::string *errorMessage, const std::atomic<bool> *cancelRequested = nullptr) {
@@ -1866,11 +1882,11 @@ namespace {
 
     std::string rawResponse;
     if (!useTls) {
-      if (!execute_plain_http_get(socketGuard.handle, request, &rawResponse, errorMessage, cancelRequested)) {
+      if (!execute_plain_http_get(socketGuard.handle(), request, &rawResponse, errorMessage, cancelRequested)) {
         return false;
       }
     } else {
-      if (!execute_tls_http_get(socketGuard.handle, request, tlsClientIdentity, expectedTlsCertificatePem, &rawResponse, errorMessage, cancelRequested)) {
+      if (!execute_tls_http_get(socketGuard.handle(), request, tlsClientIdentity, expectedTlsCertificatePem, &rawResponse, errorMessage, cancelRequested)) {
         return false;
       }
     }

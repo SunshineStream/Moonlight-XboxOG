@@ -518,11 +518,11 @@ namespace streaming {
       /**
        * @brief Allocate panel geometry when needed and enforce the raster cache budget.
        * @param backend Presentation owner of the previous raster.
-       * @param width Panel width.
-       * @param height Panel height.
+       * @param panelWidth Panel width.
+       * @param panelHeight Panel height.
        * @return True when a panel renderer is available.
        */
-      bool prepare(FfmpegStreamBackend &backend, int width, int height);
+      bool prepare(FfmpegStreamBackend &backend, int panelWidth, int panelHeight);
       /**
        * @brief Publish changed panel regions through the shared GPU and software overlay.
        * @param backend Overlay backend.
