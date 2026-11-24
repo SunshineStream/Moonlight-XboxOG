@@ -20,6 +20,7 @@
 #ifdef NXDK
   #include "src/_nxdk_compat/include/moonlight_time.h"
 #endif
+#include "src/app/file_save_activity.h"
 #include "src/platform/filesystem_utils.h"
 #include "src/startup/storage_paths.h"
 
@@ -175,6 +176,7 @@ namespace app {
   }
 
   bool append_screenshot(const ScreenshotRecord &record, const std::string &journalPath, std::string &error) {
+    const FileSaveActivity saving;
     error.clear();
     const std::string line = serialize_screenshot(record);
     if (line.empty()) {
@@ -256,6 +258,7 @@ namespace app {
   }
 
   bool delete_screenshot(const ScreenshotRecord &record, const std::string &journalPath, std::string &error) {
+    const FileSaveActivity saving;
     auto tombstone = record;
     tombstone.deleted = true;
     const std::string line = serialize_screenshot(tombstone);

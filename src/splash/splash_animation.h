@@ -16,6 +16,13 @@ namespace splash {
   constexpr float SPLASH_MAX_WEDGE_SCALE = 1.28f;  ///< Maximum enlargement of the upper-left wedge.
 
   /**
+   * @brief Sample the continuous dimming wave without the splash entrance or exit.
+   * @param elapsedMilliseconds Wave time in milliseconds.
+   * @return Brightness multipliers in clockwise wedge order.
+   */
+  std::array<std::uint8_t, SPLASH_WEDGE_COUNT> logo_wave_brightness(std::uint64_t elapsedMilliseconds);
+
+  /**
    * @brief Appearance of the logo at one point in the startup animation.
    */
   struct SplashAnimationFrame {

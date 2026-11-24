@@ -1,6 +1,7 @@
 /**
  * @file src/logging/log_file.cpp
  * @brief Implements log file lifecycle helpers.
+ * @details Routine log writes bypass the save indicator.
  */
 // class header include
 #include "src/logging/log_file.h"

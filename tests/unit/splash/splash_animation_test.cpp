@@ -15,6 +15,17 @@
 namespace {
 
   /**
+   * @brief Verify the save icon can start mid-wave and loop with no splash entrance or exit.
+   */
+  TEST(SplashAnimationTest, SamplesTheContinuousLogoWaveForTheSaveIndicator) {
+    const auto first = splash::logo_wave_brightness(0);
+    EXPECT_NE(first, splash::logo_wave_brightness(150));
+    EXPECT_EQ(first, splash::logo_wave_brightness(1200));
+    EXPECT_LT(*std::min_element(first.begin(), first.end()), 255);
+    EXPECT_EQ(*std::max_element(first.begin(), first.end()), 255);
+  }
+
+  /**
    * @brief Check whether the first wedge is at rest and all eight wedges are fully lit.
    *
    * @param frame Splash artwork to examine.

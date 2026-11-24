@@ -6,6 +6,7 @@
 
 // standard includes
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,7 @@
 #include "src/streaming/ffmpeg_video_frame.h"
 #include "src/streaming/pvideo_presenter.h"
 #include "src/streaming/software_scanout.h"
+#include "src/ui/save_indicator.h"
 
 struct SwsContext;
 
@@ -87,6 +89,12 @@ namespace streaming {
      * @param region Updated rectangle in panel pixels.
      */
     void update_color_overlay(const VideoRectangle &region);
+
+    /**
+     * @brief Sample active file saves and update the independent corner overlay.
+     * @param nowMilliseconds Current stream UI clock.
+     */
+    void update_save_indicator(Uint64 nowMilliseconds);
 
     /**
      * @brief Check whether an overlay change requires presenting an otherwise idle frame.
@@ -206,8 +214,11 @@ namespace streaming {
     PvideoPresenter presenter_;  ///< Native GPU scanout.
     SoftwareScanout softwareScanout_;  ///< Native direct framebuffer scanout.
     VideoOverlay statisticsOverlay_;  ///< Shared cached panel for all presentation paths.
+    VideoOverlay saveIndicatorOverlay_;  ///< Independent corner overlay drawn above stream controls.
+    ui::SaveIndicator saveIndicator_;  ///< Cached logo artwork for the save overlay.
+    std::optional<Uint64> saveIndicatorFrame_;  ///< Sampled animation time, or empty while idle.
     SDL_Texture *statisticsTexture_ = nullptr;  ///< Cached panel texture for SDL's final fallback.
-    bool statisticsBitmapChanged_ = false;  ///< A panel update requires refreshing a paused video frame.
+    bool overlayChanged_ = false;  ///< An overlay change requires refreshing a paused video frame.
     bool statisticsTextureChanged_ = false;  ///< SDL texture requires the current bitmap.
     VideoRectangle statisticsTextureDamage_ {};  ///< Pending SDL texture upload.
     bool gpuPresentationEnabled_ = false;  ///< GPU preference for the session.

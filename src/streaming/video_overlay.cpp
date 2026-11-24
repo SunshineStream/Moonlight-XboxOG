@@ -506,15 +506,18 @@ namespace streaming {
 
   VideoRectangle VideoOverlay::rectangle(const VideoRectangle &destination) const {
     const bool docked = placement_ == VideoOverlayPlacement::dock_bottom || placement_ == VideoOverlayPlacement::dock_top;
-    const bool bottom = placement_ == VideoOverlayPlacement::bottom_center || placement_ == VideoOverlayPlacement::dock_bottom;
-    const bool centered = bottom || docked;
-    const int margin = docked || placement_ == VideoOverlayPlacement::full_screen ? 0 : MARGIN;
-    const int width = std::min(width_ * scale_, std::max(0, destination.width - margin * (centered ? 2 : 1)));
-    const int height = std::min(height_ * scale_, std::max(0, destination.height - margin * (centered ? 2 : 1)));
+    const bool right = placement_ == VideoOverlayPlacement::bottom_right;
+    const bool centered = placement_ == VideoOverlayPlacement::bottom_center || docked;
+    const bool bottom = placement_ == VideoOverlayPlacement::bottom_center || placement_ == VideoOverlayPlacement::dock_bottom || right;
+    const int margin = docked || placement_ == VideoOverlayPlacement::full_screen ? 0 : (right ? std::max(MARGIN, destination.height / 20) : MARGIN);
+    const int inset = margin * (centered || right ? 2 : 1);
+    const int width = std::min(width_ * scale_, std::max(0, destination.width - inset));
+    const int height = std::min(height_ * scale_, std::max(0, destination.height - inset));
     if (width == 0 || height == 0) {
       return {};
     }
-    return {destination.x + (centered ? (destination.width - width) / 2 : margin), destination.y + (bottom ? destination.height - height - margin : margin), width, height};
+    const int x = right ? destination.width - width - margin : (centered ? (destination.width - width) / 2 : margin);
+    return {destination.x + x, destination.y + (bottom ? destination.height - height - margin : margin), width, height};
   }
 
   VideoRectangle VideoOverlay::bitmap_rectangle(const VideoRectangle &panel) const {

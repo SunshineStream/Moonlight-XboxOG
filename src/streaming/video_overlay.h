@@ -81,6 +81,7 @@ namespace streaming {
   enum class VideoOverlayPlacement {
     top_left,  ///< Statistics with the legacy safe-area inset.
     bottom_center,  ///< Centered bottom panel with the legacy safe-area inset.
+    bottom_right,  ///< Lower-right indicator with a television-safe inset.
     dock_bottom,  ///< Centered keyboard flush with the bottom edge.
     dock_top,  ///< Centered keyboard flush with the top edge.
     full_screen,  ///< Full-stream overlay without an inset.

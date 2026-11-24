@@ -121,7 +121,7 @@ namespace streaming {
   bool FfmpegVideoPresenter::present(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool newFrame) {
     const bool presented = render_video_frame(renderer, screenWidth, screenHeight, newFrame);
     if (presented) {
-      statisticsBitmapChanged_ = false;
+      overlayChanged_ = false;
     }
     return presented;
   }
@@ -133,6 +133,8 @@ namespace streaming {
       statisticsTexture_ = nullptr;
     }
     statisticsOverlay_.set_bitmap(0, 0, {});
+    saveIndicatorOverlay_.set_bitmap(0, 0, {});
+    saveIndicatorFrame_.reset();
 
     if (texture_ != nullptr) {
       SDL_DestroyTexture(texture_);
@@ -193,12 +195,28 @@ namespace streaming {
     } else {
       statisticsTextureDamage_ = region;
     }
-    statisticsBitmapChanged_ = true;
+    overlayChanged_ = true;
     statisticsTextureChanged_ = true;
   }
 
+  void FfmpegVideoPresenter::update_save_indicator(Uint64 nowMilliseconds) {
+    const auto frame = ui::save_indicator_frame(nowMilliseconds);
+    if (frame == saveIndicatorFrame_) {
+      return;
+    }
+    saveIndicatorFrame_ = frame;
+    if (!frame.has_value()) {
+      if (saveIndicatorOverlay_.width() != 0) {
+        saveIndicatorOverlay_.set_bitmap(0, 0, {});
+        overlayChanged_ = true;
+      }
+    } else if (const auto *raster = saveIndicator_.raster(*frame); raster != nullptr && saveIndicatorOverlay_.set_argb_surface(raster->w, raster->h, static_cast<const std::uint8_t *>(raster->pixels), static_cast<std::size_t>(raster->pitch) * raster->h, raster->pitch, VideoOverlayPlacement::bottom_right)) {
+      overlayChanged_ = true;
+    }
+  }
+
   bool FfmpegVideoPresenter::has_pending_overlay() const {
-    return statisticsBitmapChanged_;
+    return overlayChanged_;
   }
 
   void FfmpegVideoPresenter::render_local_overlay(SDL_Renderer *renderer, int width, int height) {
@@ -262,10 +280,10 @@ namespace streaming {
       return false;
     }
     const bool alreadyPresenting = presenter_.active();
-    if (!newFrame && !statisticsBitmapChanged_ && alreadyPresenting) {
+    if (!newFrame && !overlayChanged_ && alreadyPresenting) {
       return true;
     }
-    if (std::string reason; !presenter_.present(renderFrame_.view(), {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_)) {
+    if (std::string reason; !presenter_.present(renderFrame_.view(), {destination.x, destination.y, destination.w, destination.h}, &reason, {}, &statisticsOverlay_, &saveIndicatorOverlay_)) {
       overlayFailed_ = true;
       acceleration_.record_fallback(reason);
       logging::warn("stream", "GPU presentation fallback: " + reason);
@@ -318,6 +336,12 @@ namespace streaming {
     const bool presented = ui::render_texture(renderer, texture_, nullptr, &destination);
     if (presented) {
       render_sdl_statistics(renderer, destination);
+      if (saveIndicatorFrame_.has_value() && saveIndicatorOverlay_.width() != 0) {
+        const auto bounds = saveIndicatorOverlay_.rectangle({destination.x, destination.y, destination.w, destination.h});
+        if (bounds.width > 0 && bounds.height > 0) {
+          saveIndicator_.draw(renderer, {bounds.x, bounds.y, bounds.width, bounds.height}, *saveIndicatorFrame_);
+        }
+      }
       SDL_RenderPresent(renderer);
     }
     if (presented && textureNeedsUpload) {
@@ -366,7 +390,7 @@ namespace streaming {
   }
 
   void FfmpegVideoPresenter::invalidate_overlay_texture() {
-    statisticsBitmapChanged_ = true;
+    overlayChanged_ = true;
     statisticsTextureChanged_ = true;
     statisticsTextureDamage_ = {0, 0, statisticsOverlay_.width(), statisticsOverlay_.height()};
     if (statisticsTexture_ != nullptr) {
@@ -453,6 +477,7 @@ namespace streaming {
     }
 
     statisticsOverlay_.draw_rgb(framebuffer, framebufferSize, framebufferPitch, videoMode.width, videoMode.height, videoMode.bpp, videoArea);
+    saveIndicatorOverlay_.draw_rgb(framebuffer, framebufferSize, framebufferPitch, videoMode.width, videoMode.height, videoMode.bpp, videoArea);
     return softwareScanout_.present();
 #else
     (void) screenWidth;

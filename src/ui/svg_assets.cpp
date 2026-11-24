@@ -15,12 +15,6 @@ namespace ui {
       return nullptr;
     }
 
-    SDL_IOStream *rw = SDL_IOFromFile(assetPath.c_str(), "rb");
-    if (rw == nullptr) {
-      return nullptr;
-    }
-
-    size_t dataSize = 0U;
     SDL_IOStream *file = SDL_IOFromFile(assetPath.c_str(), "rb");
     if (file == nullptr) {
       return nullptr;

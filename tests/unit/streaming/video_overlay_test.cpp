@@ -18,6 +18,33 @@
 #include <lizardbyte/common/testing.h>
 
 /**
+ * @brief Keep the save icon inside letterboxing and preserve the video under its transparent pixels.
+ */
+TEST(VideoOverlayTest, AnchorsSaveIconInsideTheLowerRightOfTheVideo) {
+  constexpr int width = 80;
+  constexpr int height = 60;
+  constexpr streaming::VideoRectangle video {10, 8, 64, 48};
+  streaming::VideoOverlay indicator;
+  std::vector<std::uint8_t> icon(10 * 10 * 4, 255);
+  std::fill_n(icon.begin(), 4, 0);
+  ASSERT_TRUE(indicator.set_argb_surface(10, 10, icon.data(), icon.size(), 40, streaming::VideoOverlayPlacement::bottom_right));
+  const auto corner = indicator.rectangle(video);
+  EXPECT_EQ(corner.x, 56);
+  EXPECT_EQ(corner.y, 38);
+  EXPECT_EQ(corner.width, 10);
+  EXPECT_EQ(corner.height, 10);
+
+  constexpr std::uint8_t background = 49;
+  std::vector<std::uint8_t> framebuffer(width * height * 4, background);
+  ASSERT_TRUE(indicator.draw_rgb(framebuffer.data(), framebuffer.size(), width * 4, width, height, 32, video));
+  EXPECT_EQ(framebuffer[(corner.y * width + corner.x) * 4], background);
+  EXPECT_EQ(framebuffer[(corner.y * width + corner.x + 1) * 4], 255);
+  EXPECT_EQ(framebuffer[(corner.y * width + corner.x - 1) * 4], background);
+  EXPECT_EQ(framebuffer[((corner.y + corner.height) * width + corner.x) * 4], background);
+  EXPECT_EQ(indicator.rectangle({0, 0, 16, 16}).width, 0);
+}
+
+/**
  * @brief Full-screen dialog repaints reuse their color allocation while screenshots own additional buffers.
  */
 TEST(VideoOverlayTest, ReusesFullScreenSurfaceStorageAcrossDialogRepaints) {

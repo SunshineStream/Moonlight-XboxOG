@@ -14,6 +14,7 @@
 #include <vector>
 
 // local includes
+#include "src/app/file_save_activity.h"
 #include "src/platform/error_utils.h"
 #include "src/platform/filesystem_utils.h"
 #include "src/startup/storage_paths.h"
@@ -120,6 +121,7 @@ namespace startup {
   }
 
   SaveCoverArtResult save_cover_art(std::string_view cacheKey, const std::vector<unsigned char> &bytes, const std::string &cacheRoot) {
+    const app::FileSaveActivity saving;
     std::string errorMessage;
     if (!platform::ensure_directory_exists(cacheRoot, &errorMessage)) {
       return {false, errorMessage};

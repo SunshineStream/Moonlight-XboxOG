@@ -12,6 +12,10 @@
 // lib includes
 #include <lizardbyte/common/testing.h>
 
+// local includes
+#include "src/app/file_save_activity.h"
+#include "src/ui/save_indicator_timing.h"
+
 // test includes
 #include "tests/support/filesystem_test_utils.h"
 
@@ -107,6 +111,26 @@ namespace {
     ASSERT_TRUE(loadedLog.fileFound);
     ASSERT_EQ(loadedLog.lines.size(), 1U);
     EXPECT_EQ(loadedLog.lines.front(), "[2026-04-05 13:00:02.000] [INFO] app: fresh");
+  }
+
+  /**
+   * @brief Logging to disk and resetting the log never start the save indicator.
+   */
+  TEST(LogFileTest, RuntimeLogFileWritesDoNotTriggerTheSaveIndicator) {
+    const auto filePath = test_log_file_path("save-indicator.log");
+    const logging::RuntimeLogFileSink sink(filePath);
+    const auto before = app::file_save_snapshot();
+    ui::SaveIndicatorTiming indicator(before.generation);
+
+    ASSERT_TRUE(sink.reset());
+    ASSERT_TRUE(sink.consume({1, logging::LogLevel::info, "app", "persistent diagnostic", {2026, 4, 5, 13, 0, 2, 0}}));
+    EXPECT_FALSE(indicator.sample(120, app::file_save_snapshot()).has_value());
+
+    ASSERT_TRUE(sink.reset());
+    const auto after = app::file_save_snapshot();
+    EXPECT_FALSE(after.active);
+    EXPECT_EQ(after.generation, before.generation);
+    EXPECT_FALSE(indicator.sample(180, after).has_value());
   }
 
   TEST(LogFileTest, PersistsSourceLocationsWhenEntriesProvideThem) {

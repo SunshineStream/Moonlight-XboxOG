@@ -14,6 +14,7 @@
 #include <vector>
 
 // local includes
+#include "src/app/file_save_activity.h"
 #include "src/platform/error_utils.h"
 #include "src/platform/filesystem_utils.h"
 #include "src/startup/storage_paths.h"
@@ -157,6 +158,7 @@ namespace startup {
   }
 
   SaveClientIdentityResult save_client_identity(const network::PairingIdentity &identity, const std::string &directoryPath) {
+    const app::FileSaveActivity saving;
     std::string errorMessage;
     if (!platform::ensure_directory_exists(directoryPath, &errorMessage)) {
       return {false, errorMessage};

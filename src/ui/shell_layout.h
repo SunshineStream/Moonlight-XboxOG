@@ -5,11 +5,32 @@
 #pragma once
 
 // standard includes
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace ui {
+
+  /**
+   * @brief Choose the Vegur font size for control hints at their raster resolution.
+   * @param rasterHeight Height in raster pixels before scanout scaling.
+   * @return Hint font size in points.
+   */
+  constexpr int control_hint_font_size(int rasterHeight) {
+    return std::max(16, rasterHeight / 28);
+  }
+
+  /**
+   * @brief Fit a controller glyph or keycap inside a menu or stream control hint.
+   * @param lineHeight Font line spacing in raster pixels.
+   * @param availableHeight Maximum height available in the row.
+   * @param compact Use the smaller glyphs for shortcuts drawn inside keyboard keys.
+   * @return Glyph height in raster pixels.
+   */
+  constexpr int control_hint_glyph_size(int lineHeight, int availableHeight, bool compact = false) {
+    return std::min(availableHeight, compact ? std::max(12, lineHeight * 3 / 4) : lineHeight + 12);
+  }
 
   /**
    * @brief Keep list focus visible without scrolling rows that already contain it.
@@ -50,7 +71,9 @@ namespace ui {
     ShellRect navigation;  ///< Compact brand and toolbar strip.
     ShellRect heading;  ///< Page title and contextual subtitle.
     ShellRect content;  ///< Unframed page content.
-    ShellRect footer;  ///< Controller action hints.
+    ShellRect footer;  ///< Strip from the row after the divider to the bottom of the screen.
+    ShellRect footerHints;  ///< Left-aligned actions, with room for the save indicator at their right.
+    ShellRect saveIndicator;  ///< Lower-right save animation bounds.
     int gap = 0;  ///< Spacing between cards and panels.
   };
 
@@ -79,13 +102,15 @@ namespace ui {
   };
 
   /**
-   * @brief Divide a supported Xbox display into safe, nonoverlapping shell regions.
+   * @brief Divide the display into shell regions and center controls vertically below the footer divider.
    *
    * @param width Logical display width, after pixel-aspect correction.
    * @param height Framebuffer height.
+   * @param hintGlyphSize Height of a controller glyph at the current output resolution.
+   * @param hintRowsHeight Measured height of wrapped hints, or zero for one row.
    * @return Regions scaled for 480-line and HD output.
    */
-  ShellLayout calculate_shell_layout(int width, int height);
+  ShellLayout calculate_shell_layout(int width, int height, int hintGlyphSize, int hintRowsHeight = 0);
 
   /**
    * @brief Extend settings beside the navigation and heading.
