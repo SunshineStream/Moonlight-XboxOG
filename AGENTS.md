@@ -18,16 +18,18 @@ their existing build or ignored directories.
 
 ## Build
 
-On Windows, compile with MSYS2 MinGW64. Prefix Windows build and test commands with
-`C:\msys64\msys2_shell.cmd -defterm -here -no-start -mingw64 -c`.
+On Windows AMD64, compile in MSYS2 UCRT64. Prefix Windows AMD64 build and test commands with
+`C:\msys64\msys2_shell.cmd -defterm -here -no-start -ucrt64 -c`. Windows ARM64 CI uses CLANGARM64.
 
-Prefix local build directories with `cmake-build-`. Host builds and native tests use MinGW Makefiles on
-Windows and Unix Makefiles on other platforms. Xbox builds use Unix Makefiles on every platform.
+Prefix local build directories with `cmake-build-`. The Windows SDL client uses Ninja. Windows host
+builds for Xbox and its native tests use MinGW Makefiles. Xbox cross-builds use Unix Makefiles on every
+platform.
 
 The normal top-level configure uses the host toolchain and delegates Xbox compilation to an nxdk child
 build. Use `CMakePresets.json` and the README's build instructions; keep the Xbox toolchain separate from
-host-native tests. The normal release ISO is `cmake-build-release/xbox/Moonlight.iso`, with the packaged
-Xbox executable at `cmake-build-release/xbox/xbe/default.xbe`.
+host-native tests. The Windows release build uses `cmake-build-release-ucrt64`. Linux and macOS use
+`cmake-build-release`. The build writes the release ISO to `xbox/Moonlight.iso` and the packaged
+executable to `xbox/xbe/default.xbe` within that directory.
 
 Video experiment builds are opt-in through `MOONLIGHT_BUILD_VIDEO_EXPERIMENTS`. Keep their instructions
 with the probes in `experiments/README.md`.

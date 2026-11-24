@@ -211,7 +211,7 @@ function(_moonlight_run_windows_ffmpeg_command description nxdk_shell_path ffmpe
             "cd ${quoted_ffmpeg_build_shell_path}; "
             "exec ${ffmpeg_command}")
     execute_process(
-            COMMAND "${msys2_shell}" -defterm -here -no-start -mingw64 -c "${ffmpeg_script}"
+            COMMAND "${msys2_shell}" -defterm -here -no-start -ucrt64 -c "${ffmpeg_script}"
             RESULT_VARIABLE ffmpeg_command_result
     )
     if(NOT ffmpeg_command_result EQUAL 0)

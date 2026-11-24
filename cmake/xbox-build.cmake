@@ -34,22 +34,6 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -include:_automount_d_driv
 file(MAKE_DIRECTORY "${XBOX_XBE_DIR}")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/lucide.cmake")
 
-# ensure assets are copied to the build directory for packaging into ISO
-add_custom_target(sync_xbe_assets ALL
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/xbe"
-            "${XBOX_XBE_DIR}"
-        COMMAND "${CMAKE_COMMAND}" -E copy
-            "${NXDK_DIR}/samples/sdl_ttf/vegur-regular.ttf"
-            "${XBOX_XBE_DIR}/assets/fonts/vegur-regular.ttf"
-        COMMAND "${CMAKE_COMMAND}"
-            "-DLUCIDE_SOURCE_DIR=${MOONLIGHT_LUCIDE_SOURCE_DIR}"
-            "-DLUCIDE_ASSET_DIR=${XBOX_XBE_DIR}/assets"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage-lucide.cmake"
-        COMMENT "Sync XBE assets"
-        VERBATIM
-)
-
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -67,16 +51,17 @@ set_property(SOURCE
         -include "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/nanors_compat.h"
 )
 
-add_executable(${CMAKE_PROJECT_NAME}
+add_executable(moonlight_xbox_executable
         ${MOONLIGHT_SOURCES}
 )
-target_sources(${CMAKE_PROJECT_NAME}
+set_target_properties(moonlight_xbox_executable PROPERTIES OUTPUT_NAME "${CMAKE_PROJECT_NAME}")
+target_sources(moonlight_xbox_executable
         PRIVATE
         "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/fenv_compat.cpp"
         $<TARGET_OBJECTS:moonlight_nxdk_net_init>
         $<TARGET_OBJECTS:moonlight_video_scanout>
 )
-target_include_directories(${CMAKE_PROJECT_NAME}
+target_include_directories(moonlight_xbox_executable
         SYSTEM PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${MOONLIGHT_FFMPEG_INCLUDE_DIR}"
@@ -87,7 +72,7 @@ target_include_directories(${CMAKE_PROJECT_NAME}
         "${NXDK_DIR}/lib/usb/libusbohci/inc"
         "${NXDK_DIR}/lib/usb/libusbohci_xbox"
 )
-target_link_libraries(${CMAKE_PROJECT_NAME}
+target_link_libraries(moonlight_xbox_executable
         PUBLIC
         moonlight-common-c
         ${MOONLIGHT_FFMPEG_LIBRARIES}
@@ -102,51 +87,62 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
         OpenSSL::Crypto
         OpenSSL::SSL
 )
-target_compile_options(${CMAKE_PROJECT_NAME}
+target_compile_options(moonlight_xbox_executable
         PRIVATE
         ${MOONLIGHT_COMPILE_OPTIONS}
         $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++17>
 )
 # NASM's freestanding i386 objects do not carry Windows SafeSEH metadata; the
 # final Xbox image is packaged as XBE and does not use the Windows PE loader.
-target_link_options(${CMAKE_PROJECT_NAME} PRIVATE /safeseh:no)
-target_compile_definitions(${CMAKE_PROJECT_NAME}
+target_link_options(moonlight_xbox_executable PRIVATE /safeseh:no)
+target_compile_definitions(moonlight_xbox_executable
         PRIVATE
         XBOX
         NXDK
         USBH_USE_EXTERNAL_CONFIG="usbh_config_xbox.h"
         TOML_EXCEPTIONS=0
         TOML_ENABLE_WINDOWS_COMPAT=0)
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+target_compile_definitions(moonlight_xbox_executable PRIVATE
         MOONLIGHT_INPUT_DIAGNOSTICS=$<BOOL:${MOONLIGHT_INPUT_DIAGNOSTICS}>)
-add_dependencies(${CMAKE_PROJECT_NAME} moonlight-common-c)
+add_dependencies(moonlight_xbox_executable moonlight-common-c)
 
 if(BUILD_DOCS)
     include(third-party/dockle/cmake/Dockle.cmake)
     dockle_add_docs(docs TARGETS api)
 endif()
 
-# convert the built EXE into the XBE format
-add_custom_target(cxbe_convert ALL
-        COMMAND "${NXDK_DIR}/tools/cxbe/cxbe"
-            -OUT:${XBOX_XBE_DIR}/default.xbe
-            -TITLE:${XBE_TITLE}
-            "${CMAKE_CURRENT_BINARY_DIR}/${XBE_TITLE}.exe"
-        COMMENT "CXBE conversion: EXE -> XBE"
-        VERBATIM
-)
-add_dependencies(cxbe_convert ${CMAKE_PROJECT_NAME})
-add_dependencies(cxbe_convert sync_xbe_assets)
+set(_packaging_env)
+set(_packaging_tool_suffix "")
+if(CMAKE_HOST_WIN32)
+    set(_packaging_tool_suffix ".exe")
+    if(MOONLIGHT_NXDK_NATIVE_COMPILER)
+        # cxbe needs the UCRT64 C++ runtime DLLs when launched from CLion.
+        moonlight_get_windows_msys2_msystem_bin(_packaging_ucrt_bin)
+        set(_packaging_env "${CMAKE_COMMAND}" -E env --modify "PATH=path_list_prepend:${_packaging_ucrt_bin}")
+    endif()
+endif()
+set(_cxbe ${_packaging_env} "${NXDK_DIR}/tools/cxbe/cxbe${_packaging_tool_suffix}")
+set(_extract_xiso ${_packaging_env} "${NXDK_DIR}/tools/extract-xiso/build/extract-xiso${_packaging_tool_suffix}")
 
-# convert the XBE into an ISO
-add_custom_target(xbe_iso ALL
-        COMMAND "${NXDK_DIR}/tools/extract-xiso/build/extract-xiso"
-            -c "${XBOX_XBE_DIR}" "${XBOX_ISO_NAME}"
-        COMMENT "CXBE conversion: XBE -> XISO"
+# Expose the same ISO target in the direct Xbox profile and its host parent.
+add_custom_target(moonlight_xbox ALL
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/xbe" "${XBOX_XBE_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+            "${NXDK_DIR}/samples/sdl_ttf/vegur-regular.ttf" "${XBOX_XBE_DIR}/assets/fonts/vegur-regular.ttf"
+        COMMAND "${CMAKE_COMMAND}"
+            "-DLUCIDE_SOURCE_DIR=${MOONLIGHT_LUCIDE_SOURCE_DIR}"
+            "-DLUCIDE_ASSET_DIR=${XBOX_XBE_DIR}/assets"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage-lucide.cmake"
+        COMMAND ${_cxbe} "-OUT:${XBOX_XBE_DIR}/default.xbe" "-TITLE:${XBE_TITLE}"
+            "$<TARGET_FILE:moonlight_xbox_executable>"
+        COMMAND ${_extract_xiso} -c "${XBOX_XBE_DIR}" "${XBOX_ISO_NAME}"
+        DEPENDS moonlight_xbox_executable
+        BYPRODUCTS "${XBOX_XBE_DIR}/default.xbe" "${XBOX_ISO}"
+        COMMENT "Package Moonlight for Original Xbox"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         VERBATIM
 )
-add_dependencies(xbe_iso cxbe_convert)
 
 if(MOONLIGHT_BUILD_AUDIO_EXPERIMENTS)
     add_executable(audio_playback_probe
@@ -167,11 +163,11 @@ if(MOONLIGHT_BUILD_AUDIO_EXPERIMENTS)
     set(_audio_playback_probe_xbe_dir "${CMAKE_CURRENT_BINARY_DIR}/audio-playback-probe")
     file(MAKE_DIRECTORY "${_audio_playback_probe_xbe_dir}")
     add_custom_target(audio_playback_probe_iso ALL
-            COMMAND "${NXDK_DIR}/tools/cxbe/cxbe"
+            COMMAND ${_cxbe}
                 "-OUT:${_audio_playback_probe_xbe_dir}/default.xbe"
                 "-TITLE:Opus audio playback probe"
                 "$<TARGET_FILE:audio_playback_probe>"
-            COMMAND "${NXDK_DIR}/tools/extract-xiso/build/extract-xiso"
+            COMMAND ${_extract_xiso}
                 -c "${_audio_playback_probe_xbe_dir}" "AudioPlaybackProbe.iso"
             DEPENDS audio_playback_probe
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
@@ -194,11 +190,11 @@ if(MOONLIGHT_BUILD_VIDEO_EXPERIMENTS)
     set(_pvideo_probe_xbe_dir "${CMAKE_CURRENT_BINARY_DIR}/pvideo-presentation-probe")
     file(MAKE_DIRECTORY "${_pvideo_probe_xbe_dir}")
     add_custom_target(pvideo_presentation_probe_iso ALL
-            COMMAND "${NXDK_DIR}/tools/cxbe/cxbe"
+            COMMAND ${_cxbe}
                 "-OUT:${_pvideo_probe_xbe_dir}/default.xbe"
                 "-TITLE:PVIDEO presentation probe"
                 "$<TARGET_FILE:pvideo_presentation_probe>"
-            COMMAND "${NXDK_DIR}/tools/extract-xiso/build/extract-xiso"
+            COMMAND ${_extract_xiso}
                 -c "${_pvideo_probe_xbe_dir}" "PvideoPresentationProbe.iso"
             DEPENDS pvideo_presentation_probe
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
@@ -219,11 +215,11 @@ if(MOONLIGHT_BUILD_VIDEO_EXPERIMENTS)
     set(_mpeg2_probe_xbe_dir "${CMAKE_CURRENT_BINARY_DIR}/mpeg2-motion-probe")
     file(MAKE_DIRECTORY "${_mpeg2_probe_xbe_dir}")
     add_custom_target(mpeg2_motion_probe_iso ALL
-            COMMAND "${NXDK_DIR}/tools/cxbe/cxbe"
+            COMMAND ${_cxbe}
                 "-OUT:${_mpeg2_probe_xbe_dir}/default.xbe"
                 "-TITLE:MPEG-2 motion probe"
                 "$<TARGET_FILE:mpeg2_motion_probe>"
-            COMMAND "${NXDK_DIR}/tools/extract-xiso/build/extract-xiso"
+            COMMAND ${_extract_xiso}
                 -c "${_mpeg2_probe_xbe_dir}" "Mpeg2MotionProbe.iso"
             DEPENDS mpeg2_motion_probe
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"

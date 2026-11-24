@@ -160,7 +160,7 @@ function(_moonlight_try_hinted_msys2_root out_var)
         find_program(_tool_path
                 NAMES ${tool_name}
                 HINTS ${program_hints}
-                PATH_SUFFIXES usr/bin mingw64/bin ucrt64/bin clang64/bin clangarm64/bin mingw32/bin
+                PATH_SUFFIXES usr/bin ucrt64/bin clang64/bin clangarm64/bin
         )
         _moonlight_try_msys2_root_from_tool(_resolved_root "${_tool_path}")
         if(NOT _resolved_root STREQUAL "")
@@ -248,9 +248,9 @@ function(moonlight_get_windows_msys2_bash out_var)
     set(${out_var} "${bash_executable}" PARENT_SCOPE)
 endfunction()
 
-# Get the bin directory for the specified MSYS2 MSYSTEM environment (default: mingw64).
+# Get the bin directory for the specified MSYS2 MSYSTEM environment (default: UCRT64).
 function(moonlight_get_windows_msys2_msystem_bin out_var)
-    set(msystem_dir "mingw64")
+    set(msystem_dir "ucrt64")
     if(ARGC GREATER 1 AND NOT "${ARGV1}" STREQUAL "")
         set(msystem_dir "${ARGV1}")
     endif()
@@ -267,7 +267,7 @@ endfunction()
 
 # Build a PATH-style string prepending the MSYS2 MSYSTEM and usr/bin directories.
 function(moonlight_prepend_windows_msys2_path out_var)
-    set(msystem_dir "mingw64")
+    set(msystem_dir "ucrt64")
     if(ARGC GREATER 1 AND NOT "${ARGV1}" STREQUAL "")
         set(msystem_dir "${ARGV1}")
     endif()

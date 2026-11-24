@@ -2,6 +2,15 @@ include("${CMAKE_CURRENT_LIST_DIR}/client-media.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/sdl3.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/lucide.cmake")
 
+if(WIN32 AND MOONLIGHT_HOST_TOOL_DIR)
+    enable_language(RC)
+    if(CMAKE_RC_COMPILER MATCHES "windres[.]exe$")
+        # windres runs a separate preprocessor, and CLion's build may lack MSYS2 on PATH.
+        string(PREPEND CMAKE_RC_FLAGS "--preprocessor=\"${CMAKE_C_COMPILER}\" "
+                "--preprocessor-arg=-E --preprocessor-arg=-xc-header --preprocessor-arg=-DRC_INVOKED ")
+    endif()
+endif()
+
 moonlight_prepare_portable_sdl3()
 moonlight_prepare_client_media()
 

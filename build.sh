@@ -9,7 +9,11 @@ usage() {
 }
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOST_SYSTEM="$(uname -s)"
 BUILD_DIR="cmake-build-release"
+case "${HOST_SYSTEM}" in
+  MINGW*|MSYS*|CYGWIN*) BUILD_DIR="cmake-build-release-ucrt64" ;;
+esac
 CLEAN_BUILD=0
 POSITIONAL_BUILD_DIR_SET=0
 
@@ -59,10 +63,6 @@ case "${BUILD_DIR}" in
     ;;
 esac
 
-if [[ "${CLEAN_BUILD}" -eq 1 ]]; then
-  rm -rf "${BUILD_DIR_PATH}"
-fi
-
 cmake_configure_args=(
   -S .
   -B "${BUILD_DIR_PATH}"
@@ -73,21 +73,30 @@ cmake_configure_args=(
   -DCMAKE_BUILD_TYPE=Release
 )
 
-case "$(uname -s)" in
+case "${HOST_SYSTEM}" in
   MINGW*|MSYS*|CYGWIN*)
+    if [[ "${MSYSTEM:-}" != "UCRT64" ]]; then
+      echo "Run this build from the MSYS2 UCRT64 shell or use build-ucrt64.bat."
+      exit 1
+    fi
     if ! cmake --help 2>/dev/null | grep -q "MinGW Makefiles"; then
-      echo "Windows builds require a CMake that supports MinGW Makefiles. Install the MSYS2 package 'mingw-w64-x86_64-cmake'."
+      echo "Windows builds require a CMake that supports MinGW Makefiles."
+      echo "Install the MSYS2 package 'mingw-w64-ucrt-x86_64-cmake'."
       exit 1
     fi
 
     cmake_configure_args+=(
       -G "MinGW Makefiles"
-      -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/host-mingw64-clang.cmake"
+      -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/host-ucrt64-clang.cmake"
     )
     ;;
   *)
     ;;
 esac
+
+if [[ "${CLEAN_BUILD}" -eq 1 ]]; then
+  rm -rf "${BUILD_DIR_PATH}"
+fi
 
 cmake "${cmake_configure_args[@]}"
 

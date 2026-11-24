@@ -81,7 +81,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c  # v2.34.0
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           install: >-
             bison
@@ -90,13 +90,15 @@ jobs:
             git
             make
             patch
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-clang
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-lld
-            mingw-w64-x86_64-llvm
-            mingw-w64-x86_64-make
-            mingw-w64-x86_64-nasm
+            perl
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-lld
+            mingw-w64-ucrt-x86_64-llvm
+            mingw-w64-ucrt-x86_64-llvm-tools
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-nasm
 
       - name: Setup python
         id: setup-python
