@@ -1,6 +1,6 @@
 /**
  * @file src/streaming/ffmpeg_stream_backend.h
- * @brief Declares the FFmpeg-backed streaming decode backend for Xbox sessions.
+ * @brief Declares the FFmpeg-backed streaming decode backend.
  */
 #pragma once
 
@@ -25,6 +25,7 @@
 #include "src/streaming/stats_overlay.h"
 
 struct AVCodecContext;
+struct AVCodec;
 struct AVFrame;
 struct AVPacket;
 struct SwsContext;
@@ -45,6 +46,14 @@ namespace streaming {
    */
   class FfmpegStreamBackend {
   public:
+#ifdef MOONLIGHT_PORTABLE
+    /**
+     * @brief Query the portable FFmpeg decoders available to streaming.
+     * @return Supported 8-bit Moonlight video format flags.
+     */
+    static int available_video_formats();
+#endif
+
     /**
      * @brief Construct an empty backend.
      */
@@ -241,6 +250,12 @@ namespace streaming {
      * @return Moonlight decoder status code.
      */
     int decode_video_decode_unit(PDECODE_UNIT decodeUnit);
+#ifdef MOONLIGHT_PORTABLE
+    /**
+     * @brief Reopen the negotiated codec in software after a hardware failure.
+     */
+    void fallback_to_software_decoder();
+#endif
 
     /**
      * @brief Drain decoded frames currently available from FFmpeg.
@@ -289,6 +304,10 @@ namespace streaming {
      */
     struct VideoState {  // NOSONAR(cpp:S1820) Owned video pipeline state intentionally groups FFmpeg, SDL, queue, and metric lifetimes.
       AVCodecContext *codecContext = nullptr;
+#ifdef MOONLIGHT_PORTABLE
+      int hardwareFormat = -1;  ///< FFmpeg pixel format returned by the hardware format callback.
+      const AVCodec *softwareFallback = nullptr;  ///< Software implementation of the negotiated hardware codec.
+#endif
       SwsContext *scaleContext = nullptr;
       AVFrame *decodedFrame = nullptr;
       AVFrame *convertedFrame = nullptr;

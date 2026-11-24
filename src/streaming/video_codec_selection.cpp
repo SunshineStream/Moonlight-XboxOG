@@ -7,6 +7,17 @@
 #include <Limelight.h>
 
 namespace streaming {
+  int portable_video_formats(int decoderFormats, int serverCodecModeSupport) {
+    int hostFormats = VIDEO_FORMAT_H264;
+    if ((serverCodecModeSupport & SCM_HEVC) != 0) {
+      hostFormats |= VIDEO_FORMAT_H265;
+    }
+    if ((serverCodecModeSupport & SCM_AV1_MAIN8) != 0) {
+      hostFormats |= VIDEO_FORMAT_AV1_MAIN8;
+    }
+    return decoderFormats & hostFormats;
+  }
+
   int supported_video_formats(app::VideoCodecSelection selection, int serverCodecModeSupport) {
     constexpr int ALL_VIDEO_FORMATS = VIDEO_FORMAT_H264 | VIDEO_FORMAT_MPEG2 | VIDEO_FORMAT_H263P;
     switch (selection) {

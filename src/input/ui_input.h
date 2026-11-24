@@ -195,6 +195,12 @@ namespace input {
     ControllerNavigationHoldState moveDownHoldState {};  ///< Directional repeat state.
     ControllerNavigationHoldState moveLeftHoldState {};  ///< Directional repeat state.
     ControllerNavigationHoldState moveRightHoldState {};  ///< Directional repeat state.
+#ifdef MOONLIGHT_PORTABLE
+    std::uint64_t touchFinger = 0;  ///< Active touch used for shell navigation.
+    std::uint64_t touchStartTick = 0;  ///< Touch timestamp used to distinguish a tap from a hold.
+    float touchStartX = 0;  ///< Normalized touch origin.
+    float touchStartY = 0;  ///< Normalized touch origin.
+#endif
 
     /**
      * @brief Clear stale holds after streaming consumed their release events, then wait for neutral.

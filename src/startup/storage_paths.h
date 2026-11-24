@@ -25,7 +25,7 @@ namespace startup {
    * @brief Return the default storage path for a file or directory under Moonlight-managed storage.
    *
    * On nxdk builds this prefixes the supplied entry with the title-scoped save root.
-   * On host-native builds it returns the entry unchanged so tests can use relative paths.
+   * Portable clients use SDL's per-user data directory. Host-side unit tests use relative paths.
    *
    * @param entryName File or directory name stored under the Moonlight data root.
    * @return Fully qualified storage path, or the original entry name on host-native builds.

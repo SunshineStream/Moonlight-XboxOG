@@ -8,7 +8,8 @@
 #include <functional>
 
 // nxdk includes
-#include <hal/video.h>
+#include "src/platform/video_mode.h"
+
 #include <SDL3/SDL.h>
 
 namespace splash {

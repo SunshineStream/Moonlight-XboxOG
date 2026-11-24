@@ -57,6 +57,7 @@ endif()
 option(BUILD_DOCS "Build documentation" ON)
 option(BUILD_TESTS "Build host-native unit tests" ON)
 option(BUILD_XBOX "Build the Xbox target through an internal child configure" ON)
+option(BUILD_CLIENT "Build the shared SDL client for the selected non-nxdk target" OFF)
 option(MOONLIGHT_FORCE_NXDK_DISTCLEAN "Force a fresh nxdk distclean during configure" OFF)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sources.cmake")
@@ -67,10 +68,21 @@ if(BUILD_DOCS)
     dockle_add_docs(docs TARGETS api)
 endif()
 
-if(BUILD_TESTS)
+if(BUILD_CLIENT AND CMAKE_CROSSCOMPILING)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
+if(BUILD_TESTS OR BUILD_CLIENT)
     moonlight_prepare_common_dependencies()
+endif()
+
+if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(BUILD_CLIENT)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/client-build.cmake")
 endif()
 
 if(BUILD_XBOX)

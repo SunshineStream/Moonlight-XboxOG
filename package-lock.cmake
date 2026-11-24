@@ -41,6 +41,10 @@ CPMDeclarePackage(ffmpeg
         DOWNLOAD_ONLY YES
 )
 
+# Software AV1 decoding for mobile and TV SDK builds.
+# renovate: datasource=github-tags depName=videolan/dav1d
+set(DAV1D_CLIENT_VERSION 1.5.5)
+
 # Lucide SVG icons
 # renovate: datasource=github-tags depName=lucide-icons/lucide
 set(LUCIDE_VERSION 1.78.0)
@@ -103,6 +107,26 @@ CPMDeclarePackage(sdl3_image
         GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
         GIT_TAG release-${SDL3_IMAGE_VERSION}
         GIT_CONFIG "submodule.active=:(exclude)external"  # Leave the unused vendored codecs uninitialized.
+        DOWNLOAD_ONLY YES
+)
+
+# SDL3 for desktop and mobile clients
+# renovate: datasource=github-tags depName=libsdl-org/SDL versioning=semver
+# extractVersion=^release-(?<version>\d+\.\d+\.\d+)$
+set(SDL3_VERSION 3.4.18)
+set(SDL3_STEAM_CONTROLLER_PATCH "${CMAKE_CURRENT_LIST_DIR}/cmake/patches/sdl3-steam-controller-trigger-clicks-and-haptics.patch")
+_moonlight_patched_source_dir(SDL3_PATCHED_SOURCE_DIR sdl3 "${SDL3_VERSION}" "${SDL3_STEAM_CONTROLLER_PATCH}")
+CPMDeclarePackage(SDL3
+        NAME SDL3
+        VERSION ${SDL3_VERSION}
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-${SDL3_VERSION}
+        GIT_SHALLOW TRUE
+        SOURCE_DIR "${SDL3_PATCHED_SOURCE_DIR}"
+        GIT_CONFIG core.autocrlf=false
+        PATCHES "${SDL3_STEAM_CONTROLLER_PATCH}"
+        NO_CACHE YES
+        UPDATE_DISCONNECTED YES
         DOWNLOAD_ONLY YES
 )
 

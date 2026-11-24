@@ -26,10 +26,6 @@
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
-// nxdk includes
-#include <hal/debug.h>
-#include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
-
 // local includes
 #include "src/app/file_save_activity.h"
 #include "src/app/settings_storage.h"
@@ -212,8 +208,12 @@ namespace {
 
   int report_shell_failure(const char *category, const std::string &message) {
     logging::error(category, message);
+#ifdef NXDK
     logging::warn(category, "Holding the failure screen for 5 seconds before exit.");
-    Sleep(5000);
+    SDL_Delay(5000);
+#else
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Moonlight", message.c_str(), nullptr);
+#endif
     return 1;
   }
 
@@ -2046,6 +2046,9 @@ namespace {
       case SDLK_KP_ENTER:
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::enter, shiftPressed);
       case SDLK_ESCAPE:
+#ifdef MOONLIGHT_PORTABLE
+      case SDLK_AC_BACK:
+#endif
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::escape, shiftPressed);
       case SDLK_BACKSPACE:
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::backspace, shiftPressed);
@@ -5017,6 +5020,48 @@ namespace {
           set_shell_input_device(state, inputState, input::UiInputDevice::gamepad);
         }
         return translate_trigger_axis(event.gaxis, &inputState->leftTriggerPressed, &inputState->rightTriggerPressed);
+#ifdef MOONLIGHT_PORTABLE
+      case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (event.button.which != SDL_TOUCH_MOUSEID) {
+          set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
+          if (event.button.button == SDL_BUTTON_LEFT) {
+            return input::UiCommand::activate;
+          }
+          if (event.button.button == SDL_BUTTON_RIGHT) {
+            return input::UiCommand::open_context_menu;
+          }
+          if (event.button.button == SDL_BUTTON_X1) {
+            return input::UiCommand::back;
+          }
+        }
+        return input::UiCommand::none;
+      case SDL_EVENT_MOUSE_WHEEL:
+        return input::direction_command(0, event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? event.wheel.integer_y : -event.wheel.integer_y);
+      case SDL_EVENT_FINGER_DOWN:
+        if (inputState != nullptr && inputState->touchFinger == 0) {
+          set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
+          inputState->touchFinger = event.tfinger.fingerID;
+          inputState->touchStartTick = SDL_GetTicks();
+          inputState->touchStartX = event.tfinger.x;
+          inputState->touchStartY = event.tfinger.y;
+        }
+        return input::UiCommand::none;
+      case SDL_EVENT_FINGER_UP:
+        if (inputState != nullptr && inputState->touchFinger == event.tfinger.fingerID) {
+          const float dx = event.tfinger.x - inputState->touchStartX;
+          const float dy = event.tfinger.y - inputState->touchStartY;
+          const Uint64 held = SDL_GetTicks() - inputState->touchStartTick;
+          inputState->touchFinger = 0;
+          if (std::max(std::fabs(dx), std::fabs(dy)) >= 0.05f) {
+            return std::fabs(dx) > std::fabs(dy) ? input::direction_command(dx > 0.0f ? 1 : -1, 0) : input::direction_command(0, dy > 0.0f ? 1 : -1);
+          }
+          if (held > 1000) {
+            return input::UiCommand::back;
+          }
+          return held > 450 ? input::UiCommand::open_context_menu : input::UiCommand::activate;
+        }
+        return input::UiCommand::none;
+#endif
       case SDL_EVENT_KEY_DOWN:
         if (event.key.repeat != 0 || inputState == nullptr) {
           return input::UiCommand::none;
@@ -5317,6 +5362,7 @@ namespace {
     }
     resources->ttfInitialized = true;
 
+#ifdef NXDK
     // The Xbox renderer excludes 720-pixel SD modes and needs several scanout buffers at 1080i.
     if (videoMode.width != 720 && videoMode.height < 1080) {
       resources->renderer = SDL_CreateRenderer(window, "nxdk_xgu");
@@ -5324,6 +5370,9 @@ namespace {
         logging::warn("sdl", std::string("Xbox renderer unavailable; using software: ") + SDL_GetError());
       }
     }
+#else
+    resources->renderer = SDL_CreateRenderer(window, nullptr);
+#endif
     if (resources->renderer == nullptr) {
       resources->renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
       resources->keypadModalLayoutCache.window = window;
@@ -5363,7 +5412,11 @@ namespace {
       close_controller(resources->controller);
       resources->controller = open_primary_controller();
     }
+#ifdef NXDK
     resources->encoderSettings = XVideoGetEncoderSettings();
+#else
+    resources->encoderSettings = VIDEO_WIDESCREEN;
+#endif
     return true;
   }
 
@@ -5545,7 +5598,7 @@ namespace {
     );
     state.shell.statusMessage = std::move(report.message);
     if (!streamStarted) {
-      app::show_notification(state, app::NotificationKind::error, "Streaming failed", "Check that the PC is online and Sunshine is running, then try again.");
+      app::show_notification(state, app::NotificationKind::error, "Streaming failed", state.shell.statusMessage.empty() ? "Try starting the stream again." : state.shell.statusMessage);
     }
     if (report.controller != nullptr) {
       retainedController.reset(report.controller);

@@ -44,6 +44,9 @@ cmake-*/
 /.dockle/
 /_site/
 *.egg-info/
+/packaging/android/.gradle/
+/packaging/android/app/.cxx/
+/packaging/android/local.properties
 
 # test output
 test-output/

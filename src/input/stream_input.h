@@ -136,6 +136,12 @@ namespace input {
      * @return Bits zero through three.
      */
     std::uint16_t active_mask() const;
+    /**
+     * @brief Resolve a host slot to its current local device.
+     * @param slot Host controller number.
+     * @return SDL instance ID, or -1 when unassigned.
+     */
+    std::int64_t slot_device(unsigned int slot) const;
 
   private:
     /**

@@ -11,17 +11,19 @@
 #include <optional>
 #include <string>
 
-// nxdk includes
-#include <hal/xbox.h>
+// lib includes
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
-#include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
+
+#ifdef NXDK
+  #include <hal/xbox.h>
+#endif
 
 // local includes
 #include "src/logging/logger.h"
-#include "src/os.h"
 #include "src/splash/splash_animation.h"
 #include "src/splash/splash_layout.h"
+#include "src/ui/asset_path.h"
 
 namespace {
 
@@ -46,13 +48,15 @@ namespace {
   };
 
   /**
-   * @brief Log a splash rendering error and reboot after a delay.
+   * @brief Log a splash rendering error and reboot the original Xbox after a delay.
    */
   void printSDLErrorAndReboot() {
     logging::error("splash", std::string("SDL error: ") + SDL_GetError());
+#ifdef NXDK
     logging::warn("splash", "Rebooting in 5 seconds.");
-    Sleep(5000);
+    SDL_Delay(5000);
     XReboot();
+#endif
   }
 
   /**
@@ -78,7 +82,7 @@ namespace {
    * @return True when all wedge surfaces are ready to blend onto the splash background.
    */
   bool load_splash_logo(const SDL_Surface &screenSurface, const VIDEO_MODE &videoMode, SplashLogo &logo) {
-    const auto path = std::string(DATA_PATH) + "assets" + PATH_SEP + "moonlight-logo-wedges.svg";
+    const auto path = ui::build_asset_path("moonlight-logo-wedges.svg");
     const std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> atlas(IMG_Load(path.c_str()), SDL_DestroySurface);
     if (!atlas) {
       logging::error("splash", "Failed to load splash asset " + path + ": " + SDL_GetError());
@@ -94,7 +98,12 @@ namespace {
       return false;
     }
 
-    const auto layout = splash::calculate_logo_destination(screenSurface.w, screenSurface.h, tileSize * 2, tileSize * 2, videoMode, XVideoGetEncoderSettings());
+#ifdef NXDK
+    const auto encoderSettings = XVideoGetEncoderSettings();
+#else
+    const auto encoderSettings = VIDEO_WIDESCREEN;
+#endif
+    const auto layout = splash::calculate_logo_destination(screenSurface.w, screenSurface.h, tileSize * 2, tileSize * 2, videoMode, encoderSettings);
     const int left = layout.width / 2;
     const int top = layout.height / 2;
     const int right = layout.width - left;

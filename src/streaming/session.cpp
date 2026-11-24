@@ -1,6 +1,6 @@
 /**
  * @file src/streaming/session.cpp
- * @brief Implements the Xbox streaming session runtime.
+ * @brief Implements the streaming session runtime.
  */
 // class header include
 #include "src/streaming/session.h"
@@ -31,7 +31,11 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 // platform includes
-#include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
+#ifdef NXDK
+  #include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
+#else
+  #include <openssl/rand.h>
+#endif
 
 #if defined(NXDK) && MOONLIGHT_INPUT_DIAGNOSTICS
   #include <hal/debug.h>
@@ -41,13 +45,13 @@
 #include "src/input/shell_controller.h"
 #include "src/input/stream_exit.h"
 #include "src/logging/logger.h"
-#include "src/os.h"
 #include "src/startup/memory_stats.h"
 #include "src/startup/video_mode.h"
 #include "src/streaming/ffmpeg_stream_backend.h"
 #include "src/streaming/stats_overlay.h"
 #include "src/streaming/stream_controls.h"
 #include "src/streaming/video_codec_selection.h"
+#include "src/ui/asset_path.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/sdl_render.h"
 #include "src/ui/shell_layout.h"
@@ -83,9 +87,14 @@ namespace {
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_MILLISECONDS = 1500U;
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_COOLDOWN_MILLISECONDS = 2000U;
   constexpr int MIN_STREAM_FPS = 15;
+#ifdef MOONLIGHT_PORTABLE
+  constexpr int MAX_STREAM_FPS = 120;
+  constexpr int MAX_STREAM_BITRATE_KBPS = 150000;
+#else
   constexpr int MAX_STREAM_FPS = 60;
-  constexpr int MIN_STREAM_BITRATE_KBPS = 250;
   constexpr int MAX_STREAM_BITRATE_KBPS = 50000;
+#endif
+  constexpr int MIN_STREAM_BITRATE_KBPS = 250;
   constexpr int DEFAULT_PACKET_SIZE = 1024;
   constexpr std::size_t MAX_CONNECTION_PROTOCOL_MESSAGES = 24U;
 
@@ -158,6 +167,12 @@ namespace {
     std::atomic<bool> connectionTerminated = false;
     std::atomic<bool> poorConnection = false;
     std::atomic<bool> stopRequested = false;
+#ifdef MOONLIGHT_PORTABLE
+    std::array<std::atomic<std::uint64_t>, 4> rumble {};  ///< Latest motor levels per host slot, with a pending marker.
+    std::array<std::atomic<std::uint64_t>, 4> triggerRumble {};  ///< Latest trigger motor levels per host slot.
+    std::array<std::array<std::atomic<std::uint32_t>, 2>, 4> motion {};  ///< Pending sensor rates per host slot.
+    std::array<std::atomic<std::uint32_t>, 4> leds {};  ///< Pending controller colors per host slot.
+#endif
     StreamProtocolLogBuffer protocolLog;  ///< Recent protocol messages reported by Moonlight callbacks.
   };
 
@@ -576,7 +591,7 @@ namespace {
   }
 
   std::string build_font_path() {
-    return std::string(DATA_PATH) + "assets" + PATH_SEP + "fonts" + PATH_SEP + "vegur-regular.ttf";
+    return ui::build_asset_path("fonts/vegur-regular.ttf");
   }
 
   void close_stream_ui_resources(StreamUiResources *resources) {
@@ -682,8 +697,12 @@ namespace {
    * @return Owned renderer, or nullptr on error.
    */
   SDL_Renderer *create_stream_renderer(SDL_Window *window, std::string &errorMessage) {
+#ifdef NXDK
     // PVIDEO owns pbkit while streaming, including when the CPU draws the startup dialog.
     auto *renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
+#else
+    auto *renderer = SDL_CreateRenderer(window, nullptr);
+#endif
     if (renderer == nullptr) {
       errorMessage = std::string("SDL_CreateRenderer failed for the streaming session: ") + SDL_GetError();
     }
@@ -715,10 +734,11 @@ namespace {
     }
     return true;
 #else
-    (void) buffer;
-    (void) size;
+    if (buffer != nullptr && size <= static_cast<std::size_t>(std::numeric_limits<int>::max()) && RAND_bytes(buffer, static_cast<int>(size)) == 1) {
+      return true;
+    }
     if (errorMessage != nullptr) {
-      *errorMessage = "The streaming runtime is only supported on the Xbox build";
+      *errorMessage = "Failed to generate secure random bytes for the streaming input keys";
     }
     return false;
 #endif
@@ -867,11 +887,24 @@ namespace {
     context->streamConfiguration.packetSize = streamParameters.packetSize;
     context->streamConfiguration.streamingRemotely = streamParameters.streamingRemotely;
     context->streamConfiguration.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
+#ifdef MOONLIGHT_PORTABLE
+    int decoderFormats = streaming::FfmpegStreamBackend::available_video_formats();
+    if (streamParameters.videoCodec == app::VideoCodecSelection::h264) {
+      decoderFormats &= VIDEO_FORMAT_H264;
+    }
+    context->streamConfiguration.supportedVideoFormats = streaming::portable_video_formats(decoderFormats, launchResult.serverCodecModeSupport);
+#else
     context->streamConfiguration.supportedVideoFormats = streaming::supported_video_formats(streamParameters.videoCodec, launchResult.serverCodecModeSupport);
+#endif
     context->streamConfiguration.clientRefreshRateX100 = select_client_refresh_rate_x100(outputVideoMode);
+#ifdef MOONLIGHT_PORTABLE
+    context->streamConfiguration.colorSpace = COLORSPACE_REC_709;
+    context->streamConfiguration.encryptionFlags = ENCFLG_ALL;
+#else
     context->streamConfiguration.colorSpace = COLORSPACE_REC_601;
-    context->streamConfiguration.colorRange = COLOR_RANGE_LIMITED;
     context->streamConfiguration.encryptionFlags = ENCFLG_NONE;
+#endif
+    context->streamConfiguration.colorRange = COLOR_RANGE_LIMITED;
     std::memcpy(context->streamConfiguration.remoteInputAesKey, remoteInputKey.data(), remoteInputKey.size());
     std::memcpy(context->streamConfiguration.remoteInputAesIv, remoteInputIv.data(), remoteInputIv.size());
 
@@ -906,6 +939,48 @@ namespace {
     }
     logging::info("stream", "Streaming transport started");
   }
+
+#ifdef MOONLIGHT_PORTABLE
+  /**
+   * @brief Publish a host rumble request for the SDL event thread.
+   * @param slot Host controller slot.
+   * @param first First motor intensity.
+   * @param second Second motor intensity.
+   * @tparam Triggers Whether the request targets trigger motors.
+   */
+  template<bool Triggers>
+  void on_controller_rumble(std::uint16_t slot, std::uint16_t first, std::uint16_t second) {
+    if (StreamConnectionState *state = active_connection_state(); state != nullptr && slot < state->rumble.size()) {
+      auto &pending = Triggers ? state->triggerRumble : state->rumble;
+      pending[slot].store((1ULL << 32) | (static_cast<std::uint64_t>(first) << 16) | second);
+    }
+  }
+
+  /**
+   * @brief Queue a request for accelerometer or gyro input on the event thread.
+   * @param slot Host controller slot.
+   * @param type Moonlight motion type.
+   * @param rate Reports per second requested by the host.
+   */
+  void on_controller_motion(std::uint16_t slot, std::uint8_t type, std::uint16_t rate) {
+    if (StreamConnectionState *state = active_connection_state(); state != nullptr && slot < state->motion.size() && (type == LI_MOTION_TYPE_ACCEL || type == LI_MOTION_TYPE_GYRO)) {
+      state->motion[slot][type == LI_MOTION_TYPE_ACCEL ? 0 : 1].store((1U << 16) | rate);
+    }
+  }
+
+  /**
+   * @brief Queue a controller light update on the event thread.
+   * @param slot Host controller slot.
+   * @param red Red intensity.
+   * @param green Green intensity.
+   * @param blue Blue intensity.
+   */
+  void on_controller_led(std::uint16_t slot, std::uint8_t red, std::uint8_t green, std::uint8_t blue) {
+    if (StreamConnectionState *state = active_connection_state(); state != nullptr && slot < state->leds.size()) {
+      state->leds[slot].store((1U << 24) | (static_cast<std::uint32_t>(red) << 16) | (static_cast<std::uint32_t>(green) << 8) | blue);
+    }
+  }
+#endif
 
   void on_connection_terminated(int errorCode) {
     if (StreamConnectionState *connectionState = active_connection_state(); connectionState != nullptr) {
@@ -1049,6 +1124,24 @@ namespace {
     if (resources->controller.pump(resources->mediaBackend, resources->bodyFont, width, height, connectionState->connectionStarted.load(), resources->statisticsEnabled)) {
       request_stream_stop(connectionState);
     }
+#ifdef MOONLIGHT_PORTABLE
+    for (unsigned int slot = 0; slot < connectionState->rumble.size(); ++slot) {
+      if (const auto effect = connectionState->rumble[slot].exchange(0); effect != 0) {
+        resources->controller.rumble(slot, static_cast<std::uint16_t>(effect >> 16), static_cast<std::uint16_t>(effect), false);
+      }
+      if (const auto effect = connectionState->triggerRumble[slot].exchange(0); effect != 0) {
+        resources->controller.rumble(slot, static_cast<std::uint16_t>(effect >> 16), static_cast<std::uint16_t>(effect), true);
+      }
+      if (const auto color = connectionState->leds[slot].exchange(0); color != 0) {
+        resources->controller.set_controller_led(slot, color);
+      }
+      for (unsigned int sensor = 0; sensor < connectionState->motion[slot].size(); ++sensor) {
+        if (const auto rate = connectionState->motion[slot][sensor].exchange(0); rate != 0) {
+          resources->controller.set_motion_reporting(slot, sensor == 0 ? LI_MOTION_TYPE_ACCEL : LI_MOTION_TYPE_GYRO, static_cast<std::uint16_t>(rate));
+        }
+      }
+    }
+#endif
     if (wasVisible && !resources->controller.has_overlay()) {
       resources->statisticsSampler = {};
     }
@@ -1597,7 +1690,9 @@ namespace {
     for (const auto &line : finalStatistics.accelerationSummary) {
       logging::info("stream", line);
     }
+#ifdef NXDK
     startup::log_memory_statistics();
+#endif
     if (settings.controls.keyboardDockTop != resources.controller.keyboard_docked_top()) {
       settings.controls.keyboardDockTop = resources.controller.keyboard_docked_top();
       settings.dirty = true;
@@ -1658,7 +1753,9 @@ namespace streaming {
     resources.controller.configure(settings.controls.screenshotDirectory, settings.controls.keyboardDockTop, app::screenshot_source(host, app));
     ScopedThreadPriority streamThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 
+#ifdef NXDK
     startup::log_memory_statistics();
+#endif
 
     std::array<unsigned char, 16> remoteInputKey {};
     std::array<unsigned char, 16> remoteInputIv {};
@@ -1723,7 +1820,7 @@ namespace streaming {
     );
     resources.mediaBackend.audio_player().configure(settings.audio.mode, settings.audio.playOnXbox);
     resources.mediaBackend.presentation().configure_gpu_presentation(settings.video.gpuPresentation, settings.video.gpuBufferCount);
-    logging::info("stream", std::string("Xbox audio mode: ") + (settings.audio.playOnXbox ? audio_mode_label(settings.audio.mode) : "Disabled"));
+    logging::info("stream", std::string("Local audio mode: ") + (settings.audio.playOnXbox ? audio_mode_label(settings.audio.mode) : "Disabled"));
     logging::debug(
       "stream",
       std::string("Stream connection metadata | active=") + printable_log_value(startContext.serverInformation.address == nullptr ? std::string_view {} : std::string_view {startContext.serverInformation.address}) +
@@ -1734,6 +1831,12 @@ namespace streaming {
     );
     resources.mediaBackend.initialize_callbacks(&startContext.videoCallbacks, &startContext.audioCallbacks);
     startContext.connectionCallbacks.stageStarting = on_stage_starting;
+#ifdef MOONLIGHT_PORTABLE
+    startContext.connectionCallbacks.rumble = on_controller_rumble<false>;
+    startContext.connectionCallbacks.rumbleTriggers = on_controller_rumble<true>;
+    startContext.connectionCallbacks.setMotionEventState = on_controller_motion;
+    startContext.connectionCallbacks.setControllerLED = on_controller_led;
+#endif
     startContext.connectionCallbacks.stageComplete = on_stage_complete;
     startContext.connectionCallbacks.stageFailed = on_stage_failed;
     startContext.connectionCallbacks.connectionStarted = on_connection_started;

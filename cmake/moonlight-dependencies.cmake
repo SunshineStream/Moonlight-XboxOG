@@ -362,7 +362,13 @@ endfunction()
 
 # Prepare dependencies that are common to multiple Moonlight components
 macro(MOONLIGHT_PREPARE_COMMON_DEPENDENCIES)
-    include(GetOpenSSL REQUIRED)
+    if(BUILD_CLIENT AND CMAKE_CROSSCOMPILING AND NOT MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
+        # Cross SDKs supply their own static OpenSSL builds for the selected ABI.
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+        find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto SSL)
+    else()
+        include(GetOpenSSL REQUIRED)
+    endif()
 
     if(NOT TARGET moonlight-openssl)
         add_library(moonlight-openssl INTERFACE)

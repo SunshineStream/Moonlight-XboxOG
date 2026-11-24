@@ -119,6 +119,29 @@ namespace streaming {
      * @return True when the user confirms quit or closes the application window.
      */
     bool pump(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool active, bool &statisticsEnabled);
+#ifdef MOONLIGHT_PORTABLE
+    /**
+     * @brief Apply host feedback to the local SDL device in a protocol slot.
+     * @param slot Host controller number.
+     * @param first Left trigger or low-frequency motor level.
+     * @param second Right trigger or high-frequency motor level.
+     * @param triggers True for trigger motors.
+     */
+    void rumble(unsigned int slot, std::uint16_t first, std::uint16_t second, bool triggers);
+    /**
+     * @brief Start or stop motion reports for one host controller.
+     * @param slot Host controller number.
+     * @param motionType Protocol motion sensor selector.
+     * @param rate Requested reports per second, or zero to stop.
+     */
+    void set_motion_reporting(unsigned int slot, std::uint8_t motionType, std::uint16_t rate);
+    /**
+     * @brief Set the light color of a controller assigned to a host slot.
+     * @param slot Host controller number.
+     * @param rgb Packed red, green and blue values.
+     */
+    void set_controller_led(unsigned int slot, std::uint32_t rgb);
+#endif
     /**
      * @brief Check whether a local screen currently owns the video overlay.
      * @return True while the radial menu, keyboard, log viewer or confirmation is visible.
@@ -167,7 +190,26 @@ namespace streaming {
       input::StreamExitChord chord;  ///< Event-order chord detection.
       input::ControllerState sample {};  ///< Latest sampled state.
       bool chordDown = false;  ///< Chord edge latch.
+#ifdef MOONLIGHT_PORTABLE
+      std::array<std::uint16_t, 2> motionRate {};  ///< Accelerometer and gyro rates requested by the host.
+      std::array<Uint64, 2> lastMotionTimestamp {};  ///< Last event timestamp forwarded per sensor.
+#endif
     };
+
+#ifdef MOONLIGHT_PORTABLE
+    /**
+     * @brief Forward controller touch, sensor and battery events for an active stream.
+     * @param event SDL event consumed by the input pump.
+     */
+    void forward_gamepad_event(const SDL_Event &event);
+
+    /**
+     * @brief Resolve a local gamepad to its stable host slot.
+     * @param device SDL joystick ID.
+     * @return Host slot, or -1 when the device has yet to connect.
+     */
+    int gamepad_slot(SDL_JoystickID device) const;
+#endif
 
     /**
      * @brief Refresh live log entries while preserving a scrolled reading position.

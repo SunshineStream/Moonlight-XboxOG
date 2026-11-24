@@ -4,8 +4,8 @@
     alt="Moonlight icon"
     width="256"
   />
-  <h1 align="center">Moonlight-XboxOG</h1>
-  <h4 align="center">Port of Moonlight for the Original Xbox.</h4>
+  <h1 align="center">Moonlight</h1>
+  <h4 align="center">Game streaming client for the original Xbox, desktop, mobile, and TV.</h4>
 </div>
 
 <div align="center">
@@ -46,7 +46,7 @@ for host or app actions. Button hints follow the keyboard or controller you are 
 On the hosts page, **Alt + F4** exits the client. **PgUp / PgDn** scroll the log viewer;
 hold **Shift** for faster scrolling. **Backspace** dismisses a notification or changes the log pane.
 
-PCs use grayscale moon artwork inspired by One: a full moon for paired online PCs, a half moon for
+PCs use grayscale moon artwork: a full moon for paired online PCs, a half moon for
 online PCs awaiting pairing, and a crescent for offline PCs. A separate orbit shows controller focus.
 
 Settings categories have icons and the detail panel extends beside the page heading, with a fixed help
@@ -72,7 +72,7 @@ Only the required SVGs and their license are packaged on the ISO.
 No network connection or JavaScript runtime is needed to display the icons on the console.
 
 
-## Video codec selection
+## Video codec selection on the original Xbox
 
 **Settings → Display → Video Codec** defaults to **Auto (Prefer MPEG-2)**. Moonlight tries MPEG-2
 when the host advertises it and uses standard automatic negotiation if it is unavailable or the
@@ -205,7 +205,83 @@ Video decoding runs on the CPU. Every stream summary reports GPU and software fr
 **SOFTWARE FALLBACK USED** includes the reason GPU presentation switched to software, even when
 Performance Stats is disabled.
 
-## 🛠️ Build
+## Desktop, mobile, and TV client builds
+
+The shared SDL3 client target is `moonlight_client`. It uses separate per-user storage and stream
+profiles up to 3840×2160 at 120 FPS. Auto codec selection negotiates H.264, HEVC, or AV1 in SDR
+according to the host and available FFmpeg decoders. FFmpeg can use D3D11VA or DXVA2 on Windows,
+VA-API or CUDA on Linux, VideoToolbox on Apple platforms, and MediaCodec on Android when the
+target build and device provide the decoder. Hardware frames are copied into the SDL presentation
+path.
+
+SDL3 supports mapped gamepads and host-driven rumble, motion, touchpad, battery, and LED features
+when the device exposes them. Its Steam Controller 2 backport exposes digital trigger clicks and
+accepts the controller's haptic output reports through the SDL effect API. TV remotes use
+directional navigation. A touch swipe moves focus, a tap chooses the focused item, and a hold
+opens its actions. Hold for at least a second to go back.
+To connect from these builds, enter the Sunshine PC's IPv4 address in **Add Host**.
+
+On Windows, select the `moonlight_client` run configuration in CLion, then choose
+**SDL client (mingw64)** in the CMake profile switcher. From the MinGW64 shell, use `client-mingw64`.
+The preset downloads the pinned FFmpeg package during configure.
+
+```bash
+cmake --preset client-mingw64
+cmake --build --preset client-mingw64 --parallel
+```
+
+On Linux or macOS, use `client` and enable the prebuilt package if you want to use it.
+
+```bash
+cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON
+cmake --build --preset client --parallel
+```
+
+The prebuilt option downloads a pinned, checksum-verified LizardByte/build-deps archive. Set
+`FFMPEG_PREPARED_BINARIES` to an extracted target FFmpeg prefix to build offline with that artifact.
+Linux distribution uses `packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.yml`. The Flatpak
+grants device access so SDL can use raw HID for advanced controller features.
+The release build workflow signs the Windows executable with Azure Artifact Signing and signs,
+notarizes, and staples the macOS DMG.
+
+#### Android and Android TV
+
+Install Java 17, Android SDK and Build Tools 35, NDK 28.2.13676358, and CMake 3.22.1. Build the
+ARM64 dependencies from Linux or macOS with Meson, Ninja, pkg-config, Perl, and Make installed.
+Set `ANDROID_NDK_HOME` to the NDK directory.
+
+```bash
+prefix="$PWD/cmake-build-android-deps"
+bash scripts/build-client-deps.sh android "$prefix"
+sdl="$prefix/sources/sdl-release-3.4.18"
+bash "$sdl/android-project/gradlew" -p packaging/android :app:assembleDebug \
+  "-PmoonlightSdlSource=$sdl" "-PmoonlightAndroidDeps=$prefix"
+```
+
+The APK has both Android and Android TV launcher entries.
+
+#### iOS and Apple TV
+
+Build on macOS with Xcode, Meson, Ninja, pkg-config, Perl, and Make. For a device build, use
+`target=ios`, `system=iOS` and `sdk=iphoneos`, or use `target=tvos`, `system=tvOS` and
+`sdk=appletvos`. Supply the development team for the app's Xcode signing configuration.
+
+```bash
+prefix="$PWD/cmake-build-$target-deps"
+bash scripts/build-client-deps.sh "$target" "$prefix"
+cmake -S . -B "cmake-build-$target" -G Xcode \
+  -DBUILD_CLIENT=ON -DBUILD_XBOX=OFF -DBUILD_TESTS=OFF -DBUILD_DOCS=OFF \
+  "-DCMAKE_SYSTEM_NAME=$system" "-DCMAKE_OSX_SYSROOT=$sdk" \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+  "-DCMAKE_FIND_ROOT_PATH=$prefix" "-DOPENSSL_ROOT_DIR=$prefix" \
+  "-DFFMPEG_PREPARED_BINARIES=$prefix" "-DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=$team"
+cmake --build "cmake-build-$target" --config Release --target moonlight_client
+```
+
+CI builds iOS and tvOS simulator targets. Device installation requires a provisioning profile
+for the bundle identifier selected in the Xcode project.
+
+## 🛠️ Original Xbox build
 
 ### Prerequisites
 

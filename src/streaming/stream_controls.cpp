@@ -103,10 +103,107 @@ namespace {
         return RS_CLK_FLAG;
       case SDL_GAMEPAD_BUTTON_GUIDE:
         return SPECIAL_FLAG;
+#ifdef MOONLIGHT_PORTABLE
+      case SDL_GAMEPAD_BUTTON_MISC1:
+        return MISC_FLAG;
+      case SDL_GAMEPAD_BUTTON_TOUCHPAD:
+        return TOUCHPAD_FLAG;
+      case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1:
+        return PADDLE1_FLAG;
+      case SDL_GAMEPAD_BUTTON_LEFT_PADDLE1:
+        return PADDLE2_FLAG;
+      case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2:
+        return PADDLE3_FLAG;
+      case SDL_GAMEPAD_BUTTON_LEFT_PADDLE2:
+        return PADDLE4_FLAG;
+#endif
       default:
         return 0;
     }
   }
+
+#ifdef MOONLIGHT_PORTABLE
+  /**
+   * @brief Translate SDL battery state and send it to the host.
+   * @param slot Host controller slot.
+   * @param state SDL battery power state.
+   * @param percent State of charge, or a negative value if unknown.
+   */
+  void send_gamepad_battery(int slot, SDL_PowerState state, int percent) {
+    std::uint8_t status = LI_BATTERY_STATE_UNKNOWN;
+    switch (state) {
+      case SDL_POWERSTATE_ON_BATTERY:
+        status = LI_BATTERY_STATE_DISCHARGING;
+        break;
+      case SDL_POWERSTATE_NO_BATTERY:
+        status = LI_BATTERY_STATE_NOT_PRESENT;
+        break;
+      case SDL_POWERSTATE_CHARGING:
+        status = LI_BATTERY_STATE_CHARGING;
+        break;
+      case SDL_POWERSTATE_CHARGED:
+        status = LI_BATTERY_STATE_FULL;
+        break;
+      default:
+        break;
+    }
+    LiSendControllerBatteryEvent(slot, status, percent < 0 ? LI_BATTERY_PERCENTAGE_UNKNOWN : std::min(percent, 100));
+  }
+
+  /**
+   * @brief Select the protocol controller family from SDL's detected type.
+   * @param pad Connected SDL gamepad.
+   * @return Host controller family.
+   */
+  std::uint8_t controller_type(SDL_Gamepad *pad) {
+    switch (SDL_GetRealGamepadType(pad)) {
+      case SDL_GAMEPAD_TYPE_XBOX360:
+      case SDL_GAMEPAD_TYPE_XBOXONE:
+        return LI_CTYPE_XBOX;
+      case SDL_GAMEPAD_TYPE_PS3:
+      case SDL_GAMEPAD_TYPE_PS4:
+      case SDL_GAMEPAD_TYPE_PS5:
+        return LI_CTYPE_PS;
+      case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+      case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+      case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+      case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+        return LI_CTYPE_NINTENDO;
+      case SDL_GAMEPAD_TYPE_STEAM:
+        return LI_CTYPE_STEAM;
+      default:
+        return LI_CTYPE_UNKNOWN;
+    }
+  }
+
+  /**
+   * @brief Report the buttons and feedback available on a mapped SDL gamepad.
+   * @param packet Arrival packet with the stable slot and active mask.
+   * @param pad Local gamepad assigned to the slot.
+   */
+  void send_gamepad_arrival(const input::StreamPacket &packet, SDL_Gamepad *pad) {
+    std::uint32_t buttons = 0;
+    for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; ++button) {
+      if (SDL_GamepadHasButton(pad, static_cast<SDL_GamepadButton>(button))) {
+        buttons |= controller_flag(button);
+      }
+    }
+    const auto properties = SDL_GetGamepadProperties(pad);
+    const auto touchpads = SDL_GetNumGamepadTouchpads(pad);
+    const auto capabilities = LI_CCAP_ANALOG_TRIGGERS |
+                              (SDL_GetBooleanProperty(properties, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false) ? LI_CCAP_RUMBLE : 0) |
+                              (SDL_GetBooleanProperty(properties, SDL_PROP_GAMEPAD_CAP_TRIGGER_RUMBLE_BOOLEAN, false) ? LI_CCAP_TRIGGER_RUMBLE : 0) |
+                              (SDL_GetBooleanProperty(properties, SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN, false) ? LI_CCAP_RGB_LED : 0) |
+                              (SDL_GamepadHasSensor(pad, SDL_SENSOR_ACCEL) ? LI_CCAP_ACCEL : 0) |
+                              (SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO) ? LI_CCAP_GYRO : 0) |
+                              (touchpads > 0 ? LI_CCAP_TOUCHPAD : 0) | (touchpads > 1 ? LI_CCAP_DUAL_TOUCHPAD : 0) |
+                              LI_CCAP_BATTERY_STATE;
+    LiSendControllerArrivalEvent(packet.slot, packet.mask, controller_type(pad), buttons, capabilities);
+    int percentage = -1;
+    const auto power = SDL_GetGamepadPowerInfo(pad, &percentage);
+    send_gamepad_battery(packet.slot, power, percentage);
+  }
+#endif
 
   /**
    * @brief Cache the raw buttons bound to the three menu shortcut buttons.
@@ -292,6 +389,14 @@ namespace streaming {
 
   StreamControls::StreamControls():
       router_([this](const input::StreamPacket &packet) {
+#ifdef MOONLIGHT_PORTABLE
+        if (packet.type == input::StreamPacketType::arrival) {
+          if (SDL_Gamepad *pad = SDL_GetGamepadFromID(router_.slot_device(packet.slot)); pad != nullptr) {
+            send_gamepad_arrival(packet, pad);
+            return;
+          }
+        }
+#endif
         auto outgoing = packet;
         if (packet.type == input::StreamPacketType::controller && packet.slot >= 0 && packet.slot < 4) {
           latestHostController_[packet.slot] = packet.controller;
@@ -300,7 +405,103 @@ namespace streaming {
           }
         }
         send_packet(outgoing);
-      }) {}
+      }) {
+  }
+
+#ifdef MOONLIGHT_PORTABLE
+  int StreamControls::gamepad_slot(SDL_JoystickID device) const {
+    for (int slot = 0; slot < static_cast<int>(devices_.size()); ++slot) {
+      if (router_.slot_device(slot) == device) {
+        return slot;
+      }
+    }
+    return -1;
+  }
+
+  void StreamControls::set_motion_reporting(unsigned int slot, std::uint8_t motionType, std::uint16_t rate) {
+    const auto sensor = motionType == LI_MOTION_TYPE_ACCEL ? SDL_SENSOR_ACCEL : SDL_SENSOR_GYRO;
+    const auto index = motionType == LI_MOTION_TYPE_ACCEL ? 0 : 1;
+    for (auto &device : devices_) {
+      if (device.handle != nullptr && SDL_GetGamepadID(device.handle) == router_.slot_device(slot)) {
+        if (SDL_SetGamepadSensorEnabled(device.handle, sensor, rate != 0)) {
+          device.motionRate[index] = rate;
+          device.lastMotionTimestamp[index] = 0;
+        }
+        return;
+      }
+    }
+  }
+
+  void StreamControls::set_controller_led(unsigned int slot, std::uint32_t rgb) {
+    if (SDL_Gamepad *pad = SDL_GetGamepadFromID(router_.slot_device(slot)); pad != nullptr) {
+      SDL_SetGamepadLED(pad, (rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+    }
+  }
+
+  void StreamControls::forward_gamepad_event(const SDL_Event &event) {
+    switch (event.type) {
+      case SDL_EVENT_JOYSTICK_BATTERY_UPDATED:
+        if (const int slot = gamepad_slot(event.jbattery.which); slot >= 0) {
+          send_gamepad_battery(slot, event.jbattery.state, event.jbattery.percent);
+        }
+        break;
+      case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+      case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
+      case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
+        if (const int slot = gamepad_slot(event.gtouchpad.which); slot >= 0 && event.gtouchpad.touchpad < 2) {
+          const auto &touch = event.gtouchpad;
+          const auto type = event.type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ? LI_TOUCH_EVENT_DOWN :
+                                                                            (event.type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP ? LI_TOUCH_EVENT_UP : LI_TOUCH_EVENT_MOVE);
+          LiSendControllerTouchEvent2(slot, type, touch.touchpad, touch.finger, touch.x, touch.y, touch.pressure);
+        }
+        break;
+      case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+        {
+          const auto &sensor = event.gsensor;
+          if (sensor.sensor != SDL_SENSOR_ACCEL && sensor.sensor != SDL_SENSOR_GYRO) {
+            break;
+          }
+          const int slot = gamepad_slot(sensor.which);
+          if (slot < 0) {
+            break;
+          }
+          const int index = sensor.sensor == SDL_SENSOR_ACCEL ? 0 : 1;
+          for (auto &device : devices_) {
+            if (device.handle == nullptr || SDL_GetGamepadID(device.handle) != sensor.which) {
+              continue;
+            }
+            const auto rate = device.motionRate[index];
+            auto &last = device.lastMotionTimestamp[index];
+            if (rate != 0 && (last == 0 || sensor.timestamp - last >= SDL_NS_PER_SECOND / rate)) {
+              constexpr float radiansToDegrees = 57.295779513f;
+              const float scale = index == 0 ? 1.0f : radiansToDegrees;
+              LiSendControllerMotionEvent(slot, index == 0 ? LI_MOTION_TYPE_ACCEL : LI_MOTION_TYPE_GYRO, sensor.data[0] * scale, sensor.data[1] * scale, sensor.data[2] * scale);
+              last = sensor.timestamp;
+            }
+            break;
+          }
+          break;
+        }
+      default:
+        break;
+    }
+  }
+
+  void StreamControls::rumble(unsigned int slot, std::uint16_t first, std::uint16_t second, bool triggers) {
+    const auto device = router_.slot_device(slot);
+    if (device < 0) {
+      return;
+    }
+    if (SDL_Gamepad *pad = SDL_GetGamepadFromID(device); pad != nullptr) {
+      constexpr Uint32 effectDuration = 30000;
+      if (triggers) {
+        SDL_RumbleGamepadTriggers(pad, first, second, effectDuration);
+      } else {
+        SDL_RumbleGamepad(pad, first, second, effectDuration);
+      }
+    }
+  }
+#endif
 
   StreamControls::~StreamControls() {
     close();
@@ -349,6 +550,12 @@ namespace streaming {
     panel_.icons.clear();
     for (auto &device : devices_) {
       if (device.handle != nullptr) {
+#ifdef MOONLIGHT_PORTABLE
+        SDL_RumbleGamepad(device.handle, 0, 0, 0);
+        SDL_RumbleGamepadTriggers(device.handle, 0, 0, 0);
+        SDL_SetGamepadSensorEnabled(device.handle, SDL_SENSOR_ACCEL, false);
+        SDL_SetGamepadSensorEnabled(device.handle, SDL_SENSOR_GYRO, false);
+#endif
         SDL_CloseGamepad(device.handle);
       }
       device = {};
@@ -394,6 +601,17 @@ namespace streaming {
 
   SDL_Gamepad *StreamControls::take_controller_for_shell() {
     poll();
+#ifdef MOONLIGHT_PORTABLE
+    // The shell retains the SDL handle, so closing the stream cannot clear feedback for it.
+    for (auto &device : devices_) {
+      if (device.handle != nullptr) {
+        SDL_RumbleGamepad(device.handle, 0, 0, 0);
+        SDL_RumbleGamepadTriggers(device.handle, 0, 0, 0);
+        SDL_SetGamepadSensorEnabled(device.handle, SDL_SENSOR_ACCEL, false);
+        SDL_SetGamepadSensorEnabled(device.handle, SDL_SENSOR_GYRO, false);
+      }
+    }
+#endif
     for (auto &device : devices_) {
       if (device.handle != nullptr && (device.sample.buttonFlags != 0 || device.sample.leftTrigger != 0 || device.sample.rightTrigger != 0)) {
         return std::exchange(device.handle, nullptr);
@@ -924,6 +1142,11 @@ namespace streaming {
   }
 
   bool StreamControls::EventHandler::handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
+#ifdef MOONLIGHT_PORTABLE
+    if (active && controls_.focused_ && !controls_.visible()) {
+      controls_.forward_gamepad_event(event);
+    }
+#endif
     note_gamepad_activity(event);
     switch (event.type) {
       case SDL_EVENT_GAMEPAD_ADDED:
@@ -950,6 +1173,12 @@ namespace streaming {
         controller_axis(event.gaxis);
         break;
       case SDL_EVENT_KEY_DOWN:
+#ifdef __ANDROID__
+        if (event.key.key == SDLK_AC_BACK) {
+          return true;
+        }
+#endif
+        [[fallthrough]];
       case SDL_EVENT_KEY_UP:
         return keyboard_event(event.key, backend, active, statisticsEnabled);
       case SDL_EVENT_MOUSE_MOTION:
@@ -978,6 +1207,9 @@ namespace streaming {
         controls_.focused_ = true;
         controls_.router_.set_captured(controls_.visible());
         break;
+#ifdef MOONLIGHT_PORTABLE
+      case SDL_EVENT_DID_ENTER_BACKGROUND:
+#endif
       case SDL_EVENT_QUIT:
         return true;
       default:

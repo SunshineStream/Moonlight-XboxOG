@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -424,6 +425,18 @@ namespace {
     return "&corever=1";
   }
 
+  /**
+   * @brief Serialize the first four IV bytes as the signed big-endian key ID used on the wire.
+   * @param ivHex Validated hex encoding of the 16-byte remote input IV.
+   * @return Decimal key ID used by the host to derive the audio encryption IV.
+   */
+  std::string stream_key_id(std::string_view ivHex) {
+    std::uint32_t prefix = 0;
+    std::from_chars(ivHex.data(), ivHex.data() + 8, prefix, 16);
+    const std::int64_t keyId = prefix < (1U << 31) ? prefix : static_cast<std::int64_t>(prefix) - (1LL << 32);
+    return std::to_string(keyId);
+  }
+
   std::string build_stream_resume_path(
     std::string_view uniqueId,
     const network::StreamLaunchConfiguration &configuration
@@ -431,7 +444,7 @@ namespace {
     const std::string queryPrefix = "/resume?uniqueid=" + std::string(uniqueId);
     std::string path = queryPrefix +
                        "&rikey=" + configuration.remoteInputAesKeyHex +
-                       "&rikeyid=" + configuration.remoteInputAesIvHex +
+                       "&rikeyid=" + stream_key_id(configuration.remoteInputAesIvHex) +
                        "&localAudioPlayMode=" + std::to_string(configuration.playAudioOnPc ? 1 : 0) +
                        "&surroundAudioInfo=" + std::to_string(surround_audio_info_from_audio_configuration(configuration.audioConfiguration));
     if (configuration.clientRefreshRateX100 > 0) {
@@ -451,7 +464,7 @@ namespace {
                        "&additionalStates=1" +
                        "&sops=1" +
                        "&rikey=" + configuration.remoteInputAesKeyHex +
-                       "&rikeyid=" + configuration.remoteInputAesIvHex +
+                       "&rikeyid=" + stream_key_id(configuration.remoteInputAesIvHex) +
                        "&localAudioPlayMode=" + std::to_string(configuration.playAudioOnPc ? 1 : 0) +
                        "&surroundAudioInfo=" + std::to_string(surround_audio_info_from_audio_configuration(configuration.audioConfiguration)) +
                        "&remoteControllersBitmap=1" +
@@ -1770,6 +1783,20 @@ namespace {
     return recv_all_ssl(ssl.get(), rawResponse, errorMessage, cancelRequested);
   }
 
+  /**
+   * @brief Fetch and parse an HTTP or HTTPS response from the host.
+   * @param address Host IPv4 address.
+   * @param port Port to connect to.
+   * @param pathAndQuery Request path and query string.
+   * @param useTls Whether to use TLS.
+   * @param tlsClientIdentity Optional client identity for TLS authentication.
+   * @param expectedTlsCertificatePem Expected server certificate, or empty when none is pinned.
+   * @param response Output for the parsed response.
+   * @param errorMessage Optional diagnostic output.
+   * @param cancelRequested Optional cancellation flag.
+   * @param socketIoTimeoutMilliseconds Timeout for socket reads and writes.
+   * @return True when an HTTP response was parsed successfully.
+   */
   bool http_get(  // NOSONAR(cpp:S107) HTTP transport keeps the request inputs explicit for callers
     const std::string &address,
     uint16_t port,
@@ -1811,7 +1838,9 @@ namespace {
     }
 
     trace_pairing_phase("http_get: socket initialization");
-    if (WsaGuard wsaGuard; !wsaGuard.initialized) {
+    // Keep Winsock initialized until SocketGuard has closed the request socket.
+    const WsaGuard wsaGuard;
+    if (!wsaGuard.initialized) {
       return append_error(errorMessage, "Failed to initialize socket support for host pairing");
     }
 

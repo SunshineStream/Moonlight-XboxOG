@@ -5,7 +5,7 @@
 #pragma once
 
 // nxdk includes
-#include <hal/video.h>
+#include "src/platform/video_mode.h"
 
 // local includes
 #include "src/app/client_state.h"

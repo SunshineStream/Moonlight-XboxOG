@@ -7,6 +7,29 @@
   },
   "configurePresets": [
     {
+      "name": "client",
+      "displayName": "SDL client",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/cmake-build-client",
+      "cacheVariables": {
+        "BUILD_CLIENT": "ON",
+        "BUILD_XBOX": "OFF",
+        "BUILD_DOCS": "OFF",
+        "BUILD_TESTS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "client-mingw64",
+      "displayName": "SDL client (mingw64)",
+      "inherits": "client",
+      "generator": "MinGW Makefiles",
+      "toolchainFile": "${sourceDir}/cmake/host-mingw64-clang.cmake",
+      "cacheVariables": {
+        "MOONLIGHT_USE_PREBUILT_FFMPEG": "ON"
+      }
+    },
+    {
       "name": "nxdk-release (mingw64)",
       "displayName": "Release (mingw64)",
       "description": "Build host tests natively with MinGW Makefiles and drive the Xbox target through an internal nxdk child configure",
@@ -69,6 +92,16 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "client",
+      "configurePreset": "client",
+      "targets": ["moonlight_client"]
+    },
+    {
+      "name": "client-mingw64",
+      "configurePreset": "client-mingw64",
+      "targets": ["moonlight_client"]
+    },
     {
       "name": "nxdk-release (mingw64)",
       "configurePreset": "nxdk-release (mingw64)"

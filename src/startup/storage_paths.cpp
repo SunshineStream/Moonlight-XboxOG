@@ -8,6 +8,10 @@
 // standard includes
 #include <string>
 
+#ifdef MOONLIGHT_PORTABLE
+  #include <SDL3/SDL.h>
+#endif
+
 // nxdk includes
 #if defined(__has_include) && __has_include(<nxdk/xbe.h>)
   #include <nxdk/xbe.h>
@@ -42,11 +46,22 @@ namespace startup {
   }
 
   std::string default_storage_path(std::string_view entryName) {
+#ifdef MOONLIGHT_PORTABLE
+    // SDL creates a per-user writable application directory, including in a sandbox.
+    static const auto root = [] {
+      char *path = SDL_GetPrefPath("SunshineStream", "Moonlight");
+      std::string result = path == nullptr ? "" : path;
+      SDL_free(path);
+      return result;
+    }();
+    return root + std::string(entryName);
+#else
     if (const std::string titleScopedRoot = title_scoped_storage_root(); !titleScopedRoot.empty()) {
       return titleScopedRoot + std::string(entryName);
     }
 
     return std::string(entryName);
+#endif
   }
 
   std::string screenshot_storage_path(std::string_view directory, std::string_view filename) {

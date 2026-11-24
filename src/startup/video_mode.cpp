@@ -11,6 +11,10 @@
 // standard includes
 #include <array>
 
+#ifdef MOONLIGHT_PORTABLE
+  #include <SDL3/SDL.h>
+#endif
+
 namespace startup {
 
   namespace {
@@ -103,6 +107,11 @@ namespace startup {
   }
 
   VIDEO_MODE choose_stream_output_mode(VIDEO_MODE streamVideoMode, const VIDEO_MODE &shellVideoMode) {
+#ifdef MOONLIGHT_PORTABLE
+    // The stream resolution is independent of the native window dimensions.
+    (void) streamVideoMode;
+    return shellVideoMode;
+#else
     if (streamVideoMode.width <= 0 || streamVideoMode.height <= 0) {
       return shellVideoMode;
     }
@@ -110,10 +119,16 @@ namespace startup {
       streamVideoMode.bpp = 16;
     }
     return streamVideoMode;
+#endif
   }
 
   VIDEO_MODE choose_stream_startup_mode(const VIDEO_MODE &streamOutputMode, const VIDEO_MODE &shellVideoMode) {
+#ifdef MOONLIGHT_PORTABLE
+    (void) streamOutputMode;
+    return shellVideoMode;
+#else
     return is_1080i_mode(streamOutputMode) ? shellVideoMode : streamOutputMode;
+#endif
   }
 
   std::vector<VIDEO_MODE> stream_resolution_presets(int bpp, int refresh) {
@@ -122,6 +137,10 @@ namespace startup {
     for (const StreamResolutionPreset &preset : STREAM_RESOLUTION_PRESETS) {
       presets.push_back(make_stream_video_mode(preset, bpp, refresh));
     }
+#ifdef MOONLIGHT_PORTABLE
+    presets.push_back(make_stream_video_mode({2560, 1440}, bpp, refresh));
+    presets.push_back(make_stream_video_mode({3840, 2160}, bpp, refresh));
+#endif
     return presets;
   }
 
@@ -144,7 +163,11 @@ namespace startup {
     const int bpp = outputVideoMode.bpp > 0 ? outputVideoMode.bpp : 32;
     const int refresh = outputVideoMode.refresh > 0 ? outputVideoMode.refresh : 60;
 
+#ifdef MOONLIGHT_PORTABLE
+    return make_stream_video_mode({1920, 1080}, bpp, refresh);
+#else
     return make_stream_video_mode({640, 480}, bpp, refresh);
+#endif
   }
 
   VIDEO_MODE choose_default_stream_video_mode(const std::vector<VIDEO_MODE> &availableVideoModes, const VIDEO_MODE &outputVideoMode) {
@@ -171,6 +194,12 @@ namespace startup {
   VideoModeSelection select_best_video_mode(int bpp, int refresh) {
     VideoModeSelection selection {};
 
+#ifdef MOONLIGHT_PORTABLE
+    const SDL_DisplayMode *display = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+    const int displayRefresh = display != nullptr && display->refresh_rate > 0 ? static_cast<int>(display->refresh_rate + 0.5f) : 60;
+    selection.availableVideoModes = stream_resolution_presets(bpp, refresh > 0 ? refresh : displayRefresh);
+    selection.bestVideoMode = {1280, 720, bpp, displayRefresh};
+#else
     VIDEO_MODE videoMode;
     void *position = nullptr;
     while (XVideoListModes(&videoMode, bpp, refresh, &position)) {
@@ -178,6 +207,7 @@ namespace startup {
     }
 
     selection.bestVideoMode = choose_best_video_mode(selection.availableVideoModes);
+#endif
 
     return selection;
   }

@@ -1,0 +1,208 @@
+---
+name: Client builds
+permissions: {}
+
+on:
+  workflow_call:
+    inputs:
+      publish_release:
+        required: true
+        type: boolean
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+      - uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c  # v2.34.0
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git make patch perl
+            mingw-w64-x86_64-clang mingw-w64-x86_64-cmake mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make mingw-w64-x86_64-pkgconf
+      - name: Build and stage
+        run: |
+          cmake --preset client-mingw64
+          cmake --build --preset client-mingw64 --parallel
+          cmake --install cmake-build-client --prefix "$PWD/artifacts" --strip
+      - name: Sign Windows executable
+        if: inputs.publish_release
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\artifacts\bin
+          files-folder-filter: exe
+      - name: Package Windows client
+        working-directory: artifacts/bin
+        run: cmake -E tar c ../Moonlight-Windows-AMD64.zip --format=zip Moonlight.exe assets
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-Windows-AMD64
+          path: artifacts/*.zip
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+      - name: Install Apple certificate
+        if: inputs.publish_release
+        uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c  # v7.2.0
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD }}
+      - name: Build app
+        run: |
+          brew install pkgconf
+          cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON
+          cmake --build --preset client --parallel
+      - name: Sign app
+        if: inputs.publish_release
+        env:
+          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+        run: |
+          codesign --force --options runtime --timestamp --sign "${APPLE_CODESIGN_IDENTITY}" cmake-build-client/Moonlight.app
+          codesign --verify --strict cmake-build-client/Moonlight.app
+      - name: Package DMG
+        env:
+          PACKAGE_NAME: Moonlight-macOS-${{ matrix.arch }}
+        run: cpack -G DragNDrop --config cmake-build-client/CPackConfig.cmake -B artifacts -D "CPACK_PACKAGE_FILE_NAME=${PACKAGE_NAME}"
+      - name: Notarize and staple DMG
+        if: inputs.publish_release
+        env:
+          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARYTOOL_PASSWORD: ${{ secrets.APPLE_NOTARYTOOL_PASSWORD }}
+        run: |
+          dmg=(artifacts/*.dmg)
+          codesign --force --timestamp --sign "${APPLE_CODESIGN_IDENTITY}" "${dmg[0]}"
+          xcrun notarytool submit "${dmg[0]}" --wait --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" --password "${APPLE_NOTARYTOOL_PASSWORD}"
+          xcrun stapler staple "${dmg[0]}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-macOS-${{ matrix.arch }}
+          path: artifacts/*.dmg
+
+  flatpak:
+    name: Linux Flatpak (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+      - name: Build Flatpak
+        env:
+          FLATPAK_ARCH: ${{ matrix.arch }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --or-update flathub org.flatpak.Builder \
+            "org.freedesktop.Platform/${FLATPAK_ARCH}/25.08" "org.freedesktop.Sdk/${FLATPAK_ARCH}/25.08"
+          sudo su "$(whoami)" -c "flatpak run org.flatpak.Builder \
+            --arch=${FLATPAK_ARCH} --force-clean --repo=flatpak-repo --sandbox \
+            cmake-build-flatpak packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.yml"
+          sudo su "$(whoami)" -c "flatpak build-bundle --arch=${FLATPAK_ARCH} \
+            flatpak-repo Moonlight-${FLATPAK_ARCH}.flatpak dev.lizardbyte.app.Moonlight"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-Flatpak-${{ matrix.arch }}
+          path: Moonlight-*.flatpak
+
+  android:
+    name: Android and Android TV
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+      - name: Build Android APK
+        run: |
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+          sudo apt-get install -y meson ninja-build pkg-config
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.2.13676358"
+          bash scripts/build-client-deps.sh android "${PWD}/cmake-build-android-deps"
+          sdl_sources=( "${PWD}"/cmake-build-android-deps/sources/sdl-release-* )
+          bash "${sdl_sources[0]}/android-project/gradlew" -p packaging/android :app:assembleDebug \
+            "-PmoonlightSdlSource=${sdl_sources[0]}" "-PmoonlightAndroidDeps=${PWD}/cmake-build-android-deps"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-Android-debug
+          path: packaging/android/app/build/outputs/apk/debug/*.apk
+
+  apple_mobile:
+    name: ${{ matrix.system }} simulator
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: iOS
+            target: ios
+            sdk: iphonesimulator
+          - system: tvOS
+            target: tvos
+            sdk: appletvsimulator
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+      - name: Build simulator application
+        env:
+          APPLE_TARGET: ${{ matrix.target }}
+          APPLE_SYSTEM: ${{ matrix.system }}
+          APPLE_SDK: ${{ matrix.sdk }}
+        run: |
+          brew install pkgconf meson ninja
+          prefix="${PWD}/cmake-build-${APPLE_TARGET}-deps"
+          bash scripts/build-client-deps.sh "${APPLE_TARGET}-simulator" "${prefix}"
+          cmake -S . -B "cmake-build-${APPLE_TARGET}" -G Xcode \
+            -DBUILD_CLIENT=ON -DBUILD_XBOX=OFF -DBUILD_TESTS=OFF -DBUILD_DOCS=OFF \
+            "-DCMAKE_SYSTEM_NAME=${APPLE_SYSTEM}" "-DCMAKE_OSX_SYSROOT=${APPLE_SDK}" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            "-DOPENSSL_ROOT_DIR=${prefix}" "-DCMAKE_FIND_ROOT_PATH=${prefix}" \
+            "-DFFMPEG_PREPARED_BINARIES=${prefix}" -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
+          cmake --build "cmake-build-${APPLE_TARGET}" --config Release --target moonlight_client --parallel

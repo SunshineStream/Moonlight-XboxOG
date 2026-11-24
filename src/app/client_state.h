@@ -13,7 +13,7 @@
 #include <vector>
 
 // nxdk includes
-#include <hal/video.h>
+#include "src/platform/video_mode.h"
 
 // local includes
 #include "src/app/host_records.h"

@@ -42,6 +42,10 @@ namespace input {
   StreamInput::StreamInput(Sink sink):
       sink_(std::move(sink)) {}
 
+  std::int64_t StreamInput::slot_device(unsigned int slot) const {
+    return slot < slots_.size() ? slots_[slot].device : -1;
+  }
+
   std::uint16_t StreamInput::active_mask() const {
     std::uint16_t mask = 0;
     for (int i = 0; i < 4; ++i) {

@@ -1,4 +1,4 @@
-# Build the Xbox SDL3 port and its image and font libraries in the Xbox child.
+# Build SDL3 and the shared image and font libraries for each toolchain.
 include_guard(GLOBAL)
 
 # Configure the pinned port with Moonlight's Xbox driver adapters.
@@ -23,6 +23,47 @@ function(moonlight_prepare_sdl3)
     set(SDLTTF_VENDORED ON)
     set(SDLTTF_HARFBUZZ OFF)
     set(SDLTTF_PLUTOSVG OFF)
+    CPMGetPackage(sdl3_ttf)
+    add_subdirectory("${sdl3_ttf_SOURCE_DIR}" "${sdl3_ttf_BINARY_DIR}" EXCLUDE_FROM_ALL)
+endfunction()
+
+# Build the pinned SDL libraries with the portable client's platform backends.
+function(moonlight_prepare_portable_sdl3)
+    # Android's Java glue loads SDL3 by name. Native desktop and Apple targets link it statically.
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    if(ANDROID)
+        set(SDL_SHARED ON)
+        set(SDL_STATIC OFF)
+    else()
+        set(SDL_SHARED OFF)
+        set(SDL_STATIC ON)
+    endif()
+    set(SDL_TEST_LIBRARY OFF)
+    set(SDL_TESTS OFF)
+    set(SDL_INSTALL OFF)
+    CPMGetPackage(SDL3)
+    add_subdirectory("${SDL3_SOURCE_DIR}" "${SDL3_BINARY_DIR}" EXCLUDE_FROM_ALL)
+
+    # Use the same image formats and font source as the original Xbox.
+    # cmake-lint: disable=C0103
+    set(BUILD_SHARED_LIBS OFF)
+    set(SDLIMAGE_VENDORED OFF)
+    set(SDLIMAGE_BACKEND_STB ON)
+    set(SDLIMAGE_PNG_LIBPNG OFF)
+    set(SDLIMAGE_AVIF OFF)
+    set(SDLIMAGE_JXL OFF)
+    set(SDLIMAGE_TIF OFF)
+    set(SDLIMAGE_WEBP OFF)
+    set(SDLIMAGE_JPG_SAVE OFF)
+    set(SDLIMAGE_PNG_SAVE OFF)
+    set(SDLIMAGE_INSTALL OFF)
+    CPMGetPackage(sdl3_image)
+    add_subdirectory("${sdl3_image_SOURCE_DIR}" "${sdl3_image_BINARY_DIR}" EXCLUDE_FROM_ALL)
+
+    set(SDLTTF_VENDORED ON)
+    set(SDLTTF_HARFBUZZ OFF)
+    set(SDLTTF_PLUTOSVG OFF)
+    set(SDLTTF_INSTALL OFF)
     CPMGetPackage(sdl3_ttf)
     add_subdirectory("${sdl3_ttf_SOURCE_DIR}" "${sdl3_ttf_BINARY_DIR}" EXCLUDE_FROM_ALL)
 endfunction()

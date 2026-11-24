@@ -1,0 +1,114 @@
+---
+app-id: dev.lizardbyte.app.Moonlight
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: moonlight
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=all  # SDL HIDAPI requires access to hidraw for advanced controller features.
+modules:
+  - name: numactl
+    rm-configure: true
+    sources:
+      - type: git
+        url: https://github.com/numactl/numactl.git
+        tag: v2.0.19
+        commit: 3bc85e37d5a30da6790cb7e8bb488bb8f679170f
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /lib/*.a
+      - /lib/*.la
+      - /share/man
+  - name: ffmpeg-prebuilt
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/ffmpeg
+      - tar -xzf ffmpeg.tar.gz -C /app/ffmpeg --strip-components=1 ffmpeg/include ffmpeg/lib ffmpeg/share/licenses
+    sources:
+      - type: file
+        url: https://github.com/LizardByte/build-deps/releases/download/v2026.1017.131201/Linux-x86_64-ffmpeg.tar.gz
+        sha256: b2de5119cb0ab89cb6038acb75299b213f97a0c79d34557068add639511f8815
+        dest-filename: ffmpeg.tar.gz
+        only-arches: [x86_64]
+      - type: file
+        url: https://github.com/LizardByte/build-deps/releases/download/v2026.1017.131201/Linux-aarch64-ffmpeg.tar.gz
+        sha256: fa6ca8f716922ebd4be222647bf972ec050af145406186787c43bfa0353f0a1d
+        dest-filename: ffmpeg.tar.gz
+        only-arches: [aarch64]
+  - name: moonlight
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DBUILD_CLIENT=ON
+      - -DBUILD_XBOX=OFF
+      - -DBUILD_DOCS=OFF
+      - -DBUILD_TESTS=OFF
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DFFMPEG_PREPARED_BINARIES=/app/ffmpeg
+      - -DFETCHCONTENT_SOURCE_DIR_OPENSSL=/run/build/moonlight/deps/openssl
+      - -DFETCHCONTENT_SOURCE_DIR_MOONLIGHT-COMMON-C=/run/build/moonlight/deps/moonlight-common-c
+      - -DFETCHCONTENT_SOURCE_DIR_TOMLPLUSPLUS=/run/build/moonlight/deps/tomlplusplus
+      - -DFETCHCONTENT_SOURCE_DIR_LUCIDE=/run/build/moonlight/deps/lucide
+      - -DFETCHCONTENT_SOURCE_DIR_SDL3=/run/build/moonlight/deps/sdl
+      - -DFETCHCONTENT_SOURCE_DIR_SDL3_IMAGE=/run/build/moonlight/deps/sdl-image
+      - -DFETCHCONTENT_SOURCE_DIR_SDL3_TTF=/run/build/moonlight/deps/sdl-ttf
+    post-install:
+      - >-
+        install -Dm644 "$FLATPAK_BUILDER_BUILDDIR/packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.desktop"
+        /app/share/applications/dev.lizardbyte.app.Moonlight.desktop
+      - >-
+        install -Dm644 "$FLATPAK_BUILDER_BUILDDIR/packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.metainfo.xml"
+        /app/share/metainfo/dev.lizardbyte.app.Moonlight.metainfo.xml
+      - >-
+        install -Dm644 "$FLATPAK_BUILDER_BUILDDIR/moonlight-logo.svg"
+        /app/share/icons/hicolor/scalable/apps/dev.lizardbyte.app.Moonlight.svg
+    sources:
+      - type: dir
+        path: ../../..
+        skip:
+          - .git
+          - .flatpak-builder
+          - cmake-build-flatpak
+          - flatpak-repo
+      - type: git
+        url: https://github.com/openssl/openssl.git
+        tag: openssl-4.1.0
+        disable-submodules: true
+        dest: deps/openssl
+      - type: git
+        url: https://github.com/moonlight-stream/moonlight-common-c.git
+        commit: b4ee1cea3d19e13c0b37c26585e6b1ee174effcb
+        dest: deps/moonlight-common-c
+      - type: git
+        url: https://github.com/marzer/tomlplusplus.git
+        tag: v3.5.1
+        dest: deps/tomlplusplus
+      - type: git
+        url: https://github.com/lucide-icons/lucide.git
+        tag: 1.78.0
+        dest: deps/lucide
+      - type: git
+        url: https://github.com/libsdl-org/SDL.git
+        tag: release-3.4.18
+        dest: deps/sdl
+      - type: patch
+        path: ../../../cmake/patches/sdl3-steam-controller-trigger-clicks-and-haptics.patch
+        dest: deps/sdl
+      - type: git
+        url: https://github.com/libsdl-org/SDL_image.git
+        tag: release-3.4.8
+        disable-submodules: true
+        dest: deps/sdl-image
+      - type: git
+        url: https://github.com/libsdl-org/SDL_ttf.git
+        tag: release-3.2.2
+        dest: deps/sdl-ttf
+cleanup:
+  - /ffmpeg/include
+  - /ffmpeg/lib
