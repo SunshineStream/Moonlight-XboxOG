@@ -35,7 +35,7 @@ TEST(VideoOverlayTest, AnchorsSaveIconInsideTheLowerRightOfTheVideo) {
   EXPECT_EQ(corner.height, 10);
 
   constexpr std::uint8_t background = 49;
-  std::vector<std::uint8_t> framebuffer(width * height * 4, background);
+  std::vector framebuffer(width * height * 4, background);
   ASSERT_TRUE(indicator.draw_rgb(framebuffer.data(), framebuffer.size(), width * 4, width, height, 32, video));
   EXPECT_EQ(framebuffer[(corner.y * width + corner.x) * 4], background);
   EXPECT_EQ(framebuffer[(corner.y * width + corner.x + 1) * 4], 255);

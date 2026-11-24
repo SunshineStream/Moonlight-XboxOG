@@ -8,6 +8,7 @@
 // standard includes
 #include <cstdlib>
 #include <limits>
+#include <tuple>
 #include <utility>
 
 // lib includes
@@ -240,8 +241,7 @@ namespace {
    * @brief Center both footer items between the divider and bottom in standard and widescreen modes.
    */
   TEST(ShellLayoutTest, FitsStandardAndWidescreenDisplayModes) {
-    for (const auto [width, height] : {std::pair {640, 480}, {720, 480}, {854, 480}, {1280, 720}, {1920, 1080}}) {
-      const int glyphSize = height >= 1080 ? 68 : (height >= 720 ? 41 : 32);
+    for (const auto [width, height, glyphSize] : {std::tuple {640, 480, 32}, {720, 480, 32}, {854, 480, 32}, {1280, 720, 41}, {1920, 1080, 68}}) {
       const auto layout = ui::calculate_shell_layout(width, height, glyphSize);
       EXPECT_EQ(layout.navigation.x, width / 20);
       EXPECT_EQ(layout.navigation.y, height / 20);

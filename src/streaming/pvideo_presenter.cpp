@@ -309,8 +309,7 @@ namespace streaming {
   void PvideoPresenter::prepare_overlay_frame(const Yuv420FrameView &frame, const VideoRectangle &destination, VideoOverlay *overlay, VideoOverlay *saveIndicator, std::string &failure) {
     // The previous submission must cross a vblank before the old scanout
     // buffer can be reused. With a spare, pack before waiting for that latch.
-    const bool hasSpare = buffers_.back() != nullptr;
-    if (active_ && !hasSpare && !wait_for_scanout_after(bufferReuseVblank_)) {
+    if (const bool hasSpare = buffers_.back() != nullptr; active_ && !hasSpare && !wait_for_scanout_after(bufferReuseVblank_)) {
       failure = "Timed out waiting for GPU scanout; using software presentation";
     } else if (!pack_overlay_yuy2(frame, buffers_[nextBuffer_], bufferSize_, pitch_)) {
       failure = "Failed to pack the GPU overlay frame";

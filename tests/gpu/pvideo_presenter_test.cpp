@@ -519,7 +519,7 @@ TEST_F(PvideoPresenterTest, CompositesAndClearsAnIndependentSaveIcon) {
   ASSERT_TRUE(indicator.set_argb_surface(8, 8, icon.data(), icon.size(), 32, streaming::VideoOverlayPlacement::bottom_right));
   const auto bounds = indicator.rectangle(target);
   const auto pixelOffset = (bounds.y * width + bounds.x) * 2;
-  const auto submitted = []() -> const std::uint8_t * {
+  const auto submitted = [] {
     const auto allocation = std::find_if(hardware().allocations.begin(), hardware().allocations.end(), [](const auto &entry) {
       return entry.second.physicalAddress == VIDEOREG(0x8920);
     });

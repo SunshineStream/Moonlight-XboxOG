@@ -1789,12 +1789,12 @@ namespace {
   /**
    * @brief Measure text used in an input hint or keyboard keycap.
    * @param font Hint font.
-   * @param label Text to size.
+   * @param label Null-terminated UTF-8 text to size.
    * @return Text width, with an approximate width if SDL_ttf cannot measure it.
    */
-  int measure_footer_action_label_width(TTF_Font *font, const std::string &label) {
+  int measure_footer_action_label_width(TTF_Font *font, const char *label) {
     int width = 0;
-    return TTF_GetStringSize(font, label.c_str(), 0, &width, nullptr) ? width : static_cast<int>(label.size()) * 8;
+    return TTF_GetStringSize(font, label, 0, &width, nullptr) ? width : static_cast<int>(std::strlen(label)) * 8;
   }
 
   /**
@@ -1805,12 +1805,15 @@ namespace {
    * @return Widths for rendering and wrapping.
    */
   FooterHintWidths measure_footer_hint(TTF_Font *font, const ui::ShellFooterAction &action, int glyphSize) {
-    const auto glyph_width = [&](const std::string &key, const std::string &asset) {
-      return key.empty() ? (asset.empty() ? 0 : glyphSize) : std::max(glyphSize, measure_footer_action_label_width(font, key) + 12);
+    const auto glyph_width = [font, glyphSize](const std::string &key, bool hasAsset) {
+      if (key.empty()) {
+        return hasAsset ? glyphSize : 0;
+      }
+      return std::max(glyphSize, measure_footer_action_label_width(font, key.c_str()) + 12);
     };
-    const int primary = glyph_width(action.keyLabel, action.iconAssetPath);
-    const int secondary = glyph_width(action.secondaryKeyLabel, action.secondaryIconAssetPath);
-    const int label = measure_footer_action_label_width(font, action.label);
+    const int primary = glyph_width(action.keyLabel, !action.iconAssetPath.empty());
+    const int secondary = glyph_width(action.secondaryKeyLabel, !action.secondaryIconAssetPath.empty());
+    const int label = measure_footer_action_label_width(font, action.label.c_str());
     return {primary, secondary, primary + secondary + label + (primary > 0 ? HINT_GLYPH_GAP : 0) + (secondary > 0 ? HINT_GLYPH_GAP : 0)};
   }
 
@@ -2447,7 +2450,7 @@ namespace {
       const app::FileSaveActivity saving;
       redraw();
       if (completed) {
-        if (auto *thread = SDL_CreateThread([](void *context) {
+        if (auto *thread = SDL_CreateThread([](auto *context) {
               return (*static_cast<decltype(write) *>(context))();
             },
                                             "save-file",
@@ -4192,16 +4195,17 @@ namespace {
    * @brief Render local numeric or text entry with cached labels and optional shared keyboard geometry.
    *
    * @param renderer Active renderer.
-   * @param bodyFont Heading, input and key font.
-   * @param smallFont Guidance and action font.
+   * @param fonts Keypad text fonts and shared controller glyph size.
    * @param assetCache Cached button glyphs.
    * @param viewModel Current keypad state.
    * @param displayBounds Logical display rectangle.
    * @param cache Reusable keypad text and measurements.
-   * @param hints Shared input hint sizing, with compact row spacing.
    * @return True when the complete keypad rendered.
    */
-  bool render_keypad_dialog(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &displayBounds, KeypadModalLayoutCache *cache, FooterHintStyle hints) {
+  bool render_keypad_dialog(SDL_Renderer *renderer, const DialogFonts &fonts, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &displayBounds, KeypadModalLayoutCache *cache) {
+    auto *bodyFont = fonts.bodyFont;
+    auto *smallFont = fonts.smallFont;
+    const FooterHintStyle hints {fonts.hints.glyphSize, true};
     const int width = displayBounds.w;
     const int height = displayBounds.h;
     const int padding = std::max(18, height / 40);
@@ -4687,7 +4691,7 @@ namespace {
     } else if (viewModel.modal.visible && !render_shell_dialog(renderer, fonts, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
       return false;
     }
-    if (viewModel.keypad.visible && !render_keypad_dialog(renderer, bodyFont, smallFont, assetCache, viewModel, {0, 0, screenWidth, screenHeight}, keypadModalLayoutCache, {hints.glyphSize, true})) {
+    if (viewModel.keypad.visible && !render_keypad_dialog(renderer, fonts, assetCache, viewModel, {0, 0, screenWidth, screenHeight}, keypadModalLayoutCache)) {
       return false;
     }
 
@@ -5350,7 +5354,7 @@ namespace {
 
     const int controlsScale = streaming::controls_raster_scale(videoMode.height);
     const int rasterHeight = videoMode.height / controlsScale;
-    const std::unique_ptr<TTF_Font, decltype(&TTF_CloseFont)> controlsFont(TTF_OpenFont(fontPath.c_str(), ui::control_hint_font_size(rasterHeight)), TTF_CloseFont);
+    const std::unique_ptr<TTF_Font, decltype(&TTF_CloseFont)> controlsFont(TTF_OpenFont(fontPath.c_str(), ui::control_hint_font_size(rasterHeight)), &TTF_CloseFont);
     const int lineHeight = TTF_GetFontLineSkip(controlsFont ? controlsFont.get() : resources->smallFont);
     resources->hintGlyphSize = ui::control_hint_glyph_size(lineHeight, rasterHeight) * controlsScale;
 

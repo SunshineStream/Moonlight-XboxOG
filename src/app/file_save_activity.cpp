@@ -10,26 +10,35 @@
 
 namespace {
   constexpr std::uint64_t GENERATION_STEP = std::uint64_t {1} << 32;  ///< Increment the upper half of the packed state.
-  std::atomic<std::uint64_t> saveState {0};  ///< Save generation in the upper word and active writer count in the lower word.
+
+  /**
+   * @brief Access the packed activity state shared by save workers and UI readers.
+   * @return Atomic generation in the upper word and active writer count in the lower word.
+   */
+  std::atomic<std::uint64_t> &save_state() {
+    static std::atomic<std::uint64_t> state {0};
+    return state;
+  }
 }  // namespace
 
 namespace app {
   FileSaveActivity::FileSaveActivity() {
-    auto previous = saveState.load(std::memory_order_relaxed);
+    auto &state = save_state();
+    auto previous = state.load();
     for (;;) {
       const auto increment = static_cast<std::uint32_t>(previous) == 0 ? GENERATION_STEP + 1 : 1;
-      if (saveState.compare_exchange_weak(previous, previous + increment, std::memory_order_relaxed)) {
+      if (state.compare_exchange_weak(previous, previous + increment)) {
         break;
       }
     }
   }
 
   FileSaveActivity::~FileSaveActivity() {
-    saveState.fetch_sub(1, std::memory_order_relaxed);
+    save_state().fetch_sub(1);
   }
 
   FileSaveSnapshot file_save_snapshot() {
-    const auto state = saveState.load(std::memory_order_relaxed);
+    const auto state = save_state().load();
     return {static_cast<std::uint32_t>(state >> 32), static_cast<std::uint32_t>(state) != 0};
   }
 }  // namespace app

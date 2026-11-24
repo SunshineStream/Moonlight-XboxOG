@@ -38,7 +38,7 @@ TEST(FileSaveActivityTest, RemainsActiveUntilTheLastWriterFinishes) {
   std::promise<void> finish;
   auto enteredFuture = entered.get_future();
   auto finishFuture = finish.get_future();
-  std::thread worker([&] {
+  std::thread worker([&entered, &finishFuture] {
     const app::FileSaveActivity saving;
     entered.set_value();
     finishFuture.wait();
