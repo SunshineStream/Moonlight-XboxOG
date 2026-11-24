@@ -172,6 +172,28 @@ namespace input {
   };
 
   /**
+   * @brief Directional repeat state for the shell's primary controller.
+   */
+  struct ControllerNavigationHolds {
+    ControllerNavigationHoldState up {};  ///< Up repeat state.
+    ControllerNavigationHoldState down {};  ///< Down repeat state.
+    ControllerNavigationHoldState left {};  ///< Left repeat state.
+    ControllerNavigationHoldState right {};  ///< Right repeat state.
+  };
+
+#ifdef MOONLIGHT_PORTABLE
+  /**
+   * @brief Origin and timing of the active shell touch gesture.
+   */
+  struct ShellTouchGesture {
+    std::uint64_t finger = 0;  ///< Active touch ID, or zero when idle.
+    std::uint64_t startedAt = 0;  ///< Touch timestamp used to distinguish a tap from a hold.
+    float x = 0;  ///< Normalized horizontal origin.
+    float y = 0;  ///< Normalized vertical origin.
+  };
+#endif
+
+  /**
    * @brief Shell input lifetime, separate from the stream's input ownership.
    */
   struct ShellInputState {
@@ -191,15 +213,9 @@ namespace input {
     std::uint32_t rightShoulderRepeatTick = 0;  ///< Press or repeat tick for this input.
     std::uint32_t leftTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
     std::uint32_t rightTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
-    ControllerNavigationHoldState moveUpHoldState {};  ///< Directional repeat state.
-    ControllerNavigationHoldState moveDownHoldState {};  ///< Directional repeat state.
-    ControllerNavigationHoldState moveLeftHoldState {};  ///< Directional repeat state.
-    ControllerNavigationHoldState moveRightHoldState {};  ///< Directional repeat state.
+    ControllerNavigationHolds controllerNavigation;  ///< Directional repeat state.
 #ifdef MOONLIGHT_PORTABLE
-    std::uint64_t touchFinger = 0;  ///< Active touch used for shell navigation.
-    std::uint64_t touchStartTick = 0;  ///< Touch timestamp used to distinguish a tap from a hold.
-    float touchStartX = 0;  ///< Normalized touch origin.
-    float touchStartY = 0;  ///< Normalized touch origin.
+    ShellTouchGesture touch;  ///< Active gesture used for shell navigation.
 #endif
 
     /**

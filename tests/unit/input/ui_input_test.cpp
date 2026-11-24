@@ -142,15 +142,15 @@ TEST(ShellInputStateTest, ResumesNavigationAfterStreamingConsumesReleaseEvents) 
   state.rightShoulderRepeatTick = 120;
   state.leftTriggerRepeatTick = 120;
   state.rightTriggerRepeatTick = 120;
-  state.moveUpHoldState = {true, 100, 200};
-  state.moveDownHoldState = {true, 100, 200};
-  state.moveLeftHoldState = {true, 100, 200};
-  state.moveRightHoldState = {true, 100, 200};
+  state.controllerNavigation.up = {true, 100, 200};
+  state.controllerNavigation.down = {true, 100, 200};
+  state.controllerNavigation.left = {true, 100, 200};
+  state.controllerNavigation.right = {true, 100, 200};
   state.reset_after_stream();
   EXPECT_FALSE(state.leftTriggerPressed || state.rightTriggerPressed || state.leftShoulderPressed || state.rightShoulderPressed);
   EXPECT_FALSE(state.controllerStartPressed || state.controllerBackPressed || state.controllerExitComboArmed || state.controllerExitComboTriggered);
   EXPECT_EQ(state.controllerStartDownTick + state.controllerBackDownTick + state.leftShoulderRepeatTick + state.rightShoulderRepeatTick + state.leftTriggerRepeatTick + state.rightTriggerRepeatTick, 0);
-  for (const auto &direction : {state.moveUpHoldState, state.moveDownHoldState, state.moveLeftHoldState, state.moveRightHoldState}) {
+  for (const auto &direction : {state.controllerNavigation.up, state.controllerNavigation.down, state.controllerNavigation.left, state.controllerNavigation.right}) {
     EXPECT_FALSE(direction.active);
     EXPECT_EQ(direction.activatedTick, 0);
     EXPECT_EQ(direction.lastRepeatTick, 0);
@@ -181,16 +181,16 @@ TEST(ShellInputStateTest, ControllerHandoffPreservesKeyboardAndResetsGamepadHold
   state.rightShoulderRepeatTick = 100;
   state.leftTriggerRepeatTick = 100;
   state.rightTriggerRepeatTick = 100;
-  state.moveUpHoldState = {true, 100, 200};
-  state.moveDownHoldState = {true, 100, 200};
-  state.moveLeftHoldState = {true, 100, 200};
-  state.moveRightHoldState = {true, 100, 200};
+  state.controllerNavigation.up = {true, 100, 200};
+  state.controllerNavigation.down = {true, 100, 200};
+  state.controllerNavigation.left = {true, 100, 200};
+  state.controllerNavigation.right = {true, 100, 200};
   EXPECT_EQ(state.keyboardNavigation.press(1, input::UiCommand::move_right, 100), input::UiCommand::move_right);
   state.reset_after_controller_change();
   EXPECT_FALSE(state.leftTriggerPressed || state.rightTriggerPressed || state.leftShoulderPressed || state.rightShoulderPressed);
   EXPECT_FALSE(state.controllerStartPressed || state.controllerBackPressed || state.controllerExitComboArmed || state.controllerExitComboTriggered);
   EXPECT_EQ(state.controllerStartDownTick + state.controllerBackDownTick + state.leftShoulderRepeatTick + state.rightShoulderRepeatTick + state.leftTriggerRepeatTick + state.rightTriggerRepeatTick, 0U);
-  for (const auto &hold : {state.moveUpHoldState, state.moveDownHoldState, state.moveLeftHoldState, state.moveRightHoldState}) {
+  for (const auto &hold : {state.controllerNavigation.up, state.controllerNavigation.down, state.controllerNavigation.left, state.controllerNavigation.right}) {
     EXPECT_FALSE(hold.active);
     EXPECT_EQ(hold.activatedTick, 0U);
     EXPECT_EQ(hold.lastRepeatTick, 0U);

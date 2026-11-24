@@ -15,7 +15,8 @@ work_dir="${prefix}/sources"
 mkdir -p -- "${work_dir}"
 
 lock_value() {
-  sed -nE "s/^set\($1 ([^)]*)\).*$/\1/p" "${source_root}/package-lock.cmake"
+  local variable="$1"
+  sed -nE "s/^set\(${variable} ([^)]*)\).*$/\1/p" "${source_root}/package-lock.cmake"
 }
 
 # Each source directory includes its version so a dependency update gets a clean checkout.
@@ -80,6 +81,7 @@ case "${target}" in
       tvos) sdk=appletvos; triple=arm64-apple-tvos15.0 ;;
       ios-simulator) sdk=iphonesimulator; triple=arm64-apple-ios15.0-simulator ;;
       tvos-simulator) sdk=appletvsimulator; triple=arm64-apple-tvos15.0-simulator ;;
+      *) echo "Unsupported Apple target: ${target}" >&2; exit 2 ;;
     esac
     sysroot="$(xcrun --sdk "${sdk}" --show-sdk-path)"
     cc="$(xcrun --sdk "${sdk}" --find clang)"

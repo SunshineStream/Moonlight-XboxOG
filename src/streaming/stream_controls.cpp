@@ -297,51 +297,51 @@ namespace streaming {
   StreamControls::EventHandler::EventHandler(StreamControls &controls) noexcept:
       controls_(controls) {}
 
-  void StreamControls::clear_panel() {
-    panel_.text.clear();
-    panel_.textBytes = 0;
-    panel_.iconTextures.clear();
-    panel_.renderer.reset();
-    panel_.surface.reset();
-    panel_.content.reset();
-    panel_.damage.clear();
+  void StreamControls::PanelCache::clear() {
+    text.clear();
+    textBytes = 0;
+    iconTextures.clear();
+    renderer.reset();
+    surface.reset();
+    content.reset();
+    damage.clear();
   }
 
   void StreamControls::invalidate_panel(FfmpegStreamBackend &backend) {
     backend.presentation().set_statistics_bitmap(0, 0, {});
-    clear_panel();
+    panel_.clear();
     panel_.dirty = true;
   }
 
-  void StreamControls::label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, const StreamLabelStyle &style) {
+  void StreamControls::PanelCache::label(SDL_Renderer *target, TTF_Font *font, const std::string &caption, SDL_Rect bounds, const StreamLabelStyle &style) {
     const auto &[leading, background, fitSingleLine, foreground] = style;
     if (background) {
-      SDL_SetRenderDrawColor(renderer, 16, 16, 16, 255);
-      ui::fill_rect(renderer, bounds);
+      SDL_SetRenderDrawColor(target, 16, 16, 16, 255);
+      ui::fill_rect(target, bounds);
     }
-    if (text.empty()) {
+    if (caption.empty()) {
       return;
     }
     const Uint32 color = static_cast<Uint32>(foreground.r) | (static_cast<Uint32>(foreground.g) << 8) | (static_cast<Uint32>(foreground.b) << 16) | (static_cast<Uint32>(foreground.a) << 24);
-    const auto key = std::make_tuple(font, text, fitSingleLine ? 0 : std::max(1, bounds.w - 4), color);
-    auto found = panel_.text.find(key);
-    if (found == panel_.text.end()) {
-      std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(fitSingleLine ? TTF_RenderText_Blended(font, text.c_str(), 0, foreground) : TTF_RenderText_Blended_Wrapped(font, text.c_str(), 0, foreground, std::max(1, bounds.w - 4)), &SDL_DestroySurface);
-      if (!surface) {
+    const auto key = std::make_tuple(font, caption, fitSingleLine ? 0 : std::max(1, bounds.w - 4), color);
+    auto found = text.find(key);
+    if (found == text.end()) {
+      std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> rasterSurface(fitSingleLine ? TTF_RenderText_Blended(font, caption.c_str(), 0, foreground) : TTF_RenderText_Blended_Wrapped(font, caption.c_str(), 0, foreground, std::max(1, bounds.w - 4)), &SDL_DestroySurface);
+      if (!rasterSurface) {
         return;
       }
-      const auto bytes = static_cast<std::size_t>(surface->w) * surface->h * 4;
-      if (panel_.textBytes + bytes > 1024U * 1024U) {
-        SDL_FlushRenderer(renderer);
-        panel_.text.clear();
-        panel_.textBytes = 0;
+      const auto bytes = static_cast<std::size_t>(rasterSurface->w) * rasterSurface->h * 4;
+      if (textBytes + bytes > 1024U * 1024U) {
+        SDL_FlushRenderer(target);
+        text.clear();
+        textBytes = 0;
       }
-      std::shared_ptr<SDL_Texture> texture(SDL_CreateTextureFromSurface(renderer, surface.get()), SDL_DestroyTexture);
+      std::shared_ptr<SDL_Texture> texture(SDL_CreateTextureFromSurface(target, rasterSurface.get()), SDL_DestroyTexture);
       if (!texture) {
         return;
       }
-      found = panel_.text.try_emplace(key, CachedText {surface->w, surface->h, std::move(texture)}).first;
-      panel_.textBytes += bytes;
+      found = text.try_emplace(key, CachedText {rasterSurface->w, rasterSurface->h, std::move(texture)}).first;
+      textBytes += bytes;
     }
     const auto &raster = found->second;
     // Crop the cached raster to the label's bounds.
@@ -354,7 +354,7 @@ namespace streaming {
     }
     SDL_Rect source {layout.source.x, layout.source.y, layout.source.width, layout.source.height};
     SDL_Rect destination {layout.destination.x, layout.destination.y, layout.destination.width, layout.destination.height};
-    ui::render_texture(renderer, raster.texture.get(), &source, &destination);
+    ui::render_texture(target, raster.texture.get(), &source, &destination);
   }
 
   void StreamControls::EventHandler::navigate_controller(const input::ControllerState &sample, Uint32 now) const {
@@ -546,7 +546,7 @@ namespace streaming {
   }
 
   void StreamControls::close() {
-    clear_panel();
+    panel_.clear();
     panel_.icons.clear();
     for (auto &device : devices_) {
       if (device.handle != nullptr) {
@@ -1218,20 +1218,20 @@ namespace streaming {
     return false;
   }
 
-  void StreamControls::refresh_logs(Uint32 now) {
-    if (menu_.page == input::StreamMenuPage::logs && now - panel_.logRefreshTick >= 1000) {
-      panel_.logRefreshTick = now;
+  void StreamControls::PanelCache::refresh_logs(input::StreamMenu &menu, Uint32 now) {
+    if (menu.page == input::StreamMenuPage::logs && now - logRefreshTick >= 1000) {
+      logRefreshTick = now;
       std::vector<std::string> lines;
       for (const auto &entry : logging::snapshot()) {
         lines.push_back(logging::format_entry(entry));
       }
-      if (!lines.empty() && lines != panel_.logs) {
+      if (!lines.empty() && lines != logs) {
         // Preserve the same entries when reading older output; offset zero follows live output.
-        if (menu_.logOffset > 0) {
-          menu_.logOffset += std::max(0, static_cast<int>(lines.size()) - static_cast<int>(panel_.logs.size()));
+        if (menu.logOffset > 0) {
+          menu.logOffset += std::max(0, static_cast<int>(lines.size()) - static_cast<int>(logs.size()));
         }
-        panel_.logs = std::move(lines);
-        panel_.dirty = true;
+        logs = std::move(lines);
+        dirty = true;
       }
     }
   }
@@ -1281,7 +1281,7 @@ namespace streaming {
       if (!screenshotNotification_.visible) {
         backend.presentation().set_statistics_bitmap(0, 0, {});
       }
-      clear_panel();
+      panel_.clear();
       panel_.dirty = false;
       screenshotChanged = true;
     }
@@ -1292,7 +1292,7 @@ namespace streaming {
         render_screenshot_notification(backend, font, width, height);
       } else {
         backend.presentation().set_statistics_bitmap(0, 0, {});
-        clear_panel();
+        panel_.clear();
       }
     }
     if (visible() && screenshotNotification_.visible && panel_.message != screenshotNotification_.title()) {
@@ -1310,7 +1310,7 @@ namespace streaming {
       navigation_.keyboard.reset();
       router_.set_captured(!focused_);
       backend.presentation().set_statistics_bitmap(0, 0, {});
-      clear_panel();
+      panel_.clear();
       panel_.dirty = false;
     }
   }
@@ -1341,7 +1341,7 @@ namespace streaming {
     poll();
     const Uint32 now = SDL_GetTicks();
     screenshotChanged = screenshotNotification_.tick(now) || screenshotChanged;
-    refresh_logs(now);
+    panel_.refresh_logs(menu_, now);
     if (visible() && navigation_.inputDevice == input::UiInputDevice::keyboard) {
       const auto repeatedKey = menu_navigation_key(navigation_.keyboard.poll(now));
       if (repeatedKey != SDLK_UNKNOWN) {
@@ -1386,16 +1386,16 @@ namespace streaming {
     if (panelWidth <= 0 || panelHeight <= 0) {
       return;
     }
-    if (!prepare_panel(backend, panelWidth, panelHeight)) {
+    if (!panel_.prepare(backend, panelWidth, panelHeight)) {
       return;
     }
     auto *renderer = panel_.renderer.get();
     SDL_SetRenderDrawColor(renderer, 22, 31, 46, 170);
     SDL_RenderClear(renderer);
-    label(renderer, font, title, {12, 8, panelWidth - 24, line}, {false, false, true});
+    panel_.label(renderer, font, title, {12, 8, panelWidth - 24, line}, {false, false, true});
     if (!detail.empty()) {
       // Fit the complete path on one line within the screenshot notification.
-      label(renderer, font, detail, {12, line + 12, panelWidth - 24, line}, {false, false, true});
+      panel_.label(renderer, font, detail, {12, line + 12, panelWidth - 24, line}, {false, false, true});
     }
     SDL_Rect bar {12, panelHeight - 12, panelWidth - 24, 4};
     SDL_SetRenderDrawColor(renderer, 50, 65, 86, 255);
@@ -1407,43 +1407,43 @@ namespace streaming {
     backend.presentation().set_color_overlay_surface(panel_.surface, VideoOverlayPlacement::bottom_center);
   }
 
-  bool StreamControls::render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip) {
+  bool StreamControls::PanelCache::render_icon(SDL_Renderer *target, const char *asset, SDL_Rect bounds, const SDL_Rect *clip) {
     const int size = std::min(bounds.w, bounds.h);
     if (size <= 0) {
       return false;
     }
     const auto key = std::make_pair(std::string(asset), size);
-    auto found = panel_.icons.find(key);
-    if (found == panel_.icons.end()) {
+    auto found = icons.find(key);
+    if (found == icons.end()) {
       const std::string path = ui::build_asset_path(std::string("icons/") + asset);
       std::shared_ptr<SDL_Surface> raster(ui::load_svg_surface(path, size, size), SDL_DestroySurface);
       if (!raster) {
         logging::warn("ui", "Unable to load stream icon " + path + ": " + SDL_GetError());
       }
-      found = panel_.icons.try_emplace(key, std::move(raster)).first;
+      found = icons.try_emplace(key, std::move(raster)).first;
     }
     if (!found->second) {
       return false;
     }
-    const auto &surface = found->second;
-    auto texture = panel_.iconTextures.find(key);
-    if (texture == panel_.iconTextures.end()) {
-      auto loaded = std::shared_ptr<SDL_Texture>(SDL_CreateTextureFromSurface(renderer, surface.get()), SDL_DestroyTexture);
+    const auto &raster = found->second;
+    auto texture = iconTextures.find(key);
+    if (texture == iconTextures.end()) {
+      auto loaded = std::shared_ptr<SDL_Texture>(SDL_CreateTextureFromSurface(target, raster.get()), SDL_DestroyTexture);
       if (!loaded) {
         return false;
       }
-      texture = panel_.iconTextures.try_emplace(key, std::move(loaded)).first;
+      texture = iconTextures.try_emplace(key, std::move(loaded)).first;
     }
-    SDL_Rect destination {bounds.x + (bounds.w - surface->w) / 2, bounds.y + (bounds.h - surface->h) / 2, surface->w, surface->h};
+    SDL_Rect destination {bounds.x + (bounds.w - raster->w) / 2, bounds.y + (bounds.h - raster->h) / 2, raster->w, raster->h};
     if (clip != nullptr) {
       SDL_Rect intersection {};
       if (!SDL_GetRectIntersection(&destination, clip, &intersection)) {
         return true;
       }
       const SDL_Rect source {intersection.x - destination.x, intersection.y - destination.y, intersection.w, intersection.h};
-      return ui::render_texture(renderer, texture->second.get(), &source, &intersection);
+      return ui::render_texture(target, texture->second.get(), &source, &intersection);
     }
-    return ui::render_texture(renderer, texture->second.get(), nullptr, &destination);
+    return ui::render_texture(target, texture->second.get(), nullptr, &destination);
   }
 
   void StreamControls::render_hint(SDL_Renderer *renderer, TTF_Font *font, const char *asset, const char *key, const char *text, SDL_Rect bounds, bool compact) {
@@ -1462,11 +1462,11 @@ namespace streaming {
     if (keyboard) {
       SDL_SetRenderDrawColor(renderer, 85, 85, 85, 255);
       ui::draw_rect(renderer, icon);
-      label(renderer, font, key, {icon.x + 2, icon.y + 2, icon.w - 4, icon.h - 4}, {false, false, true});
+      panel_.label(renderer, font, key, {icon.x + 2, icon.y + 2, icon.w - 4, icon.h - 4}, {false, false, true});
     } else {
-      render_icon(renderer, asset, icon);
+      panel_.render_icon(renderer, asset, icon);
     }
-    label(renderer, font, text, {left + capWidth + 4, bounds.y, std::max(1, groupWidth - capWidth - 4), bounds.h}, {false, false, true});
+    panel_.label(renderer, font, text, {left + capWidth + 4, bounds.y, std::max(1, groupWidth - capWidth - 4), bounds.h}, {false, false, true});
   }
 
   void StreamControls::render_keyboard_key(SDL_Renderer *renderer, TTF_Font *font, int i, SDL_Rect key) {
@@ -1525,13 +1525,13 @@ namespace streaming {
     }
     if (cell.width > 2 && shortcutIcon != nullptr && (!keyboardInput || *shortcutKey != '\0')) {
       if (cell.height > 1) {
-        label(renderer, font, text, {key.x + 2, key.y + 2, key.w - 4, key.h / 2}, {false, false, true});
+        panel_.label(renderer, font, text, {key.x + 2, key.y + 2, key.w - 4, key.h / 2}, {false, false, true});
         render_hint(renderer, font, shortcutIcon, shortcutKey, "", {key.x + 2, key.y + key.h / 2, key.w - 4, key.h / 2 - 2}, cell.key != input::StreamMenu::KEYBOARD_CAPS_KEY && cell.key != 46);
       } else {
         render_hint(renderer, font, shortcutIcon, shortcutKey, text.c_str(), {key.x + 2, key.y + 2, key.w - 4, key.h - 4}, true);
       }
     } else {
-      label(renderer, font, text, {key.x + 2, key.y + 2, key.w - 4, key.h - 4}, {false, false, true});
+      panel_.label(renderer, font, text, {key.x + 2, key.y + 2, key.w - 4, key.h - 4}, {false, false, true});
     }
     if (i == menu_.keyIndex) {
       SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
@@ -1578,7 +1578,7 @@ namespace streaming {
         ui::fill_rect(renderer, area);
         panel_.damage.push_back({area.x, area.y, area.w, area.h});
       }
-      label(renderer, font, description, {padding, 2, width - padding * 2, header}, {false, false, true});
+      panel_.label(renderer, font, description, {padding, 2, width - padding * 2, header}, {false, false, true});
     }
     for (int i = 0; i < static_cast<int>(cells.size()); ++i) {
       if (focusOnly && i != panel_.selection && i != menu_.keyIndex) {
@@ -1651,15 +1651,15 @@ namespace streaming {
       rasterize_menu_wheel({static_cast<std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height}, {cx, cy, radius, selected}, sector);
       const VideoRectangle clip {group.x, group.y, group.w, group.h};
       rasterize_menu_wheel({static_cast<std::uint8_t *>(panel->pixels), static_cast<std::size_t>(panel->pitch) * height, panel->pitch, width, height}, {cx, cy, radius, selected}, -1, &clip);
-      render_icon(renderer, paint.index == 0 ? "button-left-stick.svg" : "button-right-stick.svg", {cx - line, cy - line, line * 2, line * 2}, &group);
+      panel_.render_icon(renderer, paint.index == 0 ? "button-left-stick.svg" : "button-right-stick.svg", {cx - line, cy - line, line * 2, line * 2}, &group);
       const VideoRectangle area = wheel_sector_bounds(paint.geometry, sector);
       const int left = std::min(area.x, clip.x);
       const int top = std::min(area.y, clip.y);
       panel_.damage.push_back({left, top, std::max(area.x + area.width, clip.x + clip.width) - left, std::max(area.y + area.height, clip.y + clip.height) - top});
     }
     constexpr std::array<const char *, 8> icons {"keyboard.svg", "mouse.svg", "scroll-text.svg", "log-out.svg", "button-guide.svg", "button-share.svg", "camera.svg", "chart-no-axes-combined.svg"};
-    render_icon(renderer, icons[paint.index * 4 + sector], {x + (labelWidth - iconSize) / 2, groupY, iconSize, iconSize});
-    label(renderer, font, input::stream_action_label(action, mouseDevice_ >= 0, stats), {x, groupY + iconSize + 2, labelWidth, line * 2}, {false, false});
+    panel_.render_icon(renderer, icons[paint.index * 4 + sector], {x + (labelWidth - iconSize) / 2, groupY, iconSize, iconSize});
+    panel_.label(renderer, font, input::stream_action_label(action, mouseDevice_ >= 0, stats), {x, groupY + iconSize + 2, labelWidth, line * 2}, {false, false});
   }
 
   void StreamControls::render_wheels(SDL_Renderer *renderer, TTF_Font *font, int width, int height, bool stats, bool focusOnly) {
@@ -1674,7 +1674,7 @@ namespace streaming {
       if (!focusOnly) {
         SDL_FlushRenderer(renderer);
         rasterize_menu_wheel(paint.target, paint.geometry);
-        render_icon(renderer, wheel == 0 ? "button-left-stick.svg" : "button-right-stick.svg", {cx - line, cy - line, line * 2, line * 2});
+        panel_.render_icon(renderer, wheel == 0 ? "button-left-stick.svg" : "button-right-stick.svg", {cx - line, cy - line, line * 2, line * 2});
       }
       for (int sector = 0; sector < 4; ++sector) {
         if (focusOnly && wheel * 4 + sector != panel_.selection && wheel * 4 + sector != static_cast<int>(menu_.selected)) {
@@ -1711,7 +1711,7 @@ namespace streaming {
     const int line = TTF_GetFontLineSkip(font) + 8;
     const SDL_Rect card {width / 8, line / 2, width * 7 / 8 - line / 2, height - line};
     ui::draw_dialog_surface(renderer, card);
-    label(renderer, font, "Stream logs", {card.x + 20, card.y + 28, card.w - 40, line}, {false, false});
+    panel_.label(renderer, font, "Stream logs", {card.x + 20, card.y + 28, card.w - 40, line}, {false, false});
     const int row = line * 2;
     const int count = std::max(1, (card.h - line * 4) / row);
     menu_.logOffset = std::min(menu_.logOffset, std::max(0, static_cast<int>(panel_.logs.size()) - count));
@@ -1720,7 +1720,7 @@ namespace streaming {
     for (int i = start; i < end; ++i) {
       const auto &text = panel_.logs[i];
       const SDL_Color color = stream_log_color(text);
-      label(renderer, font, text, {card.x + 16, card.y + line * 2 + (i - start) * row, card.w - 42, row}, {true, false, false, color});
+      panel_.label(renderer, font, text, {card.x + 16, card.y + line * 2 + (i - start) * row, card.w - 42, row}, {true, false, false, color});
     }
     const int trackHeight = count * row;
     const int thumbHeight = std::max(8, trackHeight * count / std::max(count, static_cast<int>(panel_.logs.size())));
@@ -1728,7 +1728,7 @@ namespace streaming {
     SDL_SetRenderDrawColor(renderer, 130, 180, 255, 255);
     ui::fill_rect(renderer, thumb);
     if (panel_.logs.empty()) {
-      label(renderer, font, "No retained log entries.", {card.x + 16, card.y + line * 2, card.w - 32, line}, {false, false});
+      panel_.label(renderer, font, "No retained log entries.", {card.x + 16, card.y + line * 2, card.w - 32, line}, {false, false});
     }
     render_hint(renderer, font, "button-left-stick.svg", "Arrows", menu_.logOffset == 0 ? "Live / scroll" : "Scroll", {card.x + 8, card.y + card.h - line - 12, card.w / 2 - 16, line});
     render_hint(renderer, font, "button-b.svg", "Esc", "Back", {card.x + card.w / 2, card.y + card.h - line - 12, card.w / 2 - 16, line});
@@ -1740,8 +1740,8 @@ namespace streaming {
     const int cardHeight = line * 7;
     const SDL_Rect card {(width - cardWidth) / 2, (height - cardHeight) / 2, cardWidth, cardHeight};
     ui::draw_dialog_surface(renderer, card);
-    label(renderer, font, "Exit stream?", {card.x + 20, card.y + 28, card.w - 40, line}, {false, false});
-    label(renderer, font, "Disconnect keeps the app running. Quit app closes it on the PC; unsaved progress may be lost.", {card.x + 20, card.y + 28 + line, card.w - 40, line * 2}, {false, false});
+    panel_.label(renderer, font, "Exit stream?", {card.x + 20, card.y + 28, card.w - 40, line}, {false, false});
+    panel_.label(renderer, font, "Disconnect keeps the app running. Quit app closes it on the PC; unsaved progress may be lost.", {card.x + 20, card.y + 28 + line, card.w - 40, line * 2}, {false, false});
     constexpr std::array<const char *, 3> buttons {"button-b.svg", "button-a.svg", "button-x.svg"};
     constexpr std::array<const char *, 3> keys {"Esc", "Enter", "Q"};
     constexpr std::array<const char *, 3> labels {"Cancel", "Disconnect", "Quit app"};
@@ -1752,40 +1752,40 @@ namespace streaming {
     }
   }
 
-  bool StreamControls::prepare_panel(FfmpegStreamBackend &backend, int width, int height) {
-    if (!panel_.surface || panel_.surface->w != width || panel_.surface->h != height) {
+  bool StreamControls::PanelCache::prepare(FfmpegStreamBackend &backend, int width, int height) {
+    if (!surface || surface->w != width || surface->h != height) {
       // Release both owners before allocating another full-size raster.
       backend.presentation().set_statistics_bitmap(0, 0, {});
-      clear_panel();
-      if (auto *surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_ARGB8888); surface != nullptr) {
-        panel_.surface.reset(surface, SDL_DestroySurface);
+      clear();
+      if (auto *createdSurface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_ARGB8888); createdSurface != nullptr) {
+        surface.reset(createdSurface, SDL_DestroySurface);
       }
     }
-    if (panel_.surface && !panel_.renderer) {
-      panel_.renderer.reset(SDL_CreateSoftwareRenderer(panel_.surface.get()));
+    if (surface && !renderer) {
+      renderer.reset(SDL_CreateSoftwareRenderer(surface.get()));
     }
-    if (!panel_.renderer) {
+    if (!renderer) {
       return false;
     }
-    if (panel_.text.size() > 256) {
-      panel_.text.clear();
-      panel_.textBytes = 0;
+    if (text.size() > 256) {
+      text.clear();
+      textBytes = 0;
     }
     return true;
   }
 
-  void StreamControls::publish_panel(FfmpegStreamBackend &backend, bool keyboard, bool focusOnly, int scale) const {
-    SDL_RenderPresent(panel_.renderer.get());
+  void StreamControls::PanelCache::publish(FfmpegStreamBackend &backend, bool keyboard, bool dockTop, bool focusOnly, int scale) const {
+    SDL_RenderPresent(renderer.get());
     if (focusOnly) {
-      for (const auto &area : panel_.damage) {
+      for (const auto &area : damage) {
         backend.presentation().update_color_overlay(area);
       }
     } else {
       VideoOverlayPlacement placement = VideoOverlayPlacement::full_screen;
       if (keyboard) {
-        placement = keyboardTop_ ? VideoOverlayPlacement::dock_top : VideoOverlayPlacement::dock_bottom;
+        placement = dockTop ? VideoOverlayPlacement::dock_top : VideoOverlayPlacement::dock_bottom;
       }
-      backend.presentation().set_color_overlay_surface(panel_.surface, placement, keyboard, scale);
+      backend.presentation().set_color_overlay_surface(surface, placement, keyboard, scale);
     }
   }
 
@@ -1803,7 +1803,7 @@ namespace streaming {
     if (width <= 0 || height <= 0) {
       return false;
     }
-    if (!prepare_panel(backend, width, height)) {
+    if (!panel_.prepare(backend, width, height)) {
       logging::warn("input", "Unable to allocate the " + std::to_string(width) + "x" + std::to_string(height) + " stream controls panel: " + SDL_GetError());
       return false;
     }
@@ -1822,7 +1822,7 @@ namespace streaming {
     }
     const int line = TTF_GetFontLineSkip(font) + 8;
     if (!focusOnly && menu_.page == input::StreamMenuPage::radial) {
-      label(renderer.get(), font, "Stream controls", {8, 4, width - 16, line}, {false, false});
+      panel_.label(renderer.get(), font, "Stream controls", {8, 4, width - 16, line}, {false, false});
     }
     if (keyboard) {
       render_keyboard(renderer.get(), font, width, height, rowHeight, focusOnly);
@@ -1834,9 +1834,9 @@ namespace streaming {
       render_exit_confirmation(renderer.get(), font, width, height);
     }
     if (!focusOnly && !panel_.message.empty() && menu_.page == input::StreamMenuPage::radial) {
-      label(renderer.get(), font, panel_.message, {4, line + 4, width - 8, line * 2}, {false, false});
+      panel_.label(renderer.get(), font, panel_.message, {4, line + 4, width - 8, line * 2}, {false, false});
     }
-    publish_panel(backend, keyboard, focusOnly, scale);
+    panel_.publish(backend, keyboard, keyboardTop_, focusOnly, scale);
     panel_.content = content;
     panel_.selection = keyboard ? menu_.keyIndex : static_cast<int>(menu_.selected);
     panel_.dirty = false;

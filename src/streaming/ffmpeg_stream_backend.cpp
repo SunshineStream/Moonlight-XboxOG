@@ -300,7 +300,11 @@ namespace {
     constexpr std::array<AVHWDeviceType, 0> devices {};
   #endif
     for (const auto device : devices) {
-      for (int index = 0; const AVCodecHWConfig *config = avcodec_get_hw_config(&codec, index); ++index) {
+      for (int index = 0;; ++index) {
+        const AVCodecHWConfig *config = avcodec_get_hw_config(&codec, index);
+        if (config == nullptr) {
+          break;
+        }
         if (config->device_type == device && (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) != 0 && av_hwdevice_ctx_create(&context.hw_device_ctx, device, nullptr, nullptr, 0) == 0) {
           hardwareFormat = config->pix_fmt;
           context.get_format = select_hardware_pixel_format;
@@ -330,7 +334,78 @@ namespace {
     context->flags |= AV_CODEC_FLAG_LOW_DELAY;
     return avcodec_open2(context, decoder, nullptr);
   }
+
+  /**
+   * @brief Replace a hardware frame with its software copy for conversion and presentation.
+   * @param frame Decoded frame to read back, or an existing software frame to leave in place.
+   * @param staging Temporary frame used for the transfer.
+   * @return Zero on success or a negative FFmpeg error.
+   */
+  int read_hardware_frame(AVFrame &frame, AVFrame &staging) {
+    if (frame.hw_frames_ctx == nullptr) {
+      return 0;
+    }
+    av_frame_unref(&staging);
+    int transfer = av_hwframe_transfer_data(&staging, &frame, 0);
+    if (transfer >= 0) {
+      transfer = av_frame_copy_props(&staging, &frame);
+    }
+    av_frame_unref(&frame);
+    if (transfer < 0) {
+      logging::warn("stream", std::string("Could not read a hardware video frame: ") + describe_ffmpeg_error(transfer));
+      av_frame_unref(&staging);
+      return transfer;
+    }
+    av_frame_move_ref(&frame, &staging);
+    return 0;
+  }
 #endif
+
+  /**
+   * @brief Convert a software frame to the presenter's I420 format.
+   * @param frame Decoded software frame.
+   * @param converted Receives the I420 pixels and presentation metadata.
+   * @param scaleContext Decoder-owned conversion context, replaced when the format changes.
+   * @return Zero on success or a negative FFmpeg error.
+   */
+  int convert_video_frame(const AVFrame &frame, AVFrame &converted, SwsContext *&scaleContext) {
+    scaleContext = sws_getCachedContext(
+      scaleContext,
+      frame.width,
+      frame.height,
+      static_cast<AVPixelFormat>(frame.format),
+      frame.width,
+      frame.height,
+      AV_PIX_FMT_YUV420P,
+      SWS_FAST_BILINEAR,
+      nullptr,
+      nullptr,
+      nullptr
+    );
+    if (scaleContext == nullptr) {
+      logging::warn("stream", "sws_getCachedContext failed for video conversion");
+      return AVERROR(EINVAL);
+    }
+
+    av_frame_unref(&converted);
+    converted.format = AV_PIX_FMT_YUV420P;
+    converted.width = frame.width;
+    converted.height = frame.height;
+    converted.color_range = frame.color_range;
+    converted.colorspace = frame.colorspace;
+    converted.flags = frame.flags;
+    if (const int allocation = av_frame_get_buffer(&converted, 32); allocation < 0) {
+      logging::warn("stream", "av_frame_get_buffer failed for converted video frame");
+      return allocation;
+    }
+
+    if (const int scaled = sws_scale(scaleContext, frame.data, frame.linesize, 0, frame.height, converted.data, converted.linesize); scaled != converted.height) {
+      logging::warn("stream", "sws_scale failed to convert the full video frame");
+      av_frame_unref(&converted);
+      return scaled < 0 ? scaled : AVERROR(EINVAL);
+    }
+    return 0;
+  }
 
   int on_video_setup(int videoFormat, int width, int height, int redrawRate, MoonlightCallbackContext *context, int drFlags) {  // NOSONAR(cpp:S5008) moonlight-common-c requires a void* render context callback.
     auto *backend = static_cast<streaming::FfmpegStreamBackend *>(context);
@@ -502,7 +577,7 @@ namespace streaming {
     screenshot_.progress.store(0);
     screenshot_.complete.store(false);
     screenshot_.thread = SDL_CreateThread([](auto *context) {
-      return save_screenshot_worker(static_cast<ScreenshotTask *>(context));
+      return ScreenshotTask::save(static_cast<ScreenshotTask *>(context));
     },
                                           "save-screenshot",
                                           &screenshot_);
@@ -553,7 +628,12 @@ namespace streaming {
     return saved;
   }
 
-  SDL_Surface *FfmpegStreamBackend::convert_screenshot_frame(const Yuv420FrameView &frame) {
+  /**
+   * @brief Convert the owned YUV snapshot into a BGR screenshot without retaining conversion buffers.
+   * @param frame Stable screenshot snapshot.
+   * @return Owned BGR surface, or nullptr when conversion fails.
+   */
+  static SDL_Surface *convert_screenshot_frame(const Yuv420FrameView &frame) {
     SDL_Surface *surface = SDL_CreateSurface(frame.width, frame.height, SDL_PIXELFORMAT_BGR24);
     if (surface == nullptr) {
       return nullptr;
@@ -578,7 +658,7 @@ namespace streaming {
     return surface;
   }
 
-  int FfmpegStreamBackend::save_screenshot_worker(ScreenshotTask *context) {
+  int FfmpegStreamBackend::ScreenshotTask::save(ScreenshotTask *context) {
     auto &job = *context;
     // Stay below the streaming event loop without starving behind USB/audio work.
     SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
@@ -741,7 +821,8 @@ namespace streaming {
     const AVCodec *softwareCodec = find_software_decoder(codecSelection.codecId);
     const AVCodec *mediaCodec = find_mediacodec_decoder(codecSelection.codecId);
     const AVCodec *nativeCodec = codecSelection.codecId == AV_CODEC_ID_AV1 ? avcodec_find_decoder_by_name("av1") : softwareCodec;
-    const AVCodec *codec = mediaCodec != nullptr ? mediaCodec : (nativeCodec != nullptr ? nativeCodec : softwareCodec);
+    const AVCodec *platformCodec = nativeCodec != nullptr ? nativeCodec : softwareCodec;
+    const AVCodec *codec = mediaCodec != nullptr ? mediaCodec : platformCodec;
 #else
     const AVCodec *codec = avcodec_find_decoder(codecSelection.codecId);
 #endif
@@ -1037,61 +1118,16 @@ namespace streaming {
       }
 
 #ifdef MOONLIGHT_PORTABLE
-      if (video_.decodedFrame->hw_frames_ctx != nullptr) {
-        av_frame_unref(video_.convertedFrame);
-        int transfer = av_hwframe_transfer_data(video_.convertedFrame, video_.decodedFrame, 0);
-        if (transfer >= 0) {
-          transfer = av_frame_copy_props(video_.convertedFrame, video_.decodedFrame);
-        }
-        av_frame_unref(video_.decodedFrame);
-        if (transfer < 0) {
-          logging::warn("stream", std::string("Could not read a hardware video frame: ") + describe_ffmpeg_error(transfer));
-          av_frame_unref(video_.convertedFrame);
-          fallback_to_software_decoder();
-          return transfer;
-        }
-        av_frame_move_ref(video_.decodedFrame, video_.convertedFrame);
+      if (const int transfer = read_hardware_frame(*video_.decodedFrame, *video_.convertedFrame); transfer < 0) {
+        fallback_to_software_decoder();
+        return transfer;
       }
 #endif
       AVFrame *frameToPresent = video_.decodedFrame;
       if (video_.decodedFrame->format != AV_PIX_FMT_YUV420P) {
-        video_.scaleContext = sws_getCachedContext(
-          video_.scaleContext,
-          video_.decodedFrame->width,
-          video_.decodedFrame->height,
-          static_cast<AVPixelFormat>(video_.decodedFrame->format),
-          video_.decodedFrame->width,
-          video_.decodedFrame->height,
-          AV_PIX_FMT_YUV420P,
-          SWS_FAST_BILINEAR,
-          nullptr,
-          nullptr,
-          nullptr
-        );
-        if (video_.scaleContext == nullptr) {
-          logging::warn("stream", "sws_getCachedContext failed for video conversion");
+        if (const int converted = convert_video_frame(*video_.decodedFrame, *video_.convertedFrame, video_.scaleContext); converted < 0) {
           av_frame_unref(video_.decodedFrame);
-          return AVERROR(EINVAL);
-        }
-
-        av_frame_unref(video_.convertedFrame);
-        video_.convertedFrame->format = AV_PIX_FMT_YUV420P;
-        video_.convertedFrame->width = video_.decodedFrame->width;
-        video_.convertedFrame->height = video_.decodedFrame->height;
-        video_.convertedFrame->color_range = video_.decodedFrame->color_range;
-        video_.convertedFrame->colorspace = video_.decodedFrame->colorspace;
-        video_.convertedFrame->flags = video_.decodedFrame->flags;
-        if (const int allocation = av_frame_get_buffer(video_.convertedFrame, 32); allocation < 0) {
-          logging::warn("stream", "av_frame_get_buffer failed for converted video frame");
-          av_frame_unref(video_.decodedFrame);
-          return allocation;
-        }
-
-        if (const int scaled = sws_scale(video_.scaleContext, video_.decodedFrame->data, video_.decodedFrame->linesize, 0, video_.decodedFrame->height, video_.convertedFrame->data, video_.convertedFrame->linesize); scaled != video_.convertedFrame->height) {
-          logging::warn("stream", "sws_scale failed to convert the full video frame");
-          av_frame_unref(video_.decodedFrame);
-          av_frame_unref(video_.convertedFrame);
-          return scaled < 0 ? scaled : AVERROR(EINVAL);
+          return converted;
         }
         frameToPresent = video_.convertedFrame;
       }

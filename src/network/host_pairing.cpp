@@ -134,6 +134,9 @@ namespace {
     bool initialized = false;
   };
 
+  /**
+   * @brief Keep socket support initialized until the owned HTTP socket closes.
+   */
   struct SocketGuard {
     SocketGuard() = default;
     SocketGuard(const SocketGuard &) = delete;
@@ -152,6 +155,17 @@ namespace {
     }
 
     SOCKET handle = INVALID_SOCKET;
+
+    /**
+     * @brief Check whether socket support was initialized for the request.
+     * @return True when the socket can be opened.
+     */
+    bool socket_support_available() const {
+      return winsock_.initialized;
+    }
+
+  private:
+    WsaGuard winsock_;  ///< Released after the socket is closed in the destructor.
   };
 
   bool pairing_cancel_requested(const std::atomic<bool> *cancelRequested) {
@@ -1838,13 +1852,11 @@ namespace {
     }
 
     trace_pairing_phase("http_get: socket initialization");
-    // Keep Winsock initialized until SocketGuard has closed the request socket.
-    const WsaGuard wsaGuard;
-    if (!wsaGuard.initialized) {
+    SocketGuard socketGuard;
+    if (!socketGuard.socket_support_available()) {
       return append_error(errorMessage, "Failed to initialize socket support for host pairing");
     }
 
-    SocketGuard socketGuard;
     trace_pairing_phase("http_get: connect_socket");
     if (!connect_socket(address, port, &socketGuard, socketIoTimeoutMilliseconds, errorMessage, cancelRequested)) {
       return false;

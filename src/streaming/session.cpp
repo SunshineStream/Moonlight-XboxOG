@@ -250,6 +250,12 @@ namespace {
     bool active_;  ///< True after SDL accepted the priority change.
   };
 
+  /**
+   * @brief Compare the dimensions, pixel depth and refresh rate of two display modes.
+   * @param left First mode.
+   * @param right Second mode.
+   * @return True when both modes use the same settings.
+   */
   bool video_modes_match(const VIDEO_MODE &left, const VIDEO_MODE &right) {
     return left.width == right.width && left.height == right.height && left.bpp == right.bpp && left.refresh == right.refresh;
   }
@@ -263,6 +269,7 @@ namespace {
       switch_to(requestedVideoMode);
     }
 
+#ifdef NXDK
     /**
      * @brief Apply a streaming display mode to the Xbox and SDL window.
      * @param requestedVideoMode The desired output mode.
@@ -272,7 +279,6 @@ namespace {
         return;
       }
 
-#ifdef NXDK
       if (!XVideoSetMode(requestedVideoMode.width, requestedVideoMode.height, requestedVideoMode.bpp, requestedVideoMode.refresh)) {
         logging::warn(
           "stream",
@@ -288,10 +294,16 @@ namespace {
         SDL_SetWindowSize(window_, activeVideoMode_.width, activeVideoMode_.height);
       }
       logging::info("stream", "Switched Xbox video mode for stream presentation to " + std::to_string(activeVideoMode_.width) + "x" + std::to_string(activeVideoMode_.height) + " at " + std::to_string(activeVideoMode_.bpp) + " bpp");
-#else
-      (void) requestedVideoMode;
-#endif
     }
+#else
+    /**
+     * @brief Retain the operating system's display mode on portable clients.
+     * @param requestedVideoMode Unused Xbox scanout mode.
+     */
+    static void switch_to(const VIDEO_MODE &requestedVideoMode) {
+      (void) requestedVideoMode;
+    }
+#endif
 
     ~ScopedStreamVideoMode() {
 #ifdef NXDK

@@ -284,20 +284,14 @@ namespace streaming {
       std::string directory;  ///< Destination at request time.
       std::int64_t capturedAt = 0;  ///< UTC capture time.
       std::string result;  ///< Detail read only after the worker completes.
-    };
 
-    /**
-     * @brief Convert and save an owned YUV snapshot with lower priority than streaming.
-     * @param context ScreenshotTask owned by this backend until the worker is joined.
-     * @return Zero after publishing a completion result.
-     */
-    static int save_screenshot_worker(ScreenshotTask *context);
-    /**
-     * @brief Convert the owned YUV snapshot into a BGR screenshot without retaining conversion buffers.
-     * @param frame Stable screenshot snapshot.
-     * @return Owned BGR surface, or nullptr when conversion fails.
-     */
-    static SDL_Surface *convert_screenshot_frame(const Yuv420FrameView &frame);
+      /**
+       * @brief Convert and save an owned YUV snapshot with lower priority than streaming.
+       * @param context ScreenshotTask owned by the backend until the worker is joined.
+       * @return Zero after publishing a completion result.
+       */
+      static int save(ScreenshotTask *context);
+    };
 
     /**
      * @brief Hold FFmpeg and SDL state used by the video path.

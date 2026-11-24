@@ -4900,10 +4900,10 @@ namespace {
         seed_controller_navigation_hold_state(
           controllerButtonDownTick,
           command,
-          &inputState->moveUpHoldState,
-          &inputState->moveDownHoldState,
-          &inputState->moveLeftHoldState,
-          &inputState->moveRightHoldState
+          &inputState->controllerNavigation.up,
+          &inputState->controllerNavigation.down,
+          &inputState->controllerNavigation.left,
+          &inputState->controllerNavigation.right
         );
       }
       if (inputState->controllerStartPressed && inputState->controllerBackPressed && hosts_screen_exit_combo_allowed(state)) {
@@ -4945,10 +4945,10 @@ namespace {
     }
     release_controller_navigation_hold_state(
       translate_controller_button(event.button),
-      &inputState->moveUpHoldState,
-      &inputState->moveDownHoldState,
-      &inputState->moveLeftHoldState,
-      &inputState->moveRightHoldState
+      &inputState->controllerNavigation.up,
+      &inputState->controllerNavigation.down,
+      &inputState->controllerNavigation.left,
+      &inputState->controllerNavigation.right
     );
     return command;
   }
@@ -4981,6 +4981,80 @@ namespace {
     }
     return true;
   }
+
+  /**
+   * @brief Translate a shell key press after handling exit and text input.
+   * @param state Shell state and current input device.
+   * @param event SDL key press.
+   * @param inputState Keyboard repeat state, if available.
+   * @return A command to apply or none if the key was consumed.
+   */
+  input::UiCommand handle_shell_key_down(app::ClientState &state, const SDL_KeyboardEvent &event, ShellInputState *inputState) {
+    if (event.repeat != 0 || inputState == nullptr) {
+      return input::UiCommand::none;
+    }
+    set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
+    if (event.key == SDLK_F4 && (event.mod & SDL_KMOD_ALT) != 0 && hosts_screen_exit_combo_allowed(state) && !state.modal.active()) {
+      state.shell.shouldExit = true;
+      return input::UiCommand::none;
+    }
+    if (handle_directory_key(state, event)) {
+      return input::UiCommand::none;
+    }
+    return inputState->keyboardNavigation.press(event.scancode, translate_keyboard_key(event.key, event.mod), SDL_GetTicks());
+  }
+
+#ifdef MOONLIGHT_PORTABLE
+  /**
+   * @brief Translate a mouse release while ignoring SDL's synthetic touch mouse events.
+   * @param state Shell state and current input device.
+   * @param event SDL mouse button release.
+   * @param inputState Shell input state, if available.
+   * @return The mapped command, or none for unbound buttons.
+   */
+  input::UiCommand handle_shell_mouse_release(app::ClientState &state, const SDL_MouseButtonEvent &event, ShellInputState *inputState) {
+    if (event.which == SDL_TOUCH_MOUSEID) {
+      return input::UiCommand::none;
+    }
+    set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
+    switch (event.button) {
+      case SDL_BUTTON_LEFT:
+        return input::UiCommand::activate;
+      case SDL_BUTTON_RIGHT:
+        return input::UiCommand::open_context_menu;
+      case SDL_BUTTON_X1:
+        return input::UiCommand::back;
+      default:
+        return input::UiCommand::none;
+    }
+  }
+
+  /**
+   * @brief Interpret the active finger's release as a swipe, hold or tap.
+   * @param gesture Saved origin and timing, cleared when the finger matches.
+   * @param event SDL finger release.
+   * @return A shell command, or none for a different finger.
+   */
+  input::UiCommand handle_shell_touch_release(input::ShellTouchGesture &gesture, const SDL_TouchFingerEvent &event) {
+    if (gesture.finger != event.fingerID) {
+      return input::UiCommand::none;
+    }
+    const float dx = event.x - gesture.x;
+    const float dy = event.y - gesture.y;
+    const Uint64 held = SDL_GetTicks() - gesture.startedAt;
+    gesture.finger = 0;
+    if (std::max(std::fabs(dx), std::fabs(dy)) >= 0.05f) {
+      if (std::fabs(dx) > std::fabs(dy)) {
+        return input::direction_command(dx > 0.0f ? 1 : -1, 0);
+      }
+      return input::direction_command(0, dy > 0.0f ? 1 : -1);
+    }
+    if (held > 1000) {
+      return input::UiCommand::back;
+    }
+    return held > 450 ? input::UiCommand::open_context_menu : input::UiCommand::activate;
+  }
+#endif
 
   /**
    * @brief Route device transitions and maintain the input source used by contextual helpers.
@@ -5022,59 +5096,20 @@ namespace {
         return translate_trigger_axis(event.gaxis, &inputState->leftTriggerPressed, &inputState->rightTriggerPressed);
 #ifdef MOONLIGHT_PORTABLE
       case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (event.button.which != SDL_TOUCH_MOUSEID) {
-          set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
-          if (event.button.button == SDL_BUTTON_LEFT) {
-            return input::UiCommand::activate;
-          }
-          if (event.button.button == SDL_BUTTON_RIGHT) {
-            return input::UiCommand::open_context_menu;
-          }
-          if (event.button.button == SDL_BUTTON_X1) {
-            return input::UiCommand::back;
-          }
-        }
-        return input::UiCommand::none;
+        return handle_shell_mouse_release(state, event.button, inputState);
       case SDL_EVENT_MOUSE_WHEEL:
         return input::direction_command(0, event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? event.wheel.integer_y : -event.wheel.integer_y);
       case SDL_EVENT_FINGER_DOWN:
-        if (inputState != nullptr && inputState->touchFinger == 0) {
+        if (inputState != nullptr && inputState->touch.finger == 0) {
           set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
-          inputState->touchFinger = event.tfinger.fingerID;
-          inputState->touchStartTick = SDL_GetTicks();
-          inputState->touchStartX = event.tfinger.x;
-          inputState->touchStartY = event.tfinger.y;
+          inputState->touch = {event.tfinger.fingerID, SDL_GetTicks(), event.tfinger.x, event.tfinger.y};
         }
         return input::UiCommand::none;
       case SDL_EVENT_FINGER_UP:
-        if (inputState != nullptr && inputState->touchFinger == event.tfinger.fingerID) {
-          const float dx = event.tfinger.x - inputState->touchStartX;
-          const float dy = event.tfinger.y - inputState->touchStartY;
-          const Uint64 held = SDL_GetTicks() - inputState->touchStartTick;
-          inputState->touchFinger = 0;
-          if (std::max(std::fabs(dx), std::fabs(dy)) >= 0.05f) {
-            return std::fabs(dx) > std::fabs(dy) ? input::direction_command(dx > 0.0f ? 1 : -1, 0) : input::direction_command(0, dy > 0.0f ? 1 : -1);
-          }
-          if (held > 1000) {
-            return input::UiCommand::back;
-          }
-          return held > 450 ? input::UiCommand::open_context_menu : input::UiCommand::activate;
-        }
-        return input::UiCommand::none;
+        return inputState != nullptr ? handle_shell_touch_release(inputState->touch, event.tfinger) : input::UiCommand::none;
 #endif
       case SDL_EVENT_KEY_DOWN:
-        if (event.key.repeat != 0 || inputState == nullptr) {
-          return input::UiCommand::none;
-        }
-        set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
-        if (event.key.key == SDLK_F4 && (event.key.mod & SDL_KMOD_ALT) != 0 && hosts_screen_exit_combo_allowed(state) && !state.modal.active()) {
-          state.shell.shouldExit = true;
-          return input::UiCommand::none;
-        }
-        if (handle_directory_key(state, event.key)) {
-          return input::UiCommand::none;
-        }
-        return inputState->keyboardNavigation.press(event.key.scancode, translate_keyboard_key(event.key.key, event.key.mod), SDL_GetTicks());
+        return handle_shell_key_down(state, event.key, inputState);
       case SDL_EVENT_KEY_UP:
         if (inputState != nullptr) {
           inputState->keyboardNavigation.release(event.key.scancode);
@@ -5126,10 +5161,10 @@ namespace {
         *skipPolledControllerNavigation = true;
       }
       reset_controller_navigation_hold_states(
-        &inputState->moveUpHoldState,
-        &inputState->moveDownHoldState,
-        &inputState->moveLeftHoldState,
-        &inputState->moveRightHoldState
+        &inputState->controllerNavigation.up,
+        &inputState->controllerNavigation.down,
+        &inputState->controllerNavigation.left,
+        &inputState->controllerNavigation.right
       );
     } while (SDL_PollEvent(&event));
   }
@@ -5148,10 +5183,10 @@ namespace {
     if (inputState->controllerNavigationNeutralRequired) {
       if (is_controller_navigation_active(controller)) {
         reset_controller_navigation_hold_states(
-          &inputState->moveUpHoldState,
-          &inputState->moveDownHoldState,
-          &inputState->moveLeftHoldState,
-          &inputState->moveRightHoldState
+          &inputState->controllerNavigation.up,
+          &inputState->controllerNavigation.down,
+          &inputState->controllerNavigation.left,
+          &inputState->controllerNavigation.right
         );
       } else {
         inputState->controllerNavigationNeutralRequired = false;
@@ -5165,10 +5200,10 @@ namespace {
     processCommand(poll_controller_navigation(
       controller,
       SDL_GetTicks(),
-      &inputState->moveUpHoldState,
-      &inputState->moveDownHoldState,
-      &inputState->moveLeftHoldState,
-      &inputState->moveRightHoldState
+      &inputState->controllerNavigation.up,
+      &inputState->controllerNavigation.down,
+      &inputState->controllerNavigation.left,
+      &inputState->controllerNavigation.right
     ));
   }
 
