@@ -1790,11 +1790,12 @@ namespace {
    * @brief Measure text used in an input hint or keyboard keycap.
    * @param font Hint font.
    * @param label Null-terminated UTF-8 text to size.
+   * @param length Label length in bytes, excluding the terminator.
    * @return Text width, with an approximate width if SDL_ttf cannot measure it.
    */
-  int measure_footer_action_label_width(TTF_Font *font, const char *label) {
+  int measure_footer_action_label_width(TTF_Font *font, const char *label, std::size_t length) {
     int width = 0;
-    return TTF_GetStringSize(font, label, 0, &width, nullptr) ? width : static_cast<int>(std::strlen(label)) * 8;
+    return TTF_GetStringSize(font, label, length, &width, nullptr) ? width : static_cast<int>(length) * 8;
   }
 
   /**
@@ -1809,11 +1810,11 @@ namespace {
       if (key.empty()) {
         return hasAsset ? glyphSize : 0;
       }
-      return std::max(glyphSize, measure_footer_action_label_width(font, key.c_str()) + 12);
+      return std::max(glyphSize, measure_footer_action_label_width(font, key.c_str(), key.size()) + 12);
     };
     const int primary = glyph_width(action.keyLabel, !action.iconAssetPath.empty());
     const int secondary = glyph_width(action.secondaryKeyLabel, !action.secondaryIconAssetPath.empty());
-    const int label = measure_footer_action_label_width(font, action.label.c_str());
+    const int label = measure_footer_action_label_width(font, action.label.c_str(), action.label.size());
     return {primary, secondary, primary + secondary + label + (primary > 0 ? HINT_GLYPH_GAP : 0) + (secondary > 0 ? HINT_GLYPH_GAP : 0)};
   }
 
