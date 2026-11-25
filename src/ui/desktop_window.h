@@ -19,11 +19,13 @@ namespace ui {
    * @param windowId Window that received the fullscreen shortcut.
    */
   inline void toggle_desktop_fullscreen(SDL_WindowID windowId) {
-    if (SDL_Window *window = SDL_GetWindowFromID(windowId); window != nullptr) {
-      const bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
-      if (!SDL_SetWindowFullscreen(window, !fullscreen)) {
-        logging::warn("sdl", std::string("Could not change fullscreen mode: ") + SDL_GetError());
-      }
+    SDL_Window *window = SDL_GetWindowFromID(windowId);
+    if (window == nullptr) {
+      return;
+    }
+    const bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+    if (!SDL_SetWindowFullscreen(window, !fullscreen)) {
+      logging::warn("sdl", std::string("Could not change fullscreen mode: ") + SDL_GetError());
     }
   }
 }  // namespace ui

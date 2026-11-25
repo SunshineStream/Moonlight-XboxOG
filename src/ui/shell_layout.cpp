@@ -93,8 +93,7 @@ namespace ui {
 
   ShellMenuPanels calculate_desktop_menu_panels(const ShellLayout &layout, bool settings) {
     const auto &[x, y, width, height] = layout.content;
-    const int viewportHeight = layout.footer.y + layout.footer.h;
-    if (height >= 410 && (width < 680 || width < viewportHeight)) {
+    if (const int viewportHeight = layout.footer.y + layout.footer.h; height >= 410 && (width < 680 || width < viewportHeight)) {
       const int menuHeight = std::min(260, (height - layout.gap) * 2 / 5);
       return {{x, y, width, menuHeight}, {x, y + menuHeight + layout.gap, width, height - menuHeight - layout.gap}};
     }

@@ -1062,16 +1062,26 @@ namespace streaming {
     return ((flags & SDL_KMOD_SHIFT) != 0 ? MODIFIER_SHIFT : 0) | ((flags & SDL_KMOD_CTRL) != 0 ? MODIFIER_CTRL : 0) | ((flags & SDL_KMOD_ALT) != 0 ? MODIFIER_ALT : 0) | ((flags & SDL_KMOD_GUI) != 0 ? MODIFIER_META : 0);
   }
 
+  /**
+   * @brief Match a fresh Ctrl+Alt+Shift press of a local stream shortcut key.
+   * @param key SDL keyboard event.
+   * @param scancode Physical key assigned to the shortcut.
+   * @return True when the event should trigger the local action.
+   */
+  bool matches_stream_shortcut(const SDL_KeyboardEvent &key, SDL_Scancode scancode) {
+    return key.type == SDL_EVENT_KEY_DOWN && key.repeat == 0 && key.scancode == scancode && (key.mod & SDL_KMOD_CTRL) != 0 && (key.mod & SDL_KMOD_ALT) != 0 && (key.mod & SDL_KMOD_SHIFT) != 0;
+  }
+
   bool StreamControls::EventHandler::keyboard_event(const SDL_KeyboardEvent &key, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
     bool stop = false;
     const bool down = key.type == SDL_EVENT_KEY_DOWN;
 #ifdef MOONLIGHT_DESKTOP
-    if (down && key.repeat == 0 && key.scancode == SDL_SCANCODE_X && (key.mod & SDL_KMOD_CTRL) != 0 && (key.mod & SDL_KMOD_ALT) != 0 && (key.mod & SDL_KMOD_SHIFT) != 0) {
+    if (matches_stream_shortcut(key, SDL_SCANCODE_X)) {
       ui::toggle_desktop_fullscreen(key.windowID);
       return false;
     }
 #endif
-    if (const bool shortcut = key.scancode == SDL_SCANCODE_Q && (key.mod & SDL_KMOD_CTRL) != 0 && (key.mod & SDL_KMOD_ALT) != 0 && (key.mod & SDL_KMOD_SHIFT) != 0; down && key.repeat == 0 && shortcut) {
+    if (matches_stream_shortcut(key, SDL_SCANCODE_Q)) {
       open_menu(-1);
       controls_.navigation_.armed = true;
       return false;

@@ -4626,7 +4626,8 @@ namespace {
     if (viewModel.frame.screen == app::ScreenId::hosts) {
       const int buttonGap = std::max(6, layout.gap / 2);
       const int availableWidth = (toolbarRect.w - buttonGap * 2 - (stackedToolbar ? 0 : brandWidth)) / 3;
-      const int buttonWidth = stackedToolbar ? availableWidth : std::min(DESKTOP_SHELL ? 144 : screenHeight / 5, availableWidth);
+      const int preferredButtonWidth = DESKTOP_SHELL ? 144 : screenHeight / 5;
+      const int buttonWidth = stackedToolbar ? availableWidth : std::min(preferredButtonWidth, availableWidth);
       int buttonX = stackedToolbar ? toolbarRect.x : toolbarRect.x + toolbarRect.w - buttonWidth * 3 - buttonGap * 2;
       for (const auto &button : viewModel.content.toolbarButtons) {
         if (!render_toolbar_button(renderer, bodyFont, smallFont, assetCache, button, {buttonX, toolbarRect.y, buttonWidth, toolbarRect.h})) {
@@ -4665,11 +4666,15 @@ namespace {
       const bool settingsScreen = viewModel.frame.screen == app::ScreenId::settings;
       const bool hasDetailMenu = settingsScreen && !viewModel.content.detailMenuRows.empty();
       const int panelPadding = DESKTOP_SHELL ? 14 : std::max(14, screenWidth / 96);
-      const int menuPanelWidth = contentRect.w * 30 / 100;
-      const auto panels = DESKTOP_SHELL ? ui::calculate_desktop_menu_panels(layout, settingsScreen) : ui::ShellMenuPanels {
-                                                                                                        {contentRect.x, contentRect.y, menuPanelWidth, contentRect.h},
-                                                                                                        settingsScreen ? ui::calculate_settings_panel(layout) : ui::ShellRect {contentRect.x + menuPanelWidth + panelGap, contentRect.y, contentRect.w - menuPanelWidth - panelGap, contentRect.h},
-                                                                                                      };
+      ui::ShellMenuPanels panels;
+      if constexpr (DESKTOP_SHELL) {
+        panels = ui::calculate_desktop_menu_panels(layout, settingsScreen);
+      } else {
+        const int menuPanelWidth = contentRect.w * 30 / 100;
+        const int detailX = contentRect.x + menuPanelWidth + panelGap;
+        panels.menu = {contentRect.x, contentRect.y, menuPanelWidth, contentRect.h};
+        panels.detail = settingsScreen ? ui::calculate_settings_panel(layout) : ui::ShellRect {detailX, contentRect.y, contentRect.x + contentRect.w - detailX, contentRect.h};
+      }
       const SDL_Rect menuPanel = sdl_rect(panels.menu);
       const SDL_Rect bodyPanel = sdl_rect(panels.detail);
       fill_rounded_rect(renderer, bodyPanel, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF});
