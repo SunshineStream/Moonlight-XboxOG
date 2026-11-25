@@ -11,7 +11,7 @@ Other CI runs upload `Moonlight-Android-unsigned`, which requires signing before
 You can install signed APKs from Windows, macOS, or Linux using
 [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools).
 
-To build from source on Linux or macOS, install Java 17, Android SDK Platform 35, Build Tools 35.0.0,
+To build from source on Linux or macOS, install Java 25, Android SDK Platform 35, Build Tools 36.0.0,
 NDK 28.2.13676358, and CMake 3.22.1. Also install Meson, Ninja, pkg-config, Perl, and Make. Set
 `ANDROID_HOME` to the Android SDK directory, then run these commands from the repository root.
 
@@ -29,7 +29,7 @@ For debugger builds, use `:app:assembleDebug` and omit `-PmoonlightSignReleaseFo
 
 ### Prepare dependencies on Windows
 
-In Android Studio's **SDK Manager**, install Android SDK Platform 35, Build Tools 35.0.0,
+In Android Studio's **SDK Manager**, install Android SDK Platform 35, Build Tools 36.0.0,
 NDK 28.2.13676358, and CMake 3.22.1. Open an **MSYS2 UCRT64** shell at the repository root
 and run:
 
@@ -118,9 +118,12 @@ moonlightSdlSource=/path/to/checkout/cmake-build-android-deps/sources/sdl-releas
 ```
 
 In Android Studio, open **Settings > Build, Execution, Deployment > Build Tools > Gradle**.
-Select Java 17 as the **Gradle JDK** and use the project's **Gradle Wrapper** distribution, the
-same one CI uses. Sync the project, select the `app` run configuration, and choose a connected
-device or emulator in the toolbar.
+Use the project's **Gradle Wrapper** distribution and sync the project. The checked-in Gradle
+daemon JVM criteria select Java 25 for Android Studio, command-line builds, and CI. Gradle can
+download a compatible JDK if it cannot find one locally.
+[Gradle daemon JVM toolchains](https://docs.gradle.org/current/userguide/gradle_daemon.html#daemon_jvm_criteria)
+
+Select the `app` run configuration and choose a connected device or emulator in the toolbar.
 Click **Run** to build and install Moonlight with the default debug variant. To run the release
 variant with your local test key, add `moonlightSignReleaseForTesting=true` to your Gradle properties,
 sync, and select `release` in **Build Variants**.

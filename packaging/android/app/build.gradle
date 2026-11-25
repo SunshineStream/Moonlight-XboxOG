@@ -1,5 +1,27 @@
+import javax.inject.Inject
+
 plugins {
-    id 'com.android.application' version '8.7.3'
+    id 'com.android.application' version '9.5.3'
+}
+
+abstract class StageMoonlightAssets extends DefaultTask {
+    @InputDirectory
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract DirectoryProperty getStagedAssets()
+
+    @OutputDirectory
+    abstract DirectoryProperty getOutputDirectory()
+
+    @Inject
+    abstract FileSystemOperations getFileSystemOperations()
+
+    @TaskAction
+    void packageAssets() {
+        fileSystemOperations.sync {
+            from(stagedAssets)
+            into(outputDirectory)
+        }
+    }
 }
 
 def sourceRoot = rootProject.file('../..')
@@ -17,16 +39,16 @@ if (!new File(depsRoot, 'lib/pkgconfig/libavcodec.pc').isFile() ||
     !new File(depsRoot, 'lib/libcrypto.a').isFile() ||
     !new File(sdlSource, 'android-project/app/src/main/java/org/libsdl/app/SDLActivity.java').isFile()) {
     throw new GradleException(
-        "Prepare Android dependencies with scripts/build-client-deps.sh android <prefix> on Linux or macOS. " +
+        'Prepare Android dependencies with scripts/build-client-deps.sh android <prefix> ' +
+        'on Linux, macOS, or MSYS2 UCRT64. ' +
         "Gradle checked ${depsRoot} for FFmpeg and OpenSSL and ${sdlSource} for SDL3. " +
         'Set moonlightAndroidDeps and moonlightSdlSource in Gradle properties to override these paths.')
 }
-def packagedAssets = layout.buildDirectory.dir('moonlight-assets')
-
 android {
     namespace = 'dev.lizardbyte.app.moonlight'
     compileSdk = 35
-    buildToolsVersion = '35.0.0'
+    buildToolsVersion = '36.0.0'
+    enableKotlin = false
     ndkVersion = '28.2.13676358'
 
     defaultConfig {
@@ -44,8 +66,7 @@ android {
                       '-DBUILD_XBOX=OFF', '-DANDROID_STL=c++_shared',
                       "-DOPENSSL_ROOT_DIR=${depsRoot}", "-DCMAKE_FIND_ROOT_PATH=${depsRoot}",
                       "-DFFMPEG_PREPARED_BINARIES=${depsRoot}",
-                      "-DFETCHCONTENT_SOURCE_DIR_SDL3=${sdlSource}",
-                      "-DMOONLIGHT_CLIENT_ASSET_ROOT=${packagedAssets.get().asFile}/assets"
+                      "-DFETCHCONTENT_SOURCE_DIR_SDL3=${sdlSource}"
             targets 'moonlight_client', 'SDL3-shared'
         }
     }
@@ -54,24 +75,34 @@ android {
         release {
             // CI and local sideloading can opt into test signing for the release variant.
             if (providers.gradleProperty('moonlightSignReleaseForTesting').getOrElse('false').toBoolean()) {
-                signingConfig signingConfigs.debug
+                signingConfig = signingConfigs.debug
             }
         }
     }
 
     externalNativeBuild.cmake {
         path = new File(sourceRoot, 'CMakeLists.txt')
+        // Keep CMake's nested compiler checks within Windows path limits.
+        buildStagingDirectory = new File(sourceRoot, 'cmake-build-android')
         version = '3.22.1'
     }
 
     sourceSets.main {
         java.srcDir new File(sdlSource, 'android-project/app/src/main/java')
-        assets.srcDir packagedAssets
     }
+}
 
-    applicationVariants.all { variant ->
-        variant.mergeAssetsProvider.configure {
-            dependsOn("externalNativeBuild${variant.name.capitalize()}")
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def variantName = variant.name.capitalize()
+        def stagedAssets = layout.buildDirectory.dir("moonlight-assets/${variant.name}")
+        variant.externalNativeBuild.arguments.add(
+            "-DMOONLIGHT_CLIENT_ASSET_ROOT=${stagedAssets.get().dir('assets').asFile}".toString()
+        )
+        def packageAssets = tasks.register("stage${variantName}MoonlightAssets", StageMoonlightAssets) {
+            dependsOn("externalNativeBuild${variantName}")
+            it.stagedAssets.set(stagedAssets)
         }
+        variant.sources.assets.addGeneratedSourceDirectory(packageAssets) { it.outputDirectory }
     }
 }
