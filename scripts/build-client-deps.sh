@@ -23,7 +23,7 @@ lock_value() {
 checkout() {
   local repository="$1" tag="$2" destination="$3"
   if [[ ! -d "${destination}/.git" ]]; then
-    git clone --quiet --depth=1 --branch "${tag}" "${repository}" "${destination}"
+    git -c core.autocrlf=false clone --quiet --depth=1 --branch "${tag}" "${repository}" "${destination}"
   fi
 }
 
@@ -40,6 +40,10 @@ checkout https://github.com/videolan/dav1d.git "${dav1d_tag}" "${dav1d_src}"
 openssl_options=(no-shared no-tests no-apps)
 openssl_env=("CFLAGS=${CFLAGS:-}" "LDFLAGS=${LDFLAGS:-}")
 target_flags='[]'
+meson_cc=
+meson_prefix="${prefix}"
+meson_setup=(meson setup)
+meson_install=(meson install)
 ffmpeg_options=(
   --arch=aarch64 --enable-cross-compile --enable-pic
   --disable-autodetect --disable-debug --disable-doc --disable-programs
@@ -55,10 +59,24 @@ case "${target}" in
     case "$(uname -s)" in
       Darwin) ndk_host=darwin-x86_64 ;;
       Linux) ndk_host=linux-x86_64 ;;
-      *) echo "Build Android dependencies from macOS or Linux." >&2; exit 2 ;;
+      MINGW*|MSYS*)
+        ndk_host=windows-x86_64
+        ANDROID_NDK_HOME="$(cygpath -u "${ANDROID_NDK_HOME}")"
+        ffmpeg_options+=("--host-cc=${MINGW_PREFIX:?Use the MSYS2 UCRT64 shell}/bin/clang")
+        ;;
+      *) echo "Build Android dependencies from Linux, macOS, or MSYS2." >&2; exit 2 ;;
     esac
-    export PATH="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/${ndk_host}/bin:${PATH}"
+    ndk_bin="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/${ndk_host}/bin"
+    export PATH="${ndk_bin}:${PATH}"
     cc=aarch64-linux-android26-clang
+    if [[ "${ndk_host}" == windows-x86_64 ]]; then
+      # Native Meson launches Windows executables directly. The NDK's shell wrapper is for Bash.
+      meson_cc="['$(cygpath -m "${ndk_bin}/clang.exe")', '--target=aarch64-linux-android26']"
+      # Meson validates the target's POSIX prefix and stages it into the Windows install directory.
+      meson_prefix=/
+      meson_setup=(env MSYS2_ARG_CONV_EXCL=--prefix= meson setup)
+      meson_install+=(--destdir "$(cygpath -m "${prefix}")")
+    fi
     ar=llvm-ar
     strip=llvm-strip
     system=android
@@ -103,9 +121,10 @@ case "${target}" in
 esac
 
 jobs="${MOONLIGHT_BUILD_JOBS:-4}"
+meson_cc="${meson_cc:-'${cc}'}"
 cat > "${work_dir}/dav1d-cross.ini" <<EOF
 [binaries]
-c = '${cc}'
+c = ${meson_cc}
 ar = '${ar}'
 strip = '${strip}'
 
@@ -120,11 +139,15 @@ c_args = ${target_flags}
 c_link_args = ${target_flags}
 EOF
 
-meson setup --cross-file "${work_dir}/dav1d-cross.ini" --prefix "${prefix}" --libdir lib \
+"${meson_setup[@]}" --cross-file "${work_dir}/dav1d-cross.ini" "--prefix=${meson_prefix}" --libdir lib \
   --default-library static --buildtype release -Denable_tools=false -Denable_tests=false \
   "${work_dir}/dav1d-build" "${dav1d_src}"
 meson compile -C "${work_dir}/dav1d-build" -j "${jobs}"
-meson install -C "${work_dir}/dav1d-build"
+"${meson_install[@]}" -C "${work_dir}/dav1d-build"
+if [[ "${meson_prefix}" == / ]]; then
+  # Override the target prefix in dav1d.pc before FFmpeg looks it up on the build host.
+  sed -i 's|^prefix=/$|prefix=${pcfiledir}/../..|' "${prefix}/lib/pkgconfig/dav1d.pc"
+fi
 
 # OpenSSL 4.1 generates this configuration header even with no-apps.
 mkdir -p -- "${work_dir}/openssl-build/apps/include" "${work_dir}/ffmpeg-build"
@@ -143,3 +166,20 @@ mkdir -p -- "${work_dir}/openssl-build/apps/include" "${work_dir}/ffmpeg-build"
   make -j "${jobs}"
   make install
 )
+
+if [[ "${target}" == android ]]; then
+  # The ARM64 libraries can be staged for Android Studio on a different host.
+  pkgconfig_prefix='${prefix}'
+  relative_prefix='prefix=${pcfiledir}/../..'
+  build_prefixes=("${prefix}")
+  if [[ "${meson_prefix}" == / ]]; then
+    build_prefixes+=("$(cygpath -m "${prefix}")")
+  fi
+  for metadata in "${prefix}"/lib/pkgconfig/*.pc; do
+    contents=$(<"${metadata}")
+    for build_prefix in "${build_prefixes[@]}"; do
+      contents="${contents//"${build_prefix}"/$pkgconfig_prefix}"
+    done
+    printf '%s\n' "${contents/#prefix="$pkgconfig_prefix"/$relative_prefix}" > "${metadata}"
+  done
+fi

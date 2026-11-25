@@ -9,6 +9,8 @@ jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
+    env:
+      SIGN_ANDROID_FOR_TESTING: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
     steps:
@@ -22,16 +24,36 @@ jobs:
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407  # v3.2.2
         with:
           packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;28.2.13676358 cmake;3.22.1
-      - name: Build Android APK
+      - name: Build Android release APK
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build pkg-config
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.2.13676358"
           bash scripts/build-client-deps.sh android "${PWD}/cmake-build-android-deps"
-          sdl_sources=( "${PWD}"/cmake-build-android-deps/sources/sdl-release-* )
-          bash "${sdl_sources[0]}/android-project/gradlew" -p packaging/android :app:assembleDebug \
-            "-PmoonlightSdlSource=${sdl_sources[0]}" "-PmoonlightAndroidDeps=${PWD}/cmake-build-android-deps"
+          bash packaging/android/gradlew -p packaging/android :app:assembleRelease \
+            "-PmoonlightSignReleaseForTesting=${SIGN_ANDROID_FOR_TESTING}"
+      - name: Verify release APK
+        id: apk
+        run: |
+          apk_dir=packaging/android/app/build/outputs/apk/release
+          build_tools="${ANDROID_HOME}/build-tools/35.0.0"
+          if [[ "${SIGN_ANDROID_FOR_TESTING}" == true ]]; then
+            apk="${apk_dir}/app-release.apk"
+            artifact=Moonlight-Android
+            "${build_tools}/apksigner" verify "${apk}"
+          else
+            apk="${apk_dir}/app-release-unsigned.apk"
+            artifact=Moonlight-Android-unsigned
+          fi
+          badging=$("${build_tools}/aapt" dump badging "${apk}")
+          if grep -qx 'application-debuggable' <<< "${badging}"; then
+            echo "The Android release APK is debuggable." >&2
+            exit 1
+          fi
+          echo "path=${apk}" >> "${GITHUB_OUTPUT}"
+          echo "artifact=${artifact}" >> "${GITHUB_OUTPUT}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: Moonlight-Android-debug
-          path: packaging/android/app/build/outputs/apk/debug/*.apk
+          name: ${{ steps.apk.outputs.artifact }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error

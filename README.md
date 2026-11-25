@@ -250,41 +250,13 @@ notarizes, and staples the macOS DMG.
 
 #### Android
 
-Install Java 17, Android SDK and Build Tools 35, NDK 28.2.13676358, and CMake 3.22.1. Build the
-ARM64 dependencies from Linux or macOS with Meson, Ninja, pkg-config, Perl, and Make installed.
-Set `ANDROID_NDK_HOME` to the NDK directory.
-
-```bash
-prefix="$PWD/cmake-build-android-deps"
-bash scripts/build-client-deps.sh android "$prefix"
-sdl="$prefix/sources/sdl-release-3.4.18"
-bash "$sdl/android-project/gradlew" -p packaging/android :app:assembleDebug \
-  "-PmoonlightSdlSource=$sdl" "-PmoonlightAndroidDeps=$prefix"
-```
-
-The APK has both Android and Android TV launcher entries.
+The APK includes Android and Android TV launcher entries. See [Testing on Android and Android TV](docs/test-android.md)
+for building, installing on hardware, and running in Android Studio.
 
 #### iOS and Apple TV
 
-Build on macOS with Xcode, Meson, Ninja, pkg-config, Perl, and Make. For a device build, use
-`target=ios`, `system=iOS` and `sdk=iphoneos`, or use `target=tvos`, `system=tvOS` and
-`sdk=appletvos`. Supply the development team for the app's Xcode signing configuration.
-
-```bash
-prefix="$PWD/cmake-build-$target-deps"
-bash scripts/build-client-deps.sh "$target" "$prefix"
-cmake -S . -B "cmake-build-$target" -G Xcode \
-  -DBUILD_CLIENT=ON -DBUILD_XBOX=OFF -DBUILD_TESTS=OFF -DBUILD_DOCS=OFF \
-  "-DCMAKE_SYSTEM_NAME=$system" "-DCMAKE_OSX_SYSROOT=$sdk" \
-  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-  "-DCMAKE_FIND_ROOT_PATH=$prefix" "-DOPENSSL_ROOT_DIR=$prefix" \
-  "-DFFMPEG_PREPARED_BINARIES=$prefix" "-DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=$team"
-cmake --build "cmake-build-$target" --config Release --target moonlight_client
-```
-
-CI builds the iOS and tvOS simulator targets in parallel in the Apple simulators workflow. Each target
-uses its own SDK and dependency build. Device installation requires a provisioning profile for the
-bundle identifier selected in the Xcode project.
+iOS and tvOS use separate SDKs and dependency builds. See [Testing on iPhone and Apple TV](docs/test-apple-mobile.md)
+for Xcode setup, development signing, and simulator builds.
 
 ## 🛠️ Original Xbox build
 

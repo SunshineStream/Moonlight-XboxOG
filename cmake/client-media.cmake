@@ -66,6 +66,11 @@ endfunction()
 
 # Resolve relocatable static archives or the media packages installed in the target SDK.
 function(moonlight_prepare_client_media)
+    if(ANDROID AND CMAKE_HOST_WIN32)
+        # Android Studio may run without MSYS2 on PATH.
+        find_program(PKG_CONFIG_EXECUTABLE NAMES pkg-config pkgconf
+                HINTS "$ENV{MSYS2_ROOT}/ucrt64/bin" "C:/msys64/ucrt64/bin")
+    endif()
     find_package(PkgConfig REQUIRED)
     set(ffmpeg_prefix "${FFMPEG_PREPARED_BINARIES}")
     if(MOONLIGHT_USE_PREBUILT_FFMPEG AND NOT ffmpeg_prefix)

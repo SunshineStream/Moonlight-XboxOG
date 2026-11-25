@@ -3,13 +3,24 @@ plugins {
 }
 
 def sourceRoot = rootProject.file('../..')
-def sdlSource = providers.gradleProperty('moonlightSdlSource').getOrNull()
-def depsRoot = providers.gradleProperty('moonlightAndroidDeps').getOrNull()
-if (sdlSource == null || depsRoot == null) {
-    throw new GradleException('Set -PmoonlightSdlSource and -PmoonlightAndroidDeps to the prepared SDL3 source and Android dependency prefix.')
+def depsRoot = providers.gradleProperty('moonlightAndroidDeps').map { rootProject.file(it) }
+    .getOrElse(new File(sourceRoot, 'cmake-build-android-deps'))
+def sdlSource = providers.gradleProperty('moonlightSdlSource').map { rootProject.file(it) }.getOrNull()
+if (sdlSource == null) {
+    def sdlPin = new File(sourceRoot, 'package-lock.cmake').getText('UTF-8') =~ /(?m)^set\(SDL3_VERSION ([^)]+)\)/
+    if (!sdlPin.find()) {
+        throw new GradleException('Could not read SDL3_VERSION from package-lock.cmake.')
+    }
+    sdlSource = new File(depsRoot, "sources/sdl-release-${sdlPin.group(1)}")
 }
-sdlSource = file(sdlSource)
-depsRoot = file(depsRoot)
+if (!new File(depsRoot, 'lib/pkgconfig/libavcodec.pc').isFile() ||
+    !new File(depsRoot, 'lib/libcrypto.a').isFile() ||
+    !new File(sdlSource, 'android-project/app/src/main/java/org/libsdl/app/SDLActivity.java').isFile()) {
+    throw new GradleException(
+        "Prepare Android dependencies with scripts/build-client-deps.sh android <prefix> on Linux or macOS. " +
+        "Gradle checked ${depsRoot} for FFmpeg and OpenSSL and ${sdlSource} for SDL3. " +
+        'Set moonlightAndroidDeps and moonlightSdlSource in Gradle properties to override these paths.')
+}
 def packagedAssets = layout.buildDirectory.dir('moonlight-assets')
 
 android {
@@ -36,6 +47,15 @@ android {
                       "-DFETCHCONTENT_SOURCE_DIR_SDL3=${sdlSource}",
                       "-DMOONLIGHT_CLIENT_ASSET_ROOT=${packagedAssets.get().asFile}/assets"
             targets 'moonlight_client', 'SDL3-shared'
+        }
+    }
+
+    buildTypes {
+        release {
+            // CI and local sideloading can opt into test signing for the release variant.
+            if (providers.gradleProperty('moonlightSignReleaseForTesting').getOrElse('false').toBoolean()) {
+                signingConfig signingConfigs.debug
+            }
         }
     }
 

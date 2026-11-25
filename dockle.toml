@@ -20,7 +20,13 @@ source = "."
 home = true
 
 [targets.doxygen]
-inputs = ["README.md", "src", "experiments/README.md"]
+inputs = [
+  "README.md",
+  "src",
+  "experiments/README.md",
+  "docs/test-android.md",
+  "docs/test-apple-mobile.md",
+]
 image_paths = ["docs/images"]
 predefined = ["NXDK"]
 extra_stylesheets = [
