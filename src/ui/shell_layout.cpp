@@ -7,6 +7,18 @@
 
 // standard includes
 #include <algorithm>
+#include <cmath>
+
+namespace {
+  /**
+   * @brief Keep desktop side margins within a useful range across window widths.
+   * @param width Desktop viewport width in layout units.
+   * @return Left and right margin.
+   */
+  int desktop_side_margin(int width) {
+    return std::clamp(width / 20, 18, 64);
+  }
+}  // namespace
 
 namespace ui {
 
@@ -33,31 +45,64 @@ namespace ui {
     return selected - first >= visible ? selected - visible + 1 : first;
   }
 
-  ShellLayout calculate_shell_layout(int width, int height, int hintGlyphSize, int hintRowsHeight) {
+  ShellLayout calculate_shell_layout(int width, int height, int hintGlyphSize, int hintRowsHeight, ShellLayoutOptions options) {
     constexpr int dividerOffset = 6;
-    const int marginX = width / 20;
-    const int marginY = height / 20;
-    const int gap = std::max(10, height / 40);
-    const int navigationHeight = std::max(38, height / 12);
-    const int headingHeight = std::max(60, height / 8);
+    const int spacingHeight = options.desktop ? std::min(height, 720) : height;
+    const int marginX = options.desktop ? desktop_side_margin(width) : width / 20;
+    const int marginY = spacingHeight / 20;
+    const int gap = std::max(10, spacingHeight / 40);
+    const int navigationHeight = std::max(38, spacingHeight / 12);
+    const int headingHeight = std::max(60, spacingHeight / 8);
     const int innerWidth = std::max(1, width - marginX * 2);
+    const ShellRect navigation {marginX, marginY, innerWidth, navigationHeight};
+    const bool stackToolbar = options.desktop && options.hasToolbar && width < 740;
+    const ShellRect toolbar = stackToolbar ? ShellRect {marginX, marginY + navigationHeight + gap, innerWidth, 48} : navigation;
     const int saveSize = std::clamp(hintGlyphSize + 6, 1, innerWidth);
     const int hintsHeight = std::max(hintGlyphSize, hintRowsHeight);
     const int controlsHeight = std::max(saveSize, hintsHeight);
-    const int contentTop = marginY + navigationHeight + gap + headingHeight + gap;
+    const int headingY = toolbar.y + toolbar.h + gap;
+    const int contentTop = headingY + headingHeight + gap;
     // Place the divider above the overscan-safe area and center the controls in all rows below it.
-    const int footerSafeTop = height - std::max(8, height / 40) - controlsHeight;
+    const int footerSafeTop = height - std::max(8, spacingHeight / 40) - controlsHeight;
     const int footerTop = footerSafeTop - dividerOffset + 1;
     const int footerHeight = height - footerTop;
     return {
-      {marginX, marginY, innerWidth, navigationHeight},
-      {marginX, marginY + navigationHeight + gap, innerWidth, headingHeight},
+      navigation,
+      toolbar,
+      {marginX, headingY, innerWidth, headingHeight},
       {marginX, contentTop, innerWidth, std::max(1, footerSafeTop - gap - contentTop)},
       {marginX, footerTop, innerWidth, footerHeight},
       {marginX, footerTop + (footerHeight - hintsHeight) / 2, std::max(0, innerWidth - saveSize - gap), hintsHeight},
       {marginX + innerWidth - saveSize, footerTop + (footerHeight - saveSize) / 2, saveSize, saveSize},
       gap,
     };
+  }
+
+  ShellRect calculate_desktop_shell_viewport(int width, int height, float displayScale) {
+    if (width <= 0 || height <= 0) {
+      return {};
+    }
+    const float scale = std::min({displayScale > 0.0f ? displayScale : 1.0f, static_cast<float>(width) / 440.0f, static_cast<float>(height) / 480.0f});
+    return {0, 0, static_cast<int>(std::lround(static_cast<float>(width) / scale)), static_cast<int>(std::lround(static_cast<float>(height) / scale))};
+  }
+
+  DesktopGridColumns calculate_desktop_grid_columns(int width) {
+    const int contentWidth = width - 2 * desktop_side_margin(width);
+    return {static_cast<std::size_t>(std::max(1, contentWidth / 300)), static_cast<std::size_t>(std::max(1, contentWidth / 245))};
+  }
+
+  ShellMenuPanels calculate_desktop_menu_panels(const ShellLayout &layout, bool settings) {
+    const auto &[x, y, width, height] = layout.content;
+    const int viewportHeight = layout.footer.y + layout.footer.h;
+    if (height >= 410 && (width < 680 || width < viewportHeight)) {
+      const int menuHeight = std::min(260, (height - layout.gap) * 2 / 5);
+      return {{x, y, width, menuHeight}, {x, y + menuHeight + layout.gap, width, height - menuHeight - layout.gap}};
+    }
+
+    const int menuWidth = std::max(154, width * 30 / 100);
+    const int detailX = x + menuWidth + layout.gap;
+    const int detailY = settings ? layout.navigation.y : y;
+    return {{x, y, menuWidth, height}, {detailX, detailY, x + width - detailX, y + height - detailY}};
   }
 
   ShellRect calculate_settings_panel(const ShellLayout &layout) {

@@ -57,7 +57,17 @@
 #include "src/ui/shell_view.h"
 #include "src/ui/svg_assets.h"
 
+#ifdef MOONLIGHT_DESKTOP
+  #include "src/ui/desktop_window.h"
+#endif
+
 namespace {
+
+#ifdef MOONLIGHT_DESKTOP
+  constexpr bool DESKTOP_SHELL = true;  ///< Use resizable desktop layouts and device-independent coordinates.
+#else
+  constexpr bool DESKTOP_SHELL = false;  ///< Use the full-screen device's native shell layout.
+#endif
 
   constexpr std::size_t PAIRING_THREAD_STACK_SIZE = 1024U * 1024U;
   constexpr Uint32 HOST_DISCOVERY_REFRESH_INTERVAL_MILLISECONDS = 10000U;
@@ -1364,7 +1374,7 @@ namespace {
 
   SDL_Rect log_viewer_rect(const ui::ShellViewModel &viewModel, int screenWidth, int screenHeight, int outerMargin) {
     const int fullWidth = screenWidth - (outerMargin * 2);
-    const int dockedWidth = std::max(420, (screenWidth - (outerMargin * 3)) / 2);
+    const int dockedWidth = std::min(fullWidth, std::max(420, (screenWidth - (outerMargin * 3)) / 2));
     const int height = screenHeight - (outerMargin * 2);
 
     switch (viewModel.logViewer.placement) {
@@ -4071,7 +4081,8 @@ namespace {
    */
   bool render_host_tiles_grid(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &gridRect) {
     const int gap = std::max(14, gridRect.w / 45);
-    const int preferredHeight = std::min(gridRect.h, gridRect.w / 3);
+    const int columns = DESKTOP_SHELL ? static_cast<int>(viewModel.content.hostColumnCount) : 3;
+    const int preferredHeight = std::min(gridRect.h, gridRect.w / columns);
     const ui::ShellRect bounds {gridRect.x, gridRect.y, gridRect.w, gridRect.h};
     const auto grid = ui::calculate_shell_grid(bounds, viewModel.content.hostTiles.size(), viewModel.content.hostColumnCount, selected_host_tile_index(viewModel.content.hostTiles), preferredHeight, gap);
     const auto first = static_cast<std::size_t>(grid.startRow * grid.columns);
@@ -4102,14 +4113,23 @@ namespace {
     return true;
   }
 
+  /**
+   * @brief Display empty-library guidance near the page content in desktop windows.
+   * @param renderer Active shell renderer.
+   * @param smallFont Font used for guidance.
+   * @param viewModel Empty-library content.
+   * @param gridRect Available content bounds.
+   * @return True when the guidance rendered successfully.
+   */
   bool render_apps_empty_state(SDL_Renderer *renderer, TTF_Font *smallFont, const ui::ShellViewModel &viewModel, const SDL_Rect &gridRect) {
     const int lineGap = 8;
     const int textHeight = measure_body_lines_height(smallFont, viewModel.content.bodyLines, gridRect.w - 48, lineGap);
+    const int top = DESKTOP_SHELL ? 16 : std::max(16, (gridRect.h - textHeight) / 2);
     return render_body_lines(
       renderer,
       smallFont,
       viewModel.content.bodyLines,
-      {{TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, gridRect.x + 24, gridRect.y + std::max(16, (gridRect.h - textHeight) / 2), gridRect.w - 48, lineGap}
+      {{TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, gridRect.x + 24, gridRect.y + top, gridRect.w - 48, lineGap}
     );
   }
 
@@ -4456,11 +4476,56 @@ namespace {
   }
 
   /**
+   * @brief Current shell output and the coordinate space used to position controls.
+   */
+  struct ShellRenderSize {
+    int framebufferWidth = 0;  ///< Physical width of the renderer's window.
+    int framebufferHeight = 0;  ///< Physical height of the renderer's window.
+    int width = 0;  ///< Width available to the shell layout.
+    int height = 0;  ///< Height available to the shell layout.
+  };
+
+  /**
+   * @brief Measure the layout area from the current window or television mode.
+   * @param renderer Renderer drawing the shell.
+   * @param videoMode Output resolution and pixel aspect information.
+   * @param encoderSettings Encoder flags used for widescreen correction.
+   * @return Current physical and logical dimensions, or empty when unavailable.
+   */
+  ShellRenderSize measure_shell_render_size(SDL_Renderer *renderer, const VIDEO_MODE &videoMode, unsigned long encoderSettings) {
+    ShellRenderSize size;
+    if (!SDL_GetCurrentRenderOutputSize(renderer, &size.framebufferWidth, &size.framebufferHeight) || size.framebufferWidth <= 0 || size.framebufferHeight <= 0) {
+      return {};
+    }
+    if constexpr (DESKTOP_SHELL) {
+      const auto viewport = ui::calculate_desktop_shell_viewport(size.framebufferWidth, size.framebufferHeight, SDL_GetWindowDisplayScale(SDL_GetRenderWindow(renderer)));
+      size.width = viewport.w;
+      size.height = viewport.h;
+    } else {
+      size.width = splash::calculate_display_width(size.framebufferHeight, videoMode, encoderSettings);
+      size.height = size.framebufferHeight;
+    }
+    return size;
+  }
+
+  /**
+   * @brief Keep desktop focus movement aligned with the columns shown at this window width.
+   * @param state Client state used by navigation and the shell view model.
+   * @param width Current shell viewport width in layout units.
+   */
+  void update_shell_grid_columns(app::ClientState &state, int width) {
+    if constexpr (DESKTOP_SHELL) {
+      const auto columns = ui::calculate_desktop_grid_columns(width);
+      state.hosts.columnCount = columns.hosts;
+      state.apps.columnCount = columns.apps;
+    }
+  }
+
+  /**
    * @brief Compose the shell, show a capture, or update retained folder rows without rebuilding unchanged page pixels.
    *
    * @param renderer Active SDL renderer, including the software fallback.
-   * @param videoMode Output resolution and pixel aspect information.
-   * @param encoderSettings Encoder flags used for widescreen correction.
+   * @param size Physical output and corresponding shell layout dimensions.
    * @param fonts Shell fonts and control hint styling.
    * @param viewModel Render-ready page and modal state.
    * @param textureCache Cached host artwork.
@@ -4472,8 +4537,7 @@ namespace {
    */
   bool draw_shell(  // NOSONAR(cpp:S107) one-frame shell rendering keeps layout dependencies explicit
     SDL_Renderer *renderer,
-    const VIDEO_MODE &videoMode,
-    unsigned long encoderSettings,
+    const ShellRenderSize &size,
     const DialogFonts &fonts,
     const ui::ShellViewModel &viewModel,
     CoverArtTextureCache *textureCache,
@@ -4483,15 +4547,12 @@ namespace {
     const std::optional<Uint64> &saveFrame
   ) {
     const auto &[titleFont, bodyFont, smallFont, hints] = fonts;
-    int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    if (!SDL_GetCurrentRenderOutputSize(renderer, &framebufferWidth, &framebufferHeight) || framebufferWidth <= 0 || framebufferHeight <= 0) {
+    const auto &[framebufferWidth, framebufferHeight, screenWidth, screenHeight] = size;
+    if (screenWidth <= 0 || screenHeight <= 0) {
       return false;
     }
-
-    const int screenHeight = framebufferHeight;
-    const int screenWidth = splash::calculate_display_width(screenHeight, videoMode, encoderSettings);
     const float horizontalScale = static_cast<float>(framebufferWidth) / static_cast<float>(screenWidth);
+    const float verticalScale = static_cast<float>(framebufferHeight) / static_cast<float>(screenHeight);
 
     // Partial redraws depend on a retained window surface. The GPU renderer flips buffers.
     auto *folder = keypadModalLayoutCache != nullptr && keypadModalLayoutCache->window != nullptr ? &keypadModalLayoutCache->folder : nullptr;
@@ -4523,9 +4584,10 @@ namespace {
 
     const bool screenshotViewer = viewModel.screenshot.visible && !viewModel.overlay.visible && keypadModalLayoutCache != nullptr;
     const auto &footerActions = screenshotViewer ? viewModel.modal.footerActions : viewModel.frame.footerActions;
-    auto layout = ui::calculate_shell_layout(screenWidth, screenHeight, hints.glyphSize);
+    const ui::ShellLayoutOptions layoutOptions {DESKTOP_SHELL, viewModel.frame.screen == app::ScreenId::hosts};
+    auto layout = ui::calculate_shell_layout(screenWidth, screenHeight, hints.glyphSize, 0, layoutOptions);
     if (const int hintsHeight = measure_footer_actions_height(smallFont, footerActions, layout.footerHints.w, hints); hintsHeight > layout.footerHints.h) {
-      layout = ui::calculate_shell_layout(screenWidth, screenHeight, hints.glyphSize, hintsHeight);
+      layout = ui::calculate_shell_layout(screenWidth, screenHeight, hints.glyphSize, hintsHeight, layoutOptions);
     }
     const int outerMargin = layout.navigation.x;
     const int panelGap = layout.gap;
@@ -4534,7 +4596,7 @@ namespace {
     const SDL_Rect footerRect = sdl_rect(layout.footer);
 
     SDL_SetRenderDrawColor(renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
-    if (!SDL_RenderClear(renderer) || !SDL_SetRenderScale(renderer, horizontalScale, 1.0f)) {
+    if (!SDL_RenderClear(renderer) || !SDL_SetRenderScale(renderer, horizontalScale, verticalScale)) {
       return false;
     }
 
@@ -4555,16 +4617,19 @@ namespace {
     const int logoSize = std::max(26, headerRect.h - 12);
     const SDL_Rect logoRect {headerRect.x, headerRect.y + (headerRect.h - logoSize) / 2, logoSize, logoSize};
     render_asset_icon(renderer, assetCache, "moonlight-logo.svg", logoRect);
-    const int brandWidth = headerRect.w / 3;
+    const SDL_Rect toolbarRect = sdl_rect(layout.toolbar);
+    const bool stackedToolbar = toolbarRect.y != headerRect.y;
+    const int brandWidth = stackedToolbar ? headerRect.w : headerRect.w / 3;
     if (!render_text_line_simple(renderer, bodyFont, viewModel.frame.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, logoRect.x + logoSize + 10, headerRect.y + (headerRect.h - TTF_GetFontLineSkip(bodyFont)) / 2, brandWidth - logoSize - 10)) {
       return false;
     }
     if (viewModel.frame.screen == app::ScreenId::hosts) {
       const int buttonGap = std::max(6, layout.gap / 2);
-      const int buttonWidth = std::min(screenHeight / 5, (headerRect.w - brandWidth - buttonGap * 2) / 3);
-      int buttonX = headerRect.x + headerRect.w - buttonWidth * 3 - buttonGap * 2;
+      const int availableWidth = (toolbarRect.w - buttonGap * 2 - (stackedToolbar ? 0 : brandWidth)) / 3;
+      const int buttonWidth = stackedToolbar ? availableWidth : std::min(DESKTOP_SHELL ? 144 : screenHeight / 5, availableWidth);
+      int buttonX = stackedToolbar ? toolbarRect.x : toolbarRect.x + toolbarRect.w - buttonWidth * 3 - buttonGap * 2;
       for (const auto &button : viewModel.content.toolbarButtons) {
-        if (!render_toolbar_button(renderer, bodyFont, smallFont, assetCache, button, {buttonX, headerRect.y, buttonWidth, headerRect.h})) {
+        if (!render_toolbar_button(renderer, bodyFont, smallFont, assetCache, button, {buttonX, toolbarRect.y, buttonWidth, toolbarRect.h})) {
           return false;
         }
         buttonX += buttonWidth + buttonGap;
@@ -4580,7 +4645,7 @@ namespace {
           return false;
         }
       } else {
-        const int iconSize = std::max(40, screenHeight / 8);
+        const int iconSize = std::max(40, (DESKTOP_SHELL ? std::min(screenHeight, 720) : screenHeight) / 8);
         const SDL_Rect icon {contentRect.x + (contentRect.w - iconSize) / 2, contentRect.y + 8, iconSize, iconSize};
         render_asset_icon(renderer, assetCache, "icons\\circle-plus.svg", icon);
         const SDL_Rect messageRect {contentRect.x, icon.y + icon.h + 12, contentRect.w, contentRect.h - icon.h - 20};
@@ -4599,17 +4664,14 @@ namespace {
     } else {
       const bool settingsScreen = viewModel.frame.screen == app::ScreenId::settings;
       const bool hasDetailMenu = settingsScreen && !viewModel.content.detailMenuRows.empty();
-      const int panelInset = 0;
-      const int panelPadding = std::max(14, screenWidth / 96);
-      const SDL_Rect panelArea {
-        contentRect.x + panelInset,
-        contentRect.y + panelInset,
-        std::max(1, contentRect.w - (panelInset * 2)),
-        std::max(1, contentRect.h - (panelInset * 2)),
-      };
-      const int menuPanelWidth = (panelArea.w * 30) / 100;
-      const SDL_Rect menuPanel {panelArea.x, panelArea.y, menuPanelWidth, panelArea.h};
-      const SDL_Rect bodyPanel = settingsScreen ? sdl_rect(ui::calculate_settings_panel(layout)) : SDL_Rect {panelArea.x + menuPanelWidth + panelGap, panelArea.y, panelArea.w - menuPanelWidth - panelGap, panelArea.h};
+      const int panelPadding = DESKTOP_SHELL ? 14 : std::max(14, screenWidth / 96);
+      const int menuPanelWidth = contentRect.w * 30 / 100;
+      const auto panels = DESKTOP_SHELL ? ui::calculate_desktop_menu_panels(layout, settingsScreen) : ui::ShellMenuPanels {
+                                                                                                        {contentRect.x, contentRect.y, menuPanelWidth, contentRect.h},
+                                                                                                        settingsScreen ? ui::calculate_settings_panel(layout) : ui::ShellRect {contentRect.x + menuPanelWidth + panelGap, contentRect.y, contentRect.w - menuPanelWidth - panelGap, contentRect.h},
+                                                                                                      };
+      const SDL_Rect menuPanel = sdl_rect(panels.menu);
+      const SDL_Rect bodyPanel = sdl_rect(panels.detail);
       fill_rounded_rect(renderer, bodyPanel, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF});
       // Focus belongs to the selected row, rather than an entire outlined pane.
 
@@ -4618,7 +4680,8 @@ namespace {
         return false;
       }
 
-      if (!render_action_rows(renderer, bodyFont, viewModel.content.menuRows, {menuPanel.x + panelPadding, menuHeaderRect.y + menuHeaderRect.h + 12, menuPanel.w - (panelPadding * 2), menuPanel.h - (menuHeaderRect.h + (panelPadding * 2) + 12)}, std::max(36, screenHeight / 13), {assetCache, viewModel.content.leftPanelActive})) {
+      const int menuRowHeight = std::max(36, DESKTOP_SHELL ? TTF_GetFontLineSkip(bodyFont) + 16 : screenHeight / 13);
+      if (!render_action_rows(renderer, bodyFont, viewModel.content.menuRows, {menuPanel.x + panelPadding, menuHeaderRect.y + menuHeaderRect.h + 12, menuPanel.w - (panelPadding * 2), menuPanel.h - (menuHeaderRect.h + (panelPadding * 2) + 12)}, menuRowHeight, {assetCache, viewModel.content.leftPanelActive})) {
         return false;
       }
 
@@ -4993,6 +5056,12 @@ namespace {
     if (event.repeat != 0 || inputState == nullptr) {
       return input::UiCommand::none;
     }
+#ifdef MOONLIGHT_DESKTOP
+    if (event.key == SDLK_F11) {
+      ui::toggle_desktop_fullscreen(event.windowID);
+      return input::UiCommand::none;
+    }
+#endif
     set_shell_input_device(state, inputState, input::UiInputDevice::keyboard);
     if (event.key == SDLK_F4 && (event.mod & SDL_KMOD_ALT) != 0 && hosts_screen_exit_combo_allowed(state) && !state.modal.active()) {
       state.shell.shouldExit = true;
@@ -5410,7 +5479,9 @@ namespace {
 #endif
     if (resources->renderer == nullptr) {
       resources->renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
+#ifndef MOONLIGHT_DESKTOP
       resources->keypadModalLayoutCache.window = window;
+#endif
     } else {
       resources->keypadModalLayoutCache.window = nullptr;
     }
@@ -5491,11 +5562,18 @@ namespace {
       return false;
     }
 
+#ifdef MOONLIGHT_DESKTOP
+    if ((SDL_GetWindowFlags(SDL_GetRenderWindow(resources->renderer)) & SDL_WINDOW_MINIMIZED) != 0) {
+      return true;
+    }
+#endif
+    const auto size = measure_shell_render_size(resources->renderer, videoMode, resources->encoderSettings);
+    update_shell_grid_columns(state, size.width);
     const std::vector<logging::LogEntry> retainedEntries = logging::snapshot(logging::LogLevel::info);
     const auto viewModel = ui::build_shell_view_model(state, retainedEntries);
     const auto saveFrame = ui::save_indicator_frame(SDL_GetTicks());
     const DialogFonts fonts {resources->titleFont, resources->bodyFont, resources->smallFont, {resources->hintGlyphSize}};
-    if (draw_shell(resources->renderer, videoMode, resources->encoderSettings, fonts, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache, resources->saveIndicator, saveFrame)) {
+    if (draw_shell(resources->renderer, size, fonts, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache, resources->saveIndicator, saveFrame)) {
       runtime->lastSaveFrame = saveFrame;
       runtime->keypadRedrawRequested = false;
       return true;
@@ -5775,6 +5853,12 @@ namespace {
     runtime->notificationTick = notificationNow;
 
     const auto processCommand = [window, &state, videoMode, resources, runtime](input::UiCommand command) {
+      if constexpr (DESKTOP_SHELL) {
+        if (is_navigation_command(command)) {
+          const auto size = measure_shell_render_size(resources->renderer, videoMode != nullptr ? *videoMode : VIDEO_MODE {}, resources->encoderSettings);
+          update_shell_grid_columns(state, size.width);
+        }
+      }
       process_shell_command(window, videoMode, state, command, resources, runtime);
     };
 

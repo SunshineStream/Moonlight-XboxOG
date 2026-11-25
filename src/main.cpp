@@ -357,6 +357,16 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
     return !startupTask.completed.load();
   });
 
+#ifdef MOONLIGHT_DESKTOP
+  // Resizing invalidates the window surface used by the splash.
+  if (!SDL_SetWindowMinimumSize(window, 640, 360)) {
+    logging::warn("sdl", std::string("Could not set the minimum window size: ") + SDL_GetError());
+  }
+  if (!SDL_SetWindowResizable(window, true)) {
+    logging::warn("sdl", std::string("Could not enable window resizing: ") + SDL_GetError());
+  }
+#endif
+
   finish_startup_task(clientState, &startupTask);
   startup::log_video_modes(videoModeSelection);
 

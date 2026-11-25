@@ -25,6 +25,10 @@
 #include "src/ui/shell_layout.h"
 #include "src/ui/svg_assets.h"
 
+#ifdef MOONLIGHT_DESKTOP
+  #include "src/ui/desktop_window.h"
+#endif
+
 namespace {
   /**
    * @brief Map local menu navigation keys to the shared repeat commands.
@@ -1061,6 +1065,12 @@ namespace streaming {
   bool StreamControls::EventHandler::keyboard_event(const SDL_KeyboardEvent &key, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
     bool stop = false;
     const bool down = key.type == SDL_EVENT_KEY_DOWN;
+#ifdef MOONLIGHT_DESKTOP
+    if (down && key.repeat == 0 && key.scancode == SDL_SCANCODE_X && (key.mod & SDL_KMOD_CTRL) != 0 && (key.mod & SDL_KMOD_ALT) != 0 && (key.mod & SDL_KMOD_SHIFT) != 0) {
+      ui::toggle_desktop_fullscreen(key.windowID);
+      return false;
+    }
+#endif
     if (const bool shortcut = key.scancode == SDL_SCANCODE_Q && (key.mod & SDL_KMOD_CTRL) != 0 && (key.mod & SDL_KMOD_ALT) != 0 && (key.mod & SDL_KMOD_SHIFT) != 0; down && key.repeat == 0 && shortcut) {
       open_menu(-1);
       controls_.navigation_.armed = true;

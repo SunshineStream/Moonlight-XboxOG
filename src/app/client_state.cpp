@@ -25,8 +25,6 @@ namespace {
   constexpr std::size_t LOG_VIEWER_FAST_SCROLL_STEP = 8U;
   constexpr std::size_t HOST_TOOLBAR_BUTTON_COUNT = 3U;
   constexpr std::size_t DEFAULT_EMPTY_HOSTS_TOOLBAR_INDEX = HOST_TOOLBAR_BUTTON_COUNT - 1U;
-  constexpr std::size_t HOST_GRID_COLUMN_COUNT = 3U;
-  constexpr std::size_t APP_GRID_COLUMN_COUNT = 4U;
   constexpr std::size_t ADD_HOST_KEYPAD_COLUMN_COUNT = 3U;
   constexpr const char *DELETE_SAVED_FILE_MENU_ID_PREFIX = "delete-saved-file:";
   constexpr const char *SETTINGS_CATEGORY_PREFIX = "settings-category:";
@@ -1249,7 +1247,7 @@ namespace {
     }
 
     bool movedAboveFirstRow = false;
-    move_grid_selection(state.hosts.items.size(), HOST_GRID_COLUMN_COUNT, rowDelta, columnDelta, &state.hosts.selectedHostIndex, &movedAboveFirstRow);
+    move_grid_selection(state.hosts.items.size(), state.hosts.columnCount, rowDelta, columnDelta, &state.hosts.selectedHostIndex, &movedAboveFirstRow);
     if (movedAboveFirstRow) {
       state.hosts.focusArea = app::HostsFocusArea::toolbar;
       return;
@@ -1270,7 +1268,7 @@ namespace {
       return;
     }
 
-    move_grid_selection(indices.size(), APP_GRID_COLUMN_COUNT, rowDelta, columnDelta, &state.apps.selectedAppIndex);
+    move_grid_selection(indices.size(), state.apps.columnCount, rowDelta, columnDelta, &state.apps.selectedAppIndex);
   }
 
   void enter_add_host_screen(app::ClientState &state) {

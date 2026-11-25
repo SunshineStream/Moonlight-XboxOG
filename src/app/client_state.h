@@ -240,6 +240,7 @@ namespace app {
     HostsFocusArea focusArea = HostsFocusArea::toolbar;  ///< Focused region on the hosts page.
     std::size_t selectedToolbarButtonIndex = 0U;  ///< Zero-based selection inside the hosts toolbar.
     std::size_t selectedHostIndex = 0U;  ///< Zero-based selection inside the saved host list.
+    std::size_t columnCount = 3U;  ///< Visible columns used for vertical navigation through hosts.
     std::vector<HostRecord> items;  ///< Saved hosts currently tracked by the shell.
     HostRecord active;  ///< Host snapshot kept for host-specific non-host screens after unloading the hosts page.
     bool activeLoaded = false;  ///< True when active contains a valid host snapshot.
@@ -370,6 +371,7 @@ namespace app {
    */
   struct AppsState {
     std::size_t selectedAppIndex = 0U;  ///< Zero-based selection inside the visible app list.
+    std::size_t columnCount = 4U;  ///< Visible columns used for vertical navigation through apps.
     std::size_t scrollPage = 0U;  ///< Horizontal page offset for paged app browsing.
     bool showHiddenApps = false;  ///< True when hidden apps should remain visible in the apps screen.
     bool refreshFailureNotified = false;  ///< Suppress repeated cached-library refresh warnings until recovery.

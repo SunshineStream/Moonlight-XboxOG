@@ -2,9 +2,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/client-media.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/sdl3.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/lucide.cmake")
 
-if(WIN32 AND MOONLIGHT_HOST_TOOL_DIR)
+if(WIN32)
     enable_language(RC)
-    if(CMAKE_RC_COMPILER MATCHES "windres[.]exe$")
+    if(MOONLIGHT_HOST_TOOL_DIR AND CMAKE_RC_COMPILER MATCHES "windres[.]exe$")
         # windres runs a separate preprocessor, and CLion's build may lack MSYS2 on PATH.
         string(PREPEND CMAKE_RC_FLAGS "--preprocessor=\"${CMAKE_C_COMPILER}\" "
                 "--preprocessor-arg=-E --preprocessor-arg=-xc-header --preprocessor-arg=-DRC_INVOKED ")
@@ -32,7 +32,10 @@ elseif(APPLE)
             MACOSX_BUNDLE_BUNDLE_VERSION "1"
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/packaging/apple/Info.plist.in")
 elseif(WIN32)
-    add_executable(moonlight_client WIN32 ${_client_sources})
+    set(_windows_resources "${CMAKE_SOURCE_DIR}/packaging/windows/moonlight.rc")
+    set_source_files_properties("${_windows_resources}" PROPERTIES
+            OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/packaging/windows/moonlight.ico")
+    add_executable(moonlight_client WIN32 ${_client_sources} "${_windows_resources}")
     set_target_properties(moonlight_client PROPERTIES OUTPUT_NAME Moonlight)
 else()
     add_executable(moonlight_client ${_client_sources})
@@ -41,6 +44,9 @@ endif()
 
 target_sources(moonlight_client PRIVATE "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg_memory.c")
 target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_PORTABLE TOML_EXCEPTIONS=0)
+if(WIN32 OR CMAKE_SYSTEM_NAME MATCHES "^(Darwin|Linux)$")
+    target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_DESKTOP)
+endif()
 target_include_directories(moonlight_client PRIVATE "${CMAKE_SOURCE_DIR}" "${tomlplusplus_SOURCE_DIR}/include")
 target_link_libraries(moonlight_client PRIVATE
         Moonlight::OpenSSL moonlight-common-c PkgConfig::MOONLIGHT_CLIENT_FFMPEG

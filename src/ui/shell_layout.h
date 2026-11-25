@@ -69,12 +69,37 @@ namespace ui {
    */
   struct ShellLayout {
     ShellRect navigation;  ///< Compact brand and toolbar strip.
+    ShellRect toolbar;  ///< Actions beside the brand or on their own row.
     ShellRect heading;  ///< Page title and contextual subtitle.
     ShellRect content;  ///< Unframed page content.
     ShellRect footer;  ///< Strip from the row after the divider to the bottom of the screen.
     ShellRect footerHints;  ///< Left-aligned actions, with room for the save indicator at their right.
     ShellRect saveIndicator;  ///< Lower-right save animation bounds.
     int gap = 0;  ///< Spacing between cards and panels.
+  };
+
+  /**
+   * @brief Shell regions that depend on the current screen and presentation.
+   */
+  struct ShellLayoutOptions {
+    bool desktop = false;  ///< Use bounded spacing for resizable windows.
+    bool hasToolbar = false;  ///< Reserve a separate action row when the brand and toolbar cannot share a row.
+  };
+
+  /**
+   * @brief Column counts shared by desktop layout and directional navigation.
+   */
+  struct DesktopGridColumns {
+    std::size_t hosts;  ///< Host cards per row.
+    std::size_t apps;  ///< App covers per row.
+  };
+
+  /**
+   * @brief Action and detail panes for settings and other menu pages.
+   */
+  struct ShellMenuPanels {
+    ShellRect menu;  ///< Scrollable list of categories or actions.
+    ShellRect detail;  ///< Explanation or options for the focused item.
   };
 
   /**
@@ -108,9 +133,34 @@ namespace ui {
    * @param height Framebuffer height.
    * @param hintGlyphSize Height of a controller glyph at the current output resolution.
    * @param hintRowsHeight Measured height of wrapped hints, or zero for one row.
-   * @return Regions scaled for 480-line and HD output.
+   * @param options Desktop spacing and toolbar behavior.
+   * @return Regions that fit the display or resizable client area.
    */
-  ShellLayout calculate_shell_layout(int width, int height, int hintGlyphSize, int hintRowsHeight = 0);
+  ShellLayout calculate_shell_layout(int width, int height, int hintGlyphSize, int hintRowsHeight = 0, ShellLayoutOptions options = {});
+
+  /**
+   * @brief Derive desktop layout units from the framebuffer and display density.
+   * @param width Output width in pixels.
+   * @param height Output height in pixels.
+   * @param displayScale Pixels per display-independent unit.
+   * @return Top-left-anchored viewport with a readable layout at the minimum window size.
+   */
+  ShellRect calculate_desktop_shell_viewport(int width, int height, float displayScale);
+
+  /**
+   * @brief Fit host cards and app covers across the desktop client area.
+   * @param width Desktop viewport width in layout units, including margins.
+   * @return Column counts of at least one for both grids.
+   */
+  DesktopGridColumns calculate_desktop_grid_columns(int width);
+
+  /**
+   * @brief Position desktop menu panes beside each other or stack them in tall windows.
+   * @param layout Shared shell regions.
+   * @param settings Whether the detail panel can extend beside the page heading.
+   * @return Menu and detail bounds.
+   */
+  ShellMenuPanels calculate_desktop_menu_panels(const ShellLayout &layout, bool settings);
 
   /**
    * @brief Extend settings beside the navigation and heading.

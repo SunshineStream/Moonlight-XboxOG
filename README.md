@@ -221,6 +221,10 @@ directional navigation. A touch swipe moves focus, a tap chooses the focused ite
 opens its actions. Hold for at least a second to go back.
 To connect from these builds, enter the Sunshine PC's IPv4 address in **Add Host**.
 
+On desktop, drag the window edges to resize or use the system maximize control. Menus reflow to
+fit the window, and streamed video keeps its aspect ratio. Press **F11** in the menus or
+**Ctrl+Alt+Shift+X** during a stream to toggle borderless fullscreen.
+
 On Windows, enable the **SDL client (UCRT64)** CMake profile in CLion and select **Windows Client**
 to build and launch `moonlight_client`. From the UCRT64 shell, use `client-ucrt64`.
 The preset downloads the pinned FFmpeg package during configure.
