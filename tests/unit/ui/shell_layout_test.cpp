@@ -302,6 +302,25 @@ namespace {
   }
 
   /**
+   * @brief Use the same responsive toolbar and grid when a high-density phone rotates.
+   */
+  TEST(ShellLayoutTest, ReflowsTheToolbarAndGridAfterPhoneRotation) {
+    const auto portrait = ui::calculate_desktop_shell_viewport(1080, 2400, 3.0f);
+    const auto portraitLayout = ui::calculate_shell_layout(portrait.w, portrait.h, 40, 64, {true, true});
+    EXPECT_EQ(portraitLayout.toolbar.y, portraitLayout.navigation.y + portraitLayout.navigation.h + portraitLayout.gap);
+    EXPECT_EQ(portraitLayout.footer.y + portraitLayout.footer.h, portrait.h);
+    EXPECT_EQ(ui::calculate_desktop_grid_columns(portrait.w).hosts, 1U);
+    EXPECT_EQ(ui::calculate_desktop_grid_columns(portrait.w).apps, 1U);
+
+    const auto landscape = ui::calculate_desktop_shell_viewport(2400, 1080, 3.0f);
+    const auto landscapeLayout = ui::calculate_shell_layout(landscape.w, landscape.h, 40, 64, {true, true});
+    EXPECT_EQ(landscapeLayout.toolbar.y, landscapeLayout.navigation.y);
+    EXPECT_EQ(landscapeLayout.footer.y + landscapeLayout.footer.h, landscape.h);
+    EXPECT_GT(ui::calculate_desktop_grid_columns(landscape.w).hosts, 1U);
+    EXPECT_GT(ui::calculate_desktop_grid_columns(landscape.w).apps, 1U);
+  }
+
+  /**
    * @brief Keep stacked panes within content and reserve enough height for options in short windows.
    */
   TEST(ShellLayoutTest, DesktopMenuPanesStackWhenTheWindowIsTall) {

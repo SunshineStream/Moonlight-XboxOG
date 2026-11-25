@@ -8,14 +8,15 @@
     <application
         android:allowBackup="false"
         android:banner="@drawable/tv_banner"
+        android:icon="@mipmap/ic_launcher"
         android:label="Moonlight"
-        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+        android:theme="@style/Theme.Moonlight"
         android:usesCleartextTraffic="false">
         <activity
-            android:name="org.libsdl.app.SDLActivity"
+            android:name=".MoonlightActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="true"
-            android:screenOrientation="sensorLandscape">
+            android:screenOrientation="user">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

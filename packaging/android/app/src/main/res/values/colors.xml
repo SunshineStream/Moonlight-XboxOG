@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="launcher_background">#101827</color>
+    <!-- Matches the SDL splash background in src/splash/splash_screen.cpp. -->
+    <color name="splash_background">#565C64</color>
+</resources>

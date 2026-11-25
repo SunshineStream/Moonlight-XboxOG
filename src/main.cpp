@@ -327,6 +327,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
     0
 #else
     SDL_WINDOW_HIGH_PIXEL_DENSITY | (SDL_IsTV() ? SDL_WINDOW_FULLSCREEN : 0)
+  #if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+      | (SDL_IsTV() ? 0 : SDL_WINDOW_RESIZABLE)
+  #endif
 #endif
   );
   if (window == nullptr) {
