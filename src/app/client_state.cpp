@@ -30,7 +30,7 @@ namespace {
   constexpr const char *SETTINGS_CATEGORY_PREFIX = "settings-category:";
   constexpr std::array<char, 10> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr std::array<char, 10> ADD_HOST_PORT_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   constexpr std::array<int, 7> STREAM_FRAMERATE_OPTIONS {24, 30, 50, 60, 90, 100, 120};
   constexpr std::array<int, 20> STREAM_BITRATE_OPTIONS {1000, 2000, 3000, 5000, 8000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, 120000, 150000};
   constexpr std::array<app::VideoCodecSelection, 2> VIDEO_CODEC_OPTIONS {app::VideoCodecSelection::autoDetect, app::VideoCodecSelection::h264};
@@ -648,7 +648,7 @@ namespace {
         return {
           {"view-log-file", "View Log File", "Open the runtime log file viewer so you can inspect the most recent log lines without leaving the shell.", true},
           {"cycle-log-level", std::string("File Logging Level: ") + logging::to_string(state.settings.loggingLevel), "Choose the minimum severity written to moonlight.log. Lower levels produce more detail but increase disk writes.", true},
-#ifndef MOONLIGHT_PORTABLE
+#ifndef MOONLIGHT_NATIVE_CLIENT
           {"cycle-xemu-console-log-level", std::string("xemu Console Level: ") + logging::to_string(state.settings.xemuConsoleLoggingLevel), "Choose the minimum severity mirrored to xemu through DbgPrint() when you launch xemu with a serial console.", true},
 #endif
         };
@@ -675,14 +675,14 @@ namespace {
           {
             "cycle-video-codec",
             std::string("Video Codec: ") + video_codec_selection_label(state.settings.video.codec),
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
             "Automatically negotiate H.264, HEVC, or AV1, or request H.264 for compatibility.",
 #else
             "Prefer MPEG-2 for faster decoding, use standard automatic negotiation, or request a specific codec.",
 #endif
             true,
           },
-#ifndef MOONLIGHT_PORTABLE
+#ifndef MOONLIGHT_NATIVE_CLIENT
           {
             "toggle-gpu-presentation",
             std::string("Video Presentation: ") + (state.settings.video.gpuPresentation ? "GPU" : "Software"),
@@ -713,7 +713,7 @@ namespace {
           },
           {
             "toggle-play-audio-on-xbox",
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
             std::string("Play Audio Locally: ") + (state.settings.audio.playOnXbox ? "On" : "Off"),
             "Play stream audio on this device.",
 #else

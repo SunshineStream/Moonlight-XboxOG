@@ -24,7 +24,7 @@ namespace app {
     bool preferredVideoModeSet = false;  ///< True when preferredVideoMode contains a saved user preference.
     int streamFramerate = DEFAULT_STREAM_FRAMERATE;  ///< Preferred stream frame rate in frames per second.
     int streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;  ///< Preferred stream bitrate in kilobits per second.
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     app::VideoCodecSelection videoCodec = app::VideoCodecSelection::autoDetect;  ///< Preferred video codec for new streams.
 #else
     app::VideoCodecSelection videoCodec = app::VideoCodecSelection::preferMpeg2;  ///< Preferred video codec for new streams.

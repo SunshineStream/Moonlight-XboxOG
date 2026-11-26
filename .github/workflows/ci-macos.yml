@@ -9,6 +9,8 @@ on:
         required: true
         type: boolean
     secrets:
+      CODECOV_TOKEN:
+        required: false
       APPLE_ID:
         required: false
       APPLE_TEAM_ID:
@@ -46,11 +48,19 @@ jobs:
         with:
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
           p12-password: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD }}
-      - name: Build app
+      - name: Build client and tests
         run: |
           brew install pkgconf
-          cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON
-          cmake --build --preset client --parallel
+          cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DMOONLIGHT_TEST_COVERAGE=ON
+          cmake --build cmake-build-client --parallel
+
+      - name: Test and report coverage
+        uses: ./.github/actions/test-and-report
+        with:
+          build-dir: cmake-build-client
+          platform: macOS-${{ matrix.arch }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
       - name: Sign app
         if: inputs.publish_release
         env:

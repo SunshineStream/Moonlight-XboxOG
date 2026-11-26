@@ -2087,7 +2087,7 @@ namespace {
       case SDLK_KP_ENTER:
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::enter, shiftPressed);
       case SDLK_ESCAPE:
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
       case SDLK_AC_BACK:
 #endif
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::escape, shiftPressed);
@@ -5131,7 +5131,7 @@ namespace {
     return inputState->keyboardNavigation.press(event.scancode, translate_keyboard_key(event.key, event.mod), SDL_GetTicks());
   }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   /**
    * @brief Translate a mouse release while ignoring SDL's synthetic touch mouse events.
    * @param state Shell state and current input device.
@@ -5221,7 +5221,7 @@ namespace {
           set_shell_input_device(state, inputState, input::UiInputDevice::gamepad);
         }
         return translate_trigger_axis(event.gaxis, &inputState->leftTriggerPressed, &inputState->rightTriggerPressed);
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
       case SDL_EVENT_MOUSE_BUTTON_UP:
         return handle_shell_mouse_release(state, event.button, inputState);
       case SDL_EVENT_MOUSE_WHEEL:

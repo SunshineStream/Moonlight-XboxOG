@@ -28,7 +28,7 @@ function(moonlight_prepare_sdl3)
 endfunction()
 
 # Build the pinned SDL libraries with the portable client's platform backends.
-function(moonlight_prepare_portable_sdl3)
+function(moonlight_prepare_native_sdl3)
     # CMake and SDL define these option names.
     # cmake-lint: disable=C0103
     # Android's Java glue loads SDL3 by name. Native desktop and Apple targets link it statically.

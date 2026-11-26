@@ -107,7 +107,7 @@ namespace {
         return RS_CLK_FLAG;
       case SDL_GAMEPAD_BUTTON_GUIDE:
         return SPECIAL_FLAG;
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
       case SDL_GAMEPAD_BUTTON_MISC1:
         return MISC_FLAG;
       case SDL_GAMEPAD_BUTTON_TOUCHPAD:
@@ -126,7 +126,7 @@ namespace {
     }
   }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   /**
    * @brief Translate SDL battery state and send it to the host.
    * @param slot Host controller slot.
@@ -393,7 +393,7 @@ namespace streaming {
 
   StreamControls::StreamControls():
       router_([this](const input::StreamPacket &packet) {
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
         if (packet.type == input::StreamPacketType::arrival) {
           if (SDL_Gamepad *pad = SDL_GetGamepadFromID(router_.slot_device(packet.slot)); pad != nullptr) {
             send_gamepad_arrival(packet, pad);
@@ -412,7 +412,7 @@ namespace streaming {
       }) {
   }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   int StreamControls::gamepad_slot(SDL_JoystickID device) const {
     for (int slot = 0; slot < static_cast<int>(devices_.size()); ++slot) {
       if (router_.slot_device(slot) == device) {
@@ -554,7 +554,7 @@ namespace streaming {
     panel_.icons.clear();
     for (auto &device : devices_) {
       if (device.handle != nullptr) {
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
         SDL_RumbleGamepad(device.handle, 0, 0, 0);
         SDL_RumbleGamepadTriggers(device.handle, 0, 0, 0);
         SDL_SetGamepadSensorEnabled(device.handle, SDL_SENSOR_ACCEL, false);
@@ -605,7 +605,7 @@ namespace streaming {
 
   SDL_Gamepad *StreamControls::take_controller_for_shell() {
     poll();
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     // The shell retains the SDL handle, so closing the stream cannot clear feedback for it.
     for (auto &device : devices_) {
       if (device.handle != nullptr) {
@@ -1162,7 +1162,7 @@ namespace streaming {
   }
 
   bool StreamControls::EventHandler::handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     if (active && controls_.focused_ && !controls_.visible()) {
       controls_.forward_gamepad_event(event);
     }
@@ -1227,7 +1227,7 @@ namespace streaming {
         controls_.focused_ = true;
         controls_.router_.set_captured(controls_.visible());
         break;
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
       case SDL_EVENT_DID_ENTER_BACKGROUND:
 #endif
       case SDL_EVENT_QUIT:

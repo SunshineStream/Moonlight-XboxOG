@@ -8,7 +8,7 @@
 // standard includes
 #include <algorithm>
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   #include <SDL3/SDL.h>
 #endif
 
@@ -17,7 +17,7 @@
 
 namespace ui {
   std::string build_asset_path(const std::string &relativePath) {
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     std::string path = relativePath;
     std::replace(path.begin(), path.end(), '\\', '/');
   #ifdef __ANDROID__

@@ -56,8 +56,13 @@ endif()
 #
 option(BUILD_DOCS "Build documentation" ON)
 option(BUILD_TESTS "Build host-native unit tests" ON)
-option(BUILD_XBOX "Build the Xbox target through an internal child configure" ON)
-option(BUILD_CLIENT "Build the shared SDL client for the selected non-nxdk target" OFF)
+option(BUILD_XBOX "Build the original Xbox client through an internal nxdk configure" OFF)
+# Honor callers and build caches created before BUILD_NATIVE_CLIENT was introduced.
+set(_native_client_default ON)
+if(DEFINED BUILD_CLIENT)
+    set(_native_client_default "${BUILD_CLIENT}")
+endif()
+option(BUILD_NATIVE_CLIENT "Build the desktop or mobile client for the selected target" ${_native_client_default})
 option(MOONLIGHT_FORCE_NXDK_DISTCLEAN "Force a fresh nxdk distclean during configure" OFF)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sources.cmake")
@@ -68,11 +73,11 @@ if(BUILD_DOCS)
     dockle_add_docs(docs TARGETS api)
 endif()
 
-if(BUILD_CLIENT AND CMAKE_CROSSCOMPILING)
+if(BUILD_NATIVE_CLIENT AND CMAKE_CROSSCOMPILING)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
-if(BUILD_TESTS OR BUILD_CLIENT)
+if(BUILD_TESTS OR BUILD_NATIVE_CLIENT)
     moonlight_prepare_common_dependencies()
 endif()
 
@@ -81,7 +86,7 @@ if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-if(BUILD_CLIENT)
+if(BUILD_NATIVE_CLIENT)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/client-build.cmake")
 endif()
 

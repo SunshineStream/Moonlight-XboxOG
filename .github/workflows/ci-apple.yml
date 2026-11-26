@@ -9,6 +9,8 @@ on:
         required: true
         type: boolean
     secrets:
+      CODECOV_TOKEN:
+        required: false
       APPLE_ID:
         required: false
       APPLE_TEAM_ID:
@@ -37,6 +39,7 @@ jobs:
     with:
       publish_release: ${{ inputs.publish_release }}
     secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_NOTARYTOOL_PASSWORD: ${{ secrets.APPLE_NOTARYTOOL_PASSWORD }}

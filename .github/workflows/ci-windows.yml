@@ -44,7 +44,6 @@ jobs:
             runner: windows-11-arm
             msystem: CLANGARM64
             packages: mingw-w64-clang-aarch64
-            runtime: mingw-w64-clang-aarch64-compiler-rt
     defaults:
       run:
         shell: msys2 {0}
@@ -57,15 +56,35 @@ jobs:
           msystem: ${{ matrix.msystem }}
           update: true
           install: >-
-            git make patch perl
-            ${{ matrix.packages }}-clang ${{ matrix.packages }}-cmake ${{ matrix.packages }}-lld
-            ${{ matrix.packages }}-ninja ${{ matrix.packages }}-pkgconf ${{ matrix.runtime }}
-      - name: Build and stage
+            git
+            make
+            patch
+            perl
+            ${{ matrix.packages }}-clang
+            ${{ matrix.packages }}-cmake
+            ${{ matrix.packages }}-compiler-rt
+            ${{ matrix.packages }}-lld
+            ${{ matrix.packages }}-llvm-tools
+            ${{ matrix.packages }}-ninja
+            ${{ matrix.packages }}-pkgconf
+            ${{ matrix.runtime }}
+
+      - name: Build client and tests
         run: |
           # Use Ninja in CI to avoid missing MinGW Makefiles dependency stamps on clean builds.
           cmake --preset client -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-            -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON
-          cmake --build --preset client --parallel
+            -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DMOONLIGHT_TEST_COVERAGE=ON
+          cmake --build cmake-build-client --parallel
+
+      - name: Test and report coverage
+        uses: ./.github/actions/test-and-report
+        with:
+          build-dir: cmake-build-client
+          platform: Windows-${{ matrix.arch }}
+          test-shell: 'msys2 {0}'
+
+      - name: Stage Windows client
+        run: |
           cmake --install cmake-build-client --prefix "$PWD/artifacts" --strip
       - name: Package Windows client
         if: '!inputs.publish_release'
@@ -116,7 +135,7 @@ jobs:
         run: |
           for arch in AMD64 ARM64; do
             (
-              cd "Windows-signing-input-${arch}"
+              cd "Windows-signing-input-${arch}" || exit
               cmake -E tar c "../Moonlight-Windows-${arch}.zip" --format=zip Moonlight.exe assets
             )
           done

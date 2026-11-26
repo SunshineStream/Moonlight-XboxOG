@@ -46,7 +46,7 @@ namespace streaming {
    */
   class FfmpegStreamBackend {
   public:
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     /**
      * @brief Query the portable FFmpeg decoders available to streaming.
      * @return Supported 8-bit Moonlight video format flags.
@@ -250,7 +250,7 @@ namespace streaming {
      * @return Moonlight decoder status code.
      */
     int decode_video_decode_unit(PDECODE_UNIT decodeUnit);
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     /**
      * @brief Reopen the negotiated codec in software after a hardware failure.
      */
@@ -298,7 +298,7 @@ namespace streaming {
      */
     struct VideoState {  // NOSONAR(cpp:S1820) Owned video pipeline state intentionally groups FFmpeg, SDL, queue, and metric lifetimes.
       AVCodecContext *codecContext = nullptr;
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
       int hardwareFormat = -1;  ///< FFmpeg pixel format returned by the hardware format callback.
       const AVCodec *softwareFallback = nullptr;  ///< Software implementation of the negotiated hardware codec.
 #endif

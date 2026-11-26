@@ -5,7 +5,7 @@
     width="256"
   />
   <h1 align="center">Moonlight</h1>
-  <h4 align="center">Game streaming client for the original Xbox, desktop, mobile, and TV.</h4>
+  <h4 align="center">Moonlight game streaming client for desktop, Android, iOS/tvOS and the original Xbox.</h4>
 </div>
 
 <div align="center">
@@ -17,12 +17,95 @@
 
 # Overview
 
+Moonlight streams games from a computer running Sunshine. Select a PC to pair or open its app
+library. Use a controller, keyboard, or touch navigation where the client supports it.
+
+- [Desktop](#desktop) (Windows, Linux, and macOS)
+- [Android](#android) (phones and Android TV)
+- [iOS and tvOS](#ios-and-tvos)
+- [Original Xbox](#original-xbox)
+
+## Desktop
+
+<details>
+<summary>Windows screenshot</summary>
+
+![Moonlight startup on Windows](./docs/images/screenshots/windows-splash.png)
+
+</details>
+
+The desktop and mobile builds use the SDL3 target `moonlight_client`, with per-user storage and
+stream profiles up to 3840×2160 at 120 FPS. Auto codec selection negotiates H.264, HEVC, or AV1 in SDR
+according to the host and available FFmpeg decoders. FFmpeg can use D3D11VA or DXVA2 on Windows,
+VA-API or CUDA on Linux, VideoToolbox on Apple platforms, and MediaCodec on Android when the
+target build and device provide the decoder. Hardware frames are copied into the SDL presentation
+path.
+
+SDL3 supports mapped gamepads and host-driven rumble, motion, touchpad, battery, and LED features
+when the device exposes them. Its Steam Controller 2 backport exposes digital trigger clicks and
+accepts the controller's haptic output reports through the SDL effect API. TV remotes use
+directional navigation. A touch swipe moves focus, a tap chooses the focused item, and a hold
+opens its actions. Hold for at least a second to go back.
+To connect from these builds, enter the Sunshine PC's IPv4 address in **Add Host**.
+
+On desktop, drag the window edges to resize or use the system maximize control. Menus reflow to
+fit the window, and streamed video keeps its aspect ratio. Press **F11** in the menus or
+**Ctrl+Alt+Shift+X** during a stream to toggle borderless fullscreen.
+
+### Windows
+
+In CLion, enable the **SDL client (UCRT64)** CMake profile and select **Windows Client**
+to build and launch `moonlight_client`. From the UCRT64 shell, use `client-ucrt64`.
+The preset downloads the pinned FFmpeg package during configure.
+
+```bash
+cmake --preset client-ucrt64
+cmake --build --preset client-ucrt64 --parallel
+```
+
+The release workflow signs the Windows executable with Azure Artifact Signing.
+
+### Linux and macOS
+
+Use `client` and enable the prebuilt package if you want to use it.
+
+```bash
+cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON
+cmake --build --preset client --parallel
+```
+
+The prebuilt option downloads a LizardByte/build-deps archive pinned in `package-lock.cmake` and
+verifies it against the release asset checksum. Set `FFMPEG_PREPARED_BINARIES` to an extracted target
+FFmpeg prefix to build offline with that artifact.
+Linux distribution uses `packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.yml`. The Flatpak
+grants device access so SDL can use raw HID for advanced controller features.
+The release workflow signs, notarizes, and staples the macOS DMG.
+
+## Android
+
+<details>
+<summary>Android screenshot</summary>
+
+![Moonlight settings in an Android emulator](./docs/images/screenshots/android-portrait.png)
+
+</details>
+
+The APK includes Android and Android TV launcher entries. See [Testing on Android and Android TV](docs/test-android.md)
+for building, installing on hardware, and running in Android Studio.
+
+## iOS and tvOS
+
+iOS and tvOS use separate SDKs and dependency builds. See [Testing on iPhone and Apple TV](docs/test-apple-mobile.md)
+for Xcode setup, development signing, and simulator builds.
+
+## Original Xbox
+
+<details>
+<summary>Original Xbox screenshots from xemu</summary>
+
 ![Splash Screen](./docs/images/screenshots/01-splash.png)
 ![Hosts Screen](./docs/images/screenshots/02-hosts.png)
 ![Apps Screen](./docs/images/screenshots/03-apps.png)
-
-<details>
-<summary>Settings, host setup and dialogs</summary>
 
 ![Settings](./docs/images/screenshots/04-settings.png)
 ![Add Host](./docs/images/screenshots/05-add-host.png)
@@ -32,6 +115,9 @@
 ![Successful Connection Test](./docs/images/screenshots/09-connection-success.png)
 ![Failed Connection Test](./docs/images/screenshots/10-connection-failed.png)
 ![Notification Stack](./docs/images/screenshots/11-notifications.png)
+![Stream controls](./docs/images/screenshots/12-stream-controls.png)
+![On-screen keyboard](./docs/images/screenshots/13-stream-keyboard.png)
+![Screenshot notification](./docs/images/screenshots/14-screenshot-notification.png)
 
 </details>
 
@@ -71,8 +157,7 @@ Navigation icons use [Lucide](https://lucide.dev/). CPM downloads the tagged sou
 Only the required SVGs and their license are packaged on the ISO.
 No network connection or JavaScript runtime is needed to display the icons on the console.
 
-
-## Video codec selection on the original Xbox
+### Video codec selection
 
 **Settings → Display → Video Codec** defaults to **Auto (Prefer MPEG-2)**. Moonlight tries MPEG-2
 when the host advertises it and uses standard automatic negotiation if it is unavailable or the
@@ -86,7 +171,7 @@ The preference is saved as `streaming.video_codec` in the settings file. The def
 `"prefer_mpeg2"`. Moonlight also reads the older `streaming.video_decoder` key for compatibility.
 `video_codec` takes precedence when both exist.
 
-## Video presentation
+### Video presentation
 
 **Settings → Display → Video Presentation** defaults to **GPU**, which uses NV2A color conversion and
 scaling with automatic software fallback. **Software** combines the decoded video and overlay on the
@@ -102,7 +187,7 @@ With 1080i enabled in the Xbox video settings, **Stream Resolution → 1920×108
 1920×1080 stream and uses native 1080i output. Moonlight uses a 16-bit RGB framebuffer in this mode
 to leave memory for the H.264 decoder.
 
-## Stream audio
+### Stream audio
 
 Choose **Settings → Audio → Audio Mode** before starting or resuming a stream. **Stereo** keeps
 left and right separate and is the default. **Mono** mixes the stereo stream locally and plays the
@@ -114,7 +199,7 @@ of `stereo` or `mono`.
 Saved choices take precedence. To check Xbox audio without a host, use the
 [standalone audio probe](experiments/README.md#audio-playback-probe).
 
-## Streaming controls and statistics
+### Streaming controls and statistics
 
 The default stream profile is **640×480 at 60 FPS and 3 Mbps**. Saved settings take precedence.
 Changing **Settings → Display → Stream Resolution** or **Stream Frame Rate** resets **Stream Bitrate**
@@ -137,8 +222,6 @@ The same shortcut returns to the wheels from the keyboard, logs or exit confirma
 | Left  | Keyboard | Mouse mode | View logs  | Exit                   |
 | Right | Guide    | Share      | Screenshot | Enable / disable stats |
 
-![Stream controls](./docs/images/screenshots/12-stream-controls.png)
-
 **Exit** opens a confirmation dialog: **A / Enter** disconnects, **X / Q** quits the host app and **B / Esc** cancels.
 **Disconnect** leaves the application running on the PC; select its pause-marked poster to resume.
 Its app action menu also offers **Quit app**. Quitting can lose unsaved progress.
@@ -151,8 +234,6 @@ Focus a shortcut to see its combination above the keys. **RT** moves the keyboar
 and bottom of the screen; **B** returns to the wheels. Keys use the host's US keyboard layout.
 When using a physical keyboard, use **Tab** to change page, **Shift** for one-shot Shift, **Caps Lock**
 to toggle Caps, **F2** to move the panel, **Space / Backspace** to send those keys, and **Esc** to return.
-
-![On-screen keyboard](./docs/images/screenshots/13-stream-keyboard.png)
 
 **View logs** shows live entries. Scroll upward to read older entries; return to the bottom to follow
 new entries. **Guide** and **Share** send their controller buttons to the PC; their behavior depends
@@ -170,8 +251,6 @@ and **B / Esc** to return. Use **X / Backspace / Delete** to delete the selected
 
 Screenshots save in the background. A popup shows progress, then the saved path or an error.
 The wheels close automatically after screenshot, Guide, Share, statistics and mouse-mode actions.
-
-![Screenshot notification](./docs/images/screenshots/14-screenshot-notification.png)
 
 Mouse mode uses the invoking controller's **left stick** for movement and **A / B** for left / right
 clicks. Disable mouse mode through the wheels to use that controller for gameplay again.
@@ -205,62 +284,9 @@ Video decoding runs on the CPU. Every stream summary reports GPU and software fr
 **SOFTWARE FALLBACK USED** includes the reason GPU presentation switched to software, even when
 Performance Stats is disabled.
 
-## Desktop, mobile, and TV client builds
+### Build the Xbox client
 
-The shared SDL3 client target is `moonlight_client`. It uses separate per-user storage and stream
-profiles up to 3840×2160 at 120 FPS. Auto codec selection negotiates H.264, HEVC, or AV1 in SDR
-according to the host and available FFmpeg decoders. FFmpeg can use D3D11VA or DXVA2 on Windows,
-VA-API or CUDA on Linux, VideoToolbox on Apple platforms, and MediaCodec on Android when the
-target build and device provide the decoder. Hardware frames are copied into the SDL presentation
-path.
-
-SDL3 supports mapped gamepads and host-driven rumble, motion, touchpad, battery, and LED features
-when the device exposes them. Its Steam Controller 2 backport exposes digital trigger clicks and
-accepts the controller's haptic output reports through the SDL effect API. TV remotes use
-directional navigation. A touch swipe moves focus, a tap chooses the focused item, and a hold
-opens its actions. Hold for at least a second to go back.
-To connect from these builds, enter the Sunshine PC's IPv4 address in **Add Host**.
-
-On desktop, drag the window edges to resize or use the system maximize control. Menus reflow to
-fit the window, and streamed video keeps its aspect ratio. Press **F11** in the menus or
-**Ctrl+Alt+Shift+X** during a stream to toggle borderless fullscreen.
-
-On Windows, enable the **SDL client (UCRT64)** CMake profile in CLion and select **Windows Client**
-to build and launch `moonlight_client`. From the UCRT64 shell, use `client-ucrt64`.
-The preset downloads the pinned FFmpeg package during configure.
-
-```bash
-cmake --preset client-ucrt64
-cmake --build --preset client-ucrt64 --parallel
-```
-
-On Linux or macOS, use `client` and enable the prebuilt package if you want to use it.
-
-```bash
-cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON
-cmake --build --preset client --parallel
-```
-
-The prebuilt option downloads a pinned, checksum-verified LizardByte/build-deps archive. Set
-`FFMPEG_PREPARED_BINARIES` to an extracted target FFmpeg prefix to build offline with that artifact.
-Linux distribution uses `packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.yml`. The Flatpak
-grants device access so SDL can use raw HID for advanced controller features.
-The release build workflow signs the Windows executable with Azure Artifact Signing and signs,
-notarizes, and staples the macOS DMG.
-
-#### Android
-
-The APK includes Android and Android TV launcher entries. See [Testing on Android and Android TV](docs/test-android.md)
-for building, installing on hardware, and running in Android Studio.
-
-#### iOS and Apple TV
-
-iOS and tvOS use separate SDKs and dependency builds. See [Testing on iPhone and Apple TV](docs/test-apple-mobile.md)
-for Xcode setup, development signing, and simulator builds.
-
-## 🛠️ Original Xbox build
-
-### Prerequisites
+#### Prerequisites
 
 1. Clone the repository with submodules, or update them after cloning.
 
@@ -270,7 +296,7 @@ for Xcode setup, development signing, and simulator builds.
 
 2. Install nxdk prerequisites.
 
-#### Windows
+##### Windows
 
 > [!NOTE]
 > Use the MSYS2 UCRT64 shell for Windows AMD64 and for building the original Xbox client on Windows.
@@ -305,7 +331,7 @@ dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
 pacman -S "${dependencies[@]}"
 ```
 
-#### Debian/Ubuntu Linux
+##### Debian/Ubuntu Linux
 
 ```bash
 nxdk_dependencies=(
@@ -329,7 +355,7 @@ dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
 apt install "${dependencies[@]}"
 ```
 
-#### macOS
+##### macOS
 
 ```bash
 nxdk_dependencies=(
@@ -348,7 +374,7 @@ dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
 brew install "${dependencies[@]}"
 ```
 
-### Configure
+#### Configure
 
 Configure the top-level project with the normal host toolchain. CMake uses the vendored `third-party/nxdk` checkout, copies its tracked sources and nested submodules into the build directory, bootstraps the required `nxdk` outputs there, builds the host-native tests with the standard compiler/linker, and drives the Xbox build through an internal child configure that reuses the stock `nxdk` toolchain.
 
@@ -369,13 +395,13 @@ Optional Xbox build settings:
 Pass these options when configuring. Existing build directories retain cached build options until
 explicitly reconfigured.
 
-### Build
+#### Build
 
 ```bash
 cmake --build cmake-build-release
 ```
 
-### Combined script
+#### Combined script
 
 This script takes care of everything, except installing the prerequisites.
 
@@ -401,38 +427,6 @@ build-ucrt64.bat
 ```bash
 ./build-ucrt64.sh
 ```
-
-### Host-native unit tests
-
-The Xbox executable cannot run directly on Windows, macOS, or Linux, so the top-level project builds `test_moonlight` natively while the Xbox binary is built by an internal child configure that uses the `nxdk` toolchain. Keep Xbox runtime code thin and move logic you want to test into platform-neutral sources that can be linked into `test_moonlight`.
-
-#### Windows via MSYS2 UCRT64
-
-From `cmd.exe` in the project root, open a UCRT64 shell using the local MSYS2 installation:
-
-```bat
-call scripts\find-msys2.cmd && "%MOONLIGHT_MSYS2_SHELL%" -defterm -here -no-start -ucrt64
-```
-
-Configure, build, and run the tests from the UCRT64 shell:
-
-```bash
-cmake -S . -B cmake-build-host-tests-ucrt64 -G "MinGW Makefiles" \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/host-ucrt64-clang.cmake \
-  -DBUILD_DOCS=OFF -DBUILD_TESTS=ON -DBUILD_XBOX=OFF -DCMAKE_BUILD_TYPE=Debug
-cmake --build cmake-build-host-tests-ucrt64 --parallel
-ctest --test-dir cmake-build-host-tests-ucrt64 --output-on-failure
-```
-
-#### Linux or macOS
-
-```bash
-cmake -S . -B cmake-build-host-tests -DBUILD_TESTS=ON -DBUILD_XBOX=OFF -DBUILD_DOCS=OFF
-cmake --build cmake-build-host-tests --target test_moonlight
-ctest --test-dir cmake-build-host-tests --output-on-failure
-```
-
-Coverage should come from this host-native test build instead of the cross-compiled Xbox build.
 
 ### Dependency compatibility on Xbox
 
@@ -508,6 +502,40 @@ scripts\setup-xemu.cmd --skip-support-files
 > To expose widescreen and HDTV modes in xemu, use
 > [Xbox EEPROM Editor](https://github.com/Ernegien/XboxEepromEditor). 1080i streaming is demanding
 > on the emulated CPU, especially when using software presentation.
+
+## Host-native unit tests
+
+The Xbox executable cannot run directly on Windows, macOS, or Linux, so the top-level project builds `test_moonlight` natively while the Xbox binary is built by an internal child configure that uses the `nxdk` toolchain. Keep Xbox runtime code thin and move logic you want to test into platform-neutral sources that can be linked into `test_moonlight`.
+
+### Windows via MSYS2 UCRT64
+
+From `cmd.exe` in the project root, open a UCRT64 shell using the local MSYS2 installation:
+
+```bat
+call scripts\find-msys2.cmd && "%MOONLIGHT_MSYS2_SHELL%" -defterm -here -no-start -ucrt64
+```
+
+Configure, build, and run the tests from the UCRT64 shell:
+
+```bash
+cmake -S . -B cmake-build-host-tests-ucrt64 -G "MinGW Makefiles" \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/host-ucrt64-clang.cmake \
+  -DBUILD_DOCS=OFF -DBUILD_TESTS=ON -DBUILD_XBOX=OFF -DBUILD_NATIVE_CLIENT=OFF \
+  -DCMAKE_BUILD_TYPE=Debug
+cmake --build cmake-build-host-tests-ucrt64 --parallel
+ctest --test-dir cmake-build-host-tests-ucrt64 --output-on-failure
+```
+
+### Linux or macOS
+
+```bash
+cmake -S . -B cmake-build-host-tests \
+  -DBUILD_TESTS=ON -DBUILD_XBOX=OFF -DBUILD_NATIVE_CLIENT=OFF -DBUILD_DOCS=OFF
+cmake --build cmake-build-host-tests --target test_moonlight
+ctest --test-dir cmake-build-host-tests --output-on-failure
+```
+
+Coverage should come from this host-native test build instead of the cross-compiled Xbox build.
 
 ## 📋 Todo
 

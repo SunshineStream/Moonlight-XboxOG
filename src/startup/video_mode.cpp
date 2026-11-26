@@ -11,7 +11,7 @@
 // standard includes
 #include <array>
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   #include <SDL3/SDL.h>
 #endif
 
@@ -107,7 +107,7 @@ namespace startup {
   }
 
   VIDEO_MODE choose_stream_output_mode(VIDEO_MODE streamVideoMode, const VIDEO_MODE &shellVideoMode) {
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     // The stream resolution is independent of the native window dimensions.
     (void) streamVideoMode;
     return shellVideoMode;
@@ -123,7 +123,7 @@ namespace startup {
   }
 
   VIDEO_MODE choose_stream_startup_mode(const VIDEO_MODE &streamOutputMode, const VIDEO_MODE &shellVideoMode) {
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     (void) streamOutputMode;
     return shellVideoMode;
 #else
@@ -137,7 +137,7 @@ namespace startup {
     for (const StreamResolutionPreset &preset : STREAM_RESOLUTION_PRESETS) {
       presets.push_back(make_stream_video_mode(preset, bpp, refresh));
     }
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     presets.push_back(make_stream_video_mode({2560, 1440}, bpp, refresh));
     presets.push_back(make_stream_video_mode({3840, 2160}, bpp, refresh));
 #endif
@@ -163,7 +163,7 @@ namespace startup {
     const int bpp = outputVideoMode.bpp > 0 ? outputVideoMode.bpp : 32;
     const int refresh = outputVideoMode.refresh > 0 ? outputVideoMode.refresh : 60;
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     return make_stream_video_mode({1920, 1080}, bpp, refresh);
 #else
     return make_stream_video_mode({640, 480}, bpp, refresh);
@@ -194,7 +194,7 @@ namespace startup {
   VideoModeSelection select_best_video_mode(int bpp, int refresh) {
     VideoModeSelection selection {};
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     const SDL_DisplayMode *display = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
     const int displayRefresh = display != nullptr && display->refresh_rate > 0 ? static_cast<int>(display->refresh_rate + 0.5f) : 60;
     selection.availableVideoModes = stream_resolution_presets(bpp, refresh > 0 ? refresh : displayRefresh);

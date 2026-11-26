@@ -14,7 +14,7 @@ elseif(WIN32)
     endif()
 endif()
 
-moonlight_prepare_portable_sdl3()
+moonlight_prepare_native_sdl3()
 moonlight_prepare_client_media()
 
 set(_client_sources ${MOONLIGHT_SOURCES})
@@ -65,7 +65,8 @@ else()
 endif()
 
 target_sources(moonlight_client PRIVATE "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg_memory.c")
-target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_PORTABLE TOML_EXCEPTIONS=0)
+# Select the desktop and mobile platform adapters in shared sources.
+target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_NATIVE_CLIENT TOML_EXCEPTIONS=0)
 if(WIN32 OR CMAKE_SYSTEM_NAME MATCHES "^(Darwin|Linux)$")
     target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_DESKTOP)
 endif()
@@ -134,5 +135,14 @@ elseif(NOT ANDROID)
         target_compile_definitions(moonlight_client PRIVATE
                 MOONLIGHT_INSTALLED_ASSETS="${CMAKE_INSTALL_FULL_DATADIR}/moonlight/assets")
         install(DIRECTORY "${_client_assets}/" DESTINATION "${CMAKE_INSTALL_DATADIR}/moonlight/assets")
+        set(_linux_app_id dev.lizardbyte.app.Moonlight)
+        set(_linux_metadata "${CMAKE_SOURCE_DIR}/packaging/linux/flatpak")
+        install(FILES "${_linux_metadata}/${_linux_app_id}.desktop"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+        install(FILES "${_linux_metadata}/${_linux_app_id}.metainfo.xml"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+        install(FILES "${CMAKE_SOURCE_DIR}/moonlight-logo.svg"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+                RENAME "${_linux_app_id}.svg")
     endif()
 endif()

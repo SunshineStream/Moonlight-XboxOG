@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#if defined(MOONLIGHT_PORTABLE) && !defined(_WIN32)
+#if defined(MOONLIGHT_NATIVE_CLIENT) && !defined(_WIN32)
   #include <csignal>
 #endif
 
@@ -120,7 +120,7 @@ namespace {
 
     if (!loadResult.fileFound) {
       logging::info("settings", "No persisted settings file found. Using defaults.");
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
       state.settings.streamBitrateKbps = app::default_stream_bitrate_kbps(1920, 1080, state.settings.streamFramerate);
 #endif
       return;
@@ -242,7 +242,7 @@ namespace {
  * @return Process exit code.
  */
 int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
-#if defined(MOONLIGHT_PORTABLE) && !defined(_WIN32)
+#if defined(MOONLIGHT_NATIVE_CLIENT) && !defined(_WIN32)
   // A host can close a TCP connection while OpenSSL is writing to it.
   std::signal(SIGPIPE, SIG_IGN);
 #endif

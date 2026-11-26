@@ -20,6 +20,10 @@ function(_moonlight_patched_source_dir out_var name revision patch)
     set(${out_var} "${FETCHCONTENT_BASE_DIR}/${name}-${revision_id}-${patch_id}-src" PARENT_SCOPE)
 endfunction()
 
+# Desktop FFmpeg SDK packages.
+# renovate: datasource=github-releases depName=LizardByte/build-deps versioning=semver
+set(MOONLIGHT_BUILD_DEPS_TAG v2026.1017.131201)
+
 # FFmpeg, cross-compiled with its upstream configure script.
 # renovate: datasource=github-tags depName=FFmpeg/FFmpeg versioning=semver-coerced
 # extractVersion=^n(?<version>\d+\.\d+(?:\.\d+)?)$

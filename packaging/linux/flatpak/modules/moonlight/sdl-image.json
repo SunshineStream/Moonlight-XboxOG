@@ -1,0 +1,20 @@
+[
+  {
+    "type": "git",
+    "x-renovate": {
+      "datasource": "github-tags",
+      "depName": "libsdl-org/SDL_image",
+      "versioning": "regex:^release-(?<major>[0-9]+)[.](?<minor>[0-9]+)[.](?<patch>[0-9]+)$"
+    },
+    "url": "https://github.com/libsdl-org/SDL_image.git",
+    "tag": "release-3.4.8",
+    "commit": "0891fc30428b518e7d018677bd6fa95c1a50f4c6",
+    "disable-submodules": true,
+    "dest": "deps/sdl-image",
+    "x-checker-data": {
+      "type": "git",
+      "tag-pattern": "^release-([0-9]+[.][0-9]+[.][0-9]+)$",
+      "version-scheme": "semantic"
+    }
+  }
+]

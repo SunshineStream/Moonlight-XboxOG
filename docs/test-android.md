@@ -7,19 +7,23 @@ The APK supports devices and emulator images that can run `arm64-v8a` apps on An
 
 To test a pull request, download and extract the `Moonlight-Android` artifact from its GitHub
 Actions run. The APK uses the release build variant and a test signing key for sideloading.
-Other CI runs upload `Moonlight-Android-unsigned`, which requires signing before installation.
+Push builds use the distribution key when configured. Without the key, they upload
+`Moonlight-Android-unsigned`, which requires signing before installation.
 You can install signed APKs from Windows, macOS, or Linux using
 [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools).
 
-To build from source on Linux or macOS, install Java 25, Android SDK Platform 35, Build Tools 36.0.0,
-NDK 28.2.13676358, and CMake 3.22.1. Also install Meson, Ninja, pkg-config, Perl, and Make. Set
-`ANDROID_HOME` to the Android SDK directory, then run these commands from the repository root.
+To build from source on Linux or macOS, install Java 25, CMake, Meson, Ninja, pkg-config, Perl,
+and Make. Install the SDK packages pinned in `packaging/android/gradle.properties`
+using Android Studio's SDK Manager or `sdkmanager`. Set `ANDROID_HOME` to the Android SDK directory,
+then run these commands from the repository root.
 
 ```bash
 git submodule update --init --recursive
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+ndk_version="$(sed -nE 's/^moonlightNdk=([0-9.]+).*/\1/p' packaging/android/gradle.properties)"
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ndk_version"
 prefix="$PWD/cmake-build-android-deps"
-bash scripts/build-client-deps.sh android "$prefix"
+cmake -S cmake/mobile-deps -B "$prefix" -G Ninja -DMOONLIGHT_MOBILE_TARGET=android
+cmake --build "$prefix"
 bash packaging/android/gradlew -p packaging/android :app:assembleRelease \
   -PmoonlightSignReleaseForTesting=true
 ```
@@ -29,20 +33,21 @@ For debugger builds, use `:app:assembleDebug` and omit `-PmoonlightSignReleaseFo
 
 ### Prepare dependencies on Windows
 
-In Android Studio's **SDK Manager**, install Android SDK Platform 35, Build Tools 36.0.0,
-NDK 28.2.13676358, and CMake 3.22.1. Open an **MSYS2 UCRT64** shell at the repository root
-and run:
+Install the pinned SDK packages from the same Gradle properties file. Open an **MSYS2 UCRT64**
+shell at the repository root and run:
 
 ```bash
 pacman -S --needed git make perl mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-meson \
-  mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf
+  mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf
 git submodule update --init --recursive
-export ANDROID_NDK_HOME="$(cygpath -u "$LOCALAPPDATA")/Android/Sdk/ndk/28.2.13676358"
-bash scripts/build-client-deps.sh android "$PWD/cmake-build-android-deps"
+ndk_version="$(sed -nE 's/^moonlightNdk=([0-9.]+).*/\1/p' packaging/android/gradle.properties)"
+export ANDROID_NDK_HOME="$(cygpath -u "$LOCALAPPDATA")/Android/Sdk/ndk/$ndk_version"
+cmake -S cmake/mobile-deps -B cmake-build-android-deps -G Ninja -DMOONLIGHT_MOBILE_TARGET=android
+cmake --build cmake-build-android-deps
 ```
 
-If your Android SDK is in a different directory, set `ANDROID_NDK_HOME` to its
-`ndk/28.2.13676358` directory. Repeat this setup after the Android dependency versions
+If your Android SDK is in a different directory, set `ANDROID_NDK_HOME` to its pinned NDK
+installation. Rebuild these dependencies after the Android dependency versions
 or SDL3 patch change. For day-to-day changes, use Android Studio's normal **Run** and **Debug**
 actions.
 
@@ -59,6 +64,27 @@ Play App Signing in Play Console, Google can generate the app signing key it use
 downloads. If you need APKs distributed outside Play to update the same installation, you can
 provide your own app signing key during setup and use it for direct distribution.
 [Android's app signing guide](https://developer.android.com/studio/publish/app-signing)
+
+### Set up CI signing
+
+1. Create the release keystore and alias in Android Studio and store a secure backup. Decide
+   whether the GitHub APK needs to share an app-signing certificate with Google Play before
+   enrolling the app in Play App Signing.
+2. In GitHub's **Settings > Secrets and variables > Actions**, add these repository secrets.
+
+   - `ANDROID_KEYSTORE_BASE64` contains the Base64 encoding of the keystore file.
+   - `ANDROID_KEYSTORE_PASSWORD` contains the keystore password.
+   - `ANDROID_KEY_ALIAS` contains the signing key alias.
+   - `ANDROID_KEY_PASSWORD` contains the signing key password.
+
+3. On pushes to the release branch, CI signs the APK and the Android App Bundle. Download the
+   APK from `Moonlight-Android` or the draft GitHub release. Download the signed `app-release.aab`
+   from the workflow's `Moonlight-Android-AppBundle` artifact for Play Console. Each workflow run
+   uses its run number as the Android version code. Pull requests use a test key.
+
+Google Play currently requires new phone apps to target API 36 or newer. Confirm the target SDK
+and test phone, TV, and streaming behavior before the first submission.
+[Google Play target API requirements](https://support.google.com/googleplay/android-developer/answer/11926878)
 
 ## Run on a physical device
 
@@ -114,7 +140,7 @@ file, usually `~/.gradle/gradle.properties`.
 
 ```properties
 moonlightAndroidDeps=/path/to/checkout/cmake-build-android-deps
-moonlightSdlSource=/path/to/checkout/cmake-build-android-deps/sources/sdl-release-3.4.18
+moonlightSdlSource=/path/to/prepared/SDL
 ```
 
 In Android Studio, open **Settings > Build, Execution, Deployment > Build Tools > Gradle**.

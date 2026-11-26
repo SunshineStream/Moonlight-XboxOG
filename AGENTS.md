@@ -52,7 +52,7 @@ validation limits that require an emulator or console.
 
 Run tests with `ctest --test-dir <build-directory> --output-on-failure` so every registered test executable
 is included. Native test executables, including `test_moonlight` and `test_pvideo_presenter`, are under the
-build directory's `tests/` folder. A host-only configuration can disable Xbox builds with `BUILD_XBOX=OFF`.
+build directory's `tests/` folder. For a tests-only configuration, set `BUILD_NATIVE_CLIENT=OFF` and `BUILD_XBOX=OFF`.
 
 Build-system changes require appropriate configuration, build and lint checks rather than dedicated
 build-system regression projects or fixtures. Documentation-only edits require a strict documentation

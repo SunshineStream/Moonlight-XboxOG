@@ -12,7 +12,7 @@
       "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/cmake-build-client",
       "cacheVariables": {
-        "BUILD_CLIENT": "ON",
+        "BUILD_NATIVE_CLIENT": "ON",
         "BUILD_XBOX": "OFF",
         "BUILD_DOCS": "OFF",
         "BUILD_TESTS": "OFF",
@@ -47,6 +47,7 @@
       },
       "cacheVariables": {
         "BUILD_DOCS": "ON",
+        "BUILD_NATIVE_CLIENT": "OFF",
         "BUILD_TESTS": "ON",
         "BUILD_XBOX": "ON",
         "CMAKE_DEPENDS_USE_COMPILER": "FALSE",

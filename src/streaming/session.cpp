@@ -87,7 +87,7 @@ namespace {
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_MILLISECONDS = 1500U;
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_COOLDOWN_MILLISECONDS = 2000U;
   constexpr int MIN_STREAM_FPS = 15;
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   constexpr int MAX_STREAM_FPS = 120;
   constexpr int MAX_STREAM_BITRATE_KBPS = 150000;
 #else
@@ -167,7 +167,7 @@ namespace {
     std::atomic<bool> connectionTerminated = false;
     std::atomic<bool> poorConnection = false;
     std::atomic<bool> stopRequested = false;
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     std::array<std::atomic<std::uint64_t>, 4> rumble {};  ///< Latest motor levels per host slot, with a pending marker.
     std::array<std::atomic<std::uint64_t>, 4> triggerRumble {};  ///< Latest trigger motor levels per host slot.
     std::array<std::array<std::atomic<std::uint32_t>, 2>, 4> motion {};  ///< Pending sensor rates per host slot.
@@ -899,7 +899,7 @@ namespace {
     context->streamConfiguration.packetSize = streamParameters.packetSize;
     context->streamConfiguration.streamingRemotely = streamParameters.streamingRemotely;
     context->streamConfiguration.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     int decoderFormats = streaming::FfmpegStreamBackend::available_video_formats();
     if (streamParameters.videoCodec == app::VideoCodecSelection::h264) {
       decoderFormats &= VIDEO_FORMAT_H264;
@@ -909,7 +909,7 @@ namespace {
     context->streamConfiguration.supportedVideoFormats = streaming::supported_video_formats(streamParameters.videoCodec, launchResult.serverCodecModeSupport);
 #endif
     context->streamConfiguration.clientRefreshRateX100 = select_client_refresh_rate_x100(outputVideoMode);
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     context->streamConfiguration.colorSpace = COLORSPACE_REC_709;
     context->streamConfiguration.encryptionFlags = ENCFLG_ALL;
 #else
@@ -952,7 +952,7 @@ namespace {
     logging::info("stream", "Streaming transport started");
   }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   /**
    * @brief Publish a host rumble request for the SDL event thread.
    * @param slot Host controller slot.
@@ -1136,7 +1136,7 @@ namespace {
     if (resources->controller.pump(resources->mediaBackend, resources->bodyFont, width, height, connectionState->connectionStarted.load(), resources->statisticsEnabled)) {
       request_stream_stop(connectionState);
     }
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     for (unsigned int slot = 0; slot < connectionState->rumble.size(); ++slot) {
       if (const auto effect = connectionState->rumble[slot].exchange(0); effect != 0) {
         resources->controller.rumble(slot, static_cast<std::uint16_t>(effect >> 16), static_cast<std::uint16_t>(effect), false);
@@ -1847,7 +1847,7 @@ namespace streaming {
     );
     resources.mediaBackend.initialize_callbacks(&startContext.videoCallbacks, &startContext.audioCallbacks);
     startContext.connectionCallbacks.stageStarting = on_stage_starting;
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     startContext.connectionCallbacks.rumble = on_controller_rumble<false>;
     startContext.connectionCallbacks.rumbleTriggers = on_controller_rumble<true>;
     startContext.connectionCallbacks.setMotionEventState = on_controller_motion;

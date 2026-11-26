@@ -87,11 +87,18 @@ case "${target}" in
       '--enable-decoder=h264_mediacodec,hevc_mediacodec,av1_mediacodec')
     sdl_tag="release-$(lock_value SDL3_VERSION)"
     sdl_src="${work_dir}/sdl-${sdl_tag}"
-    checkout https://github.com/libsdl-org/SDL.git "${sdl_tag}" "${sdl_src}"
-    sdl_patch="${source_root}/cmake/patches/sdl3-steam-controller-trigger-clicks-and-haptics.patch"
-    if ! git -C "${sdl_src}" apply --reverse --check "${sdl_patch}" 2>/dev/null; then
-      git -C "${sdl_src}" apply "${sdl_patch}"
+    if [[ ! -d "${sdl_src}" ]]; then
+      checkout https://github.com/libsdl-org/SDL.git "${sdl_tag}" "${sdl_src}"
     fi
+    sdl_patch="${source_root}/cmake/patches/sdl3-steam-controller-trigger-clicks-and-haptics.patch"
+    (
+      cd -- "${sdl_src}"
+      # Staged archives omit .git. Keep git apply from looking up the parent Moonlight checkout.
+      export GIT_CEILING_DIRECTORIES="${work_dir}"
+      if ! git apply --reverse --check "${sdl_patch}" 2>/dev/null; then
+        git apply "${sdl_patch}"
+      fi
+    )
     ;;
   ios|tvos|ios-simulator|tvos-simulator)
     case "${target}" in

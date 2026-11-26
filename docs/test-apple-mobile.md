@@ -34,9 +34,10 @@ signing_arg=-DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=YOUR_TEAM_ID
 
 prefix="$PWD/cmake-build-$target-deps"
 build_dir="cmake-build-$target"
-bash scripts/build-client-deps.sh "$target" "$prefix"
+cmake -S cmake/mobile-deps -B "$prefix" -G Ninja "-DMOONLIGHT_MOBILE_TARGET=$target"
+cmake --build "$prefix"
 cmake -S . -B "$build_dir" -G Xcode \
-  -DBUILD_CLIENT=ON -DBUILD_XBOX=OFF -DBUILD_TESTS=OFF -DBUILD_DOCS=OFF \
+  -DBUILD_NATIVE_CLIENT=ON -DBUILD_XBOX=OFF -DBUILD_TESTS=OFF -DBUILD_DOCS=OFF \
   -DCMAKE_XCODE_GENERATE_SCHEME=ON \
   "-DCMAKE_SYSTEM_NAME=$system" "-DCMAKE_OSX_SYSROOT=$sdk" \
   -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \

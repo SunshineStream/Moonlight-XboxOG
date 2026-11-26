@@ -181,7 +181,7 @@ namespace input {
     ControllerNavigationHoldState right {};  ///< Right repeat state.
   };
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   /**
    * @brief Origin and timing of the active shell touch gesture.
    */
@@ -214,7 +214,7 @@ namespace input {
     std::uint32_t leftTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
     std::uint32_t rightTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
     ControllerNavigationHolds controllerNavigation;  ///< Directional repeat state.
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     ShellTouchGesture touch;  ///< Active gesture used for shell navigation.
 #endif
 

@@ -22,22 +22,35 @@ jobs:
             target: tvos
             sdk: appletvsimulator
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           submodules: recursive
-      - name: Build simulator application
+
+      - name: Build simulator dependencies
+        env:
+          APPLE_TARGET: ${{ matrix.target }}
+        run: |
+          brew install pkgconf meson ninja
+          cmake -S cmake/mobile-deps -B "cmake-build-${APPLE_TARGET}-deps" -G Ninja \
+            "-DMOONLIGHT_MOBILE_TARGET=${APPLE_TARGET}-simulator"
+          cmake --build "cmake-build-${APPLE_TARGET}-deps"
+
+      - name: Configure simulator application
         env:
           APPLE_TARGET: ${{ matrix.target }}
           APPLE_SYSTEM: ${{ matrix.system }}
           APPLE_SDK: ${{ matrix.sdk }}
         run: |
-          brew install pkgconf meson ninja
           prefix="${PWD}/cmake-build-${APPLE_TARGET}-deps"
-          bash scripts/build-client-deps.sh "${APPLE_TARGET}-simulator" "${prefix}"
           cmake -S . -B "cmake-build-${APPLE_TARGET}" -G Xcode \
-            -DBUILD_CLIENT=ON -DBUILD_XBOX=OFF -DBUILD_TESTS=OFF -DBUILD_DOCS=OFF \
+            -DBUILD_NATIVE_CLIENT=ON -DBUILD_XBOX=OFF -DBUILD_TESTS=OFF -DBUILD_DOCS=OFF \
             "-DCMAKE_SYSTEM_NAME=${APPLE_SYSTEM}" "-DCMAKE_OSX_SYSROOT=${APPLE_SDK}" \
             -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             "-DOPENSSL_ROOT_DIR=${prefix}" "-DCMAKE_FIND_ROOT_PATH=${prefix}" \
             "-DFFMPEG_PREPARED_BINARIES=${prefix}" -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
-          cmake --build "cmake-build-${APPLE_TARGET}" --config Release --target moonlight_client --parallel
+
+      - name: Build simulator application
+        env:
+          APPLE_TARGET: ${{ matrix.target }}
+        run: cmake --build "cmake-build-${APPLE_TARGET}" --config Release --target moonlight_client --parallel

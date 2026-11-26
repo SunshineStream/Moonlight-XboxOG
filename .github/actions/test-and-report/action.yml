@@ -1,0 +1,160 @@
+---
+name: Test and report coverage
+description: Publish JUnit and LCOV reports from native tests
+inputs:
+  build-dir:
+    description: Build directory relative to the workspace
+    required: true
+  platform:
+    description: Platform name for the report artifact and Codecov flag
+    required: true
+  gcov-source-root:
+    description: Retained source directory when CTest and gcov already ran in the build sandbox
+    required: false
+  test-shell:
+    description: Shell with the build toolchain on its path
+    required: false
+    default: bash
+  codecov-token:
+    description: Codecov token for the project
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      if: runner.os != 'Windows'
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+      with:
+        python-version: '3.14'
+
+    - name: Set up uv
+      if: runner.os != 'Windows'
+      uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
+      with:
+        enable-cache: true
+        cache-dependency-glob: third-party/lizardbyte-common/uv.lock
+
+    - name: Install coverage tools
+      if: runner.os != 'Windows'
+      shell: ${{ inputs.test-shell }}
+      run: |
+        uv sync --project third-party/lizardbyte-common --locked --only-group test-c \
+          --no-python-downloads --no-install-project
+
+    - name: Run unit tests
+      id: tests
+      shell: ${{ inputs.test-shell }}
+      env:
+        CMAKE_BUILD: ${{ inputs.build-dir }}
+        GCOV_SOURCE_ROOT: ${{ inputs.gcov-source-root }}
+      run: |
+        if [[ -n "${GCOV_SOURCE_ROOT}" ]]; then
+          test -s "${CMAKE_BUILD}/tests/test_results.xml"
+          exit
+        fi
+        if [[ "${RUNNER_OS}" == Windows ]]; then
+          export LLVM_PROFILE_FILE
+          LLVM_PROFILE_FILE="$(cygpath -m "${PWD}/${CMAKE_BUILD}/tests/%m-%p.profraw")"
+        fi
+        ctest --test-dir "${CMAKE_BUILD}" --output-on-failure \
+          --output-junit "${PWD}/${CMAKE_BUILD}/tests/test_results.xml"
+
+    - name: Generate coverage report
+      id: coverage
+      if: ${{ !cancelled() && (steps.tests.outcome == 'success' || steps.tests.outcome == 'failure') }}
+      shell: ${{ inputs.test-shell }}
+      env:
+        CMAKE_BUILD: ${{ inputs.build-dir }}
+        GCOV_SOURCE_ROOT: ${{ inputs.gcov-source-root }}
+      run: |
+        set -euo pipefail
+        report="${PWD}/${CMAKE_BUILD}/coverage.info"
+        raw_report="${report}.raw"
+        coverage_root=
+        if [[ "${RUNNER_OS}" == Windows ]]; then
+          # CTest starts one process per test, which can exceed the Windows command line limit.
+          printf '%s\n' "${CMAKE_BUILD}"/tests/*.profraw > "${CMAKE_BUILD}/coverage-inputs.txt"
+          llvm-profdata merge -sparse -f "${CMAKE_BUILD}/coverage-inputs.txt" -o "${CMAKE_BUILD}/coverage.profdata"
+          binaries=("${CMAKE_BUILD}"/tests/test_*.exe)
+          objects=()
+          for binary in "${binaries[@]:1}"; do
+            objects+=("-object=${binary}")
+          done
+          mapfile -t sources < <(git ls-files src)
+          coverage_root="$(cygpath -am "${PWD}")/"
+          llvm-cov export -format=lcov -instr-profile="${CMAKE_BUILD}/coverage.profdata" \
+            "${binaries[0]}" "${objects[@]}" "${sources[@]}" > "${raw_report}"
+        else
+          gcov=gcov
+          if [[ "${RUNNER_OS}" == macOS ]]; then
+            gcov='xcrun llvm-cov gcov'
+          fi
+          gcov_args=(--gcov-executable "${gcov}")
+          if [[ -n "${GCOV_SOURCE_ROOT}" ]]; then
+            coverage_root="$(realpath "${GCOV_SOURCE_ROOT}")/"
+            gcov_args=(--gcov-use-existing-files)
+          fi
+          uv run --directory "${GCOV_SOURCE_ROOT:-.}" --project "${PWD}/third-party/lizardbyte-common" \
+            --locked --no-sync gcovr "${PWD}/${CMAKE_BUILD}" -r . "${gcov_args[@]}" --filter src \
+            --exclude-noncode-lines --exclude-throw-branches --exclude-unreachable-branches --lcov "${raw_report}"
+        fi
+        if [[ -n "${coverage_root}" ]]; then
+          # LCOV source paths must resolve from the repository checkout.
+          awk -v root="${coverage_root}" '
+            /^SF:/ {
+              source = substr($0, 4)
+              gsub(/\\/, "/", source)
+              sub(/\r$/, "", source)
+              if (index(tolower(source), tolower(root)) != 1) {
+                print "Coverage source is outside the source tree: " source > "/dev/stderr"
+                exit 1
+              }
+              $0 = "SF:" substr(source, length(root) + 1)
+            }
+            { print }
+          ' "${raw_report}" > "${report}.tmp"
+          grep -q '^SF:src/' "${report}.tmp"
+          mv "${report}.tmp" "${report}"
+        else
+          mv "${raw_report}" "${report}"
+        fi
+        test -s "${report}"
+
+    - name: Upload test and coverage artifacts
+      if: ${{ !cancelled() && (steps.tests.outcome == 'success' || steps.tests.outcome == 'failure') }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: Tests-${{ inputs.platform }}
+        path: |
+          ${{ inputs.build-dir }}/coverage.info
+          ${{ inputs.build-dir }}/tests/test_results.xml
+        include-hidden-files: ${{ inputs.gcov-source-root != '' }}
+        if-no-files-found: error
+
+    - name: Upload coverage to Codecov
+      if: >-
+        ${{ !cancelled() && runner.os != 'Windows' && steps.coverage.outcome == 'success' &&
+        startsWith(github.repository, 'SunshineStream/') }}
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+      with:
+        disable_search: true
+        fail_ci_if_error: true
+        files: ${{ inputs.build-dir }}/coverage.info
+        flags: ${{ inputs.platform }}
+        report_type: coverage
+        token: ${{ inputs.codecov-token }}
+
+    - name: Upload test results to Codecov
+      if: >-
+        ${{ !cancelled() && runner.os != 'Windows' &&
+        (steps.tests.outcome == 'success' || steps.tests.outcome == 'failure') &&
+        startsWith(github.repository, 'SunshineStream/') }}
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+      with:
+        disable_search: true
+        fail_ci_if_error: true
+        files: ${{ inputs.build-dir }}/tests/test_results.xml
+        flags: ${{ inputs.platform }}
+        report_type: test_results
+        token: ${{ inputs.codecov-token }}

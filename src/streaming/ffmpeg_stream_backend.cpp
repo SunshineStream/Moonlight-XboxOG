@@ -20,7 +20,7 @@
 // lib includes
 extern "C" {
 #include <libavcodec/avcodec.h>
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   #include <libavutil/hwcontext.h>
 #endif
 #include <libavutil/cpu.h>
@@ -213,7 +213,7 @@ namespace {
       selection->displayName = "H.264";
       return true;
     }
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     if ((videoFormat & VIDEO_FORMAT_H265) != 0) {
       *selection = {AV_CODEC_ID_HEVC, "HEVC"};
       return true;
@@ -227,7 +227,7 @@ namespace {
     return false;
   }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   /**
    * @brief Find an FFmpeg software decoder for a portable format.
    * @param id FFmpeg codec ID.
@@ -537,7 +537,7 @@ extern "C" std::size_t moonlight_screenshot_file_write(void *context, const void
 }
 
 namespace streaming {
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   int FfmpegStreamBackend::available_video_formats() {
     int formats = 0;
     for (const int format : {VIDEO_FORMAT_H264, VIDEO_FORMAT_H265, VIDEO_FORMAT_AV1_MAIN8}) {
@@ -817,7 +817,7 @@ namespace streaming {
       return -1;
     }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     const AVCodec *softwareCodec = find_software_decoder(codecSelection.codecId);
     const AVCodec *mediaCodec = find_mediacodec_decoder(codecSelection.codecId);
     const AVCodec *nativeCodec = codecSelection.codecId == AV_CODEC_ID_AV1 ? avcodec_find_decoder_by_name("av1") : softwareCodec;
@@ -853,7 +853,7 @@ namespace streaming {
     video_.codecContext->skip_loop_filter = AVDISCARD_ALL;
     video_.codecContext->skip_idct = AVDISCARD_NONREF;
 #endif
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     AVPixelFormat hardwareFormat = AV_PIX_FMT_NONE;
     const char *hardware = mediaCodec != nullptr ? "MediaCodec" : attach_hardware_decoder(*video_.codecContext, *codec, hardwareFormat);
     if (hardwareFormat != AV_PIX_FMT_NONE) {
@@ -881,7 +881,7 @@ namespace streaming {
       return openResult;
     }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     if (hardware != nullptr) {
       video_.softwareFallback = softwareCodec;
       logging::info("stream", std::string("Opened FFmpeg ") + video_.codecName + " with " + hardware + " acceleration");
@@ -892,7 +892,7 @@ namespace streaming {
     return 0;
   }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
   void FfmpegStreamBackend::fallback_to_software_decoder() {
     const auto *codec = std::exchange(video_.softwareFallback, nullptr);
     if (codec == nullptr) {
@@ -967,7 +967,7 @@ namespace streaming {
     video_.renderedFrameVersion = 0;
     video_.publishedFrameVersion.store(0);
     video_.codecName = "video";
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
     video_.softwareFallback = nullptr;
 #endif
     video_.decoderStopRequested.store(false);
@@ -1109,7 +1109,7 @@ namespace streaming {
       }
       if (receiveResult < 0) {
         logging::warn("stream", std::string("avcodec_receive_frame failed for ") + video_.codecName + ": " + describe_ffmpeg_error(receiveResult));
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
         if (receiveResult == AVERROR_EXTERNAL || receiveResult == AVERROR(EIO) || receiveResult == AVERROR(ENOSYS)) {
           fallback_to_software_decoder();
         }
@@ -1117,7 +1117,7 @@ namespace streaming {
         return receiveResult;
       }
 
-#ifdef MOONLIGHT_PORTABLE
+#ifdef MOONLIGHT_NATIVE_CLIENT
       if (const int transfer = read_hardware_frame(*video_.decodedFrame, *video_.convertedFrame); transfer < 0) {
         fallback_to_software_decoder();
         return transfer;

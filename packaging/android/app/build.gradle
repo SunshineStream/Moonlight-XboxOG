@@ -25,6 +25,16 @@ abstract class StageMoonlightAssets extends DefaultTask {
 }
 
 def sourceRoot = rootProject.file('../..')
+def testSigning = providers.gradleProperty('moonlightSignReleaseForTesting').getOrElse('false').toBoolean()
+def releaseSigning = [
+    keystore: providers.environmentVariable('ANDROID_KEYSTORE').getOrNull(),
+    storePassword: providers.environmentVariable('ANDROID_KEYSTORE_PASSWORD').getOrNull(),
+    keyAlias: providers.environmentVariable('ANDROID_KEY_ALIAS').getOrNull(),
+    keyPassword: providers.environmentVariable('ANDROID_KEY_PASSWORD').getOrNull()
+]
+if (releaseSigning.values().any { it } && !releaseSigning.values().every { it }) {
+    throw new GradleException('Set all four Android release signing environment variables.')
+}
 def depsRoot = providers.gradleProperty('moonlightAndroidDeps').map { rootProject.file(it) }
     .getOrElse(new File(sourceRoot, 'cmake-build-android-deps'))
 def sdlSource = providers.gradleProperty('moonlightSdlSource').map { rootProject.file(it) }.getOrNull()
@@ -46,16 +56,16 @@ if (!new File(depsRoot, 'lib/pkgconfig/libavcodec.pc').isFile() ||
 }
 android {
     namespace = 'dev.lizardbyte.app.moonlight'
-    compileSdk = 35
-    buildToolsVersion = '36.0.0'
+    compileSdk = providers.gradleProperty('moonlightCompileSdk').get().toInteger()
+    buildToolsVersion = providers.gradleProperty('moonlightBuildTools').get()
     enableKotlin = false
-    ndkVersion = '28.2.13676358'
+    ndkVersion = providers.gradleProperty('moonlightNdk').get()
 
     defaultConfig {
         applicationId = 'dev.lizardbyte.app.moonlight'
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = providers.gradleProperty('moonlightVersionCode').getOrElse('1').toInteger()
         versionName = '0.1.0'
 
         ndk {
@@ -71,11 +81,24 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseSigning.keystore && !testSigning) {
+            distribution {
+                storeFile = file(releaseSigning.keystore)
+                storePassword = releaseSigning.storePassword
+                keyAlias = releaseSigning.keyAlias
+                keyPassword = releaseSigning.keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             // CI and local sideloading can opt into test signing for the release variant.
-            if (providers.gradleProperty('moonlightSignReleaseForTesting').getOrElse('false').toBoolean()) {
+            if (testSigning) {
                 signingConfig = signingConfigs.debug
+            } else if (releaseSigning.keystore) {
+                signingConfig = signingConfigs.distribution
             }
         }
     }
@@ -84,7 +107,7 @@ android {
         path = new File(sourceRoot, 'CMakeLists.txt')
         // Keep CMake's nested compiler checks within Windows path limits.
         buildStagingDirectory = new File(sourceRoot, 'cmake-build-android')
-        version = '3.22.1'
+        version = providers.gradleProperty('moonlightCmake').get()
     }
 
     sourceSets.main {

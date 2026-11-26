@@ -4,7 +4,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--build-dir <dir> | <dir>] [--clean|clean] [--distclean|distclean]"
+  echo "Usage: $0 [--build-dir <dir> | <dir>] [--clean|clean] [--distclean|distclean] [--coverage]"
   return 0
 }
 
@@ -15,6 +15,7 @@ case "${HOST_SYSTEM}" in
   *) BUILD_DIR="cmake-build-release" ;;
 esac
 CLEAN_BUILD=0
+ENABLE_TEST_COVERAGE=0
 POSITIONAL_BUILD_DIR_SET=0
 
 while [[ "$#" -gt 0 ]]; do
@@ -34,6 +35,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --distclean|distclean)
       CLEAN_BUILD=1
+      shift
+      ;;
+    --coverage)
+      ENABLE_TEST_COVERAGE=1
       shift
       ;;
     -h|--help)
@@ -67,11 +72,16 @@ cmake_configure_args=(
   -S .
   -B "${BUILD_DIR_PATH}"
   -DBUILD_DOCS=OFF
+  -DBUILD_NATIVE_CLIENT=OFF
   -DBUILD_TESTS=ON
   -DBUILD_XBOX=ON
   -DCMAKE_DEPENDS_USE_COMPILER=FALSE
   -DCMAKE_BUILD_TYPE=Release
 )
+
+if [[ "${ENABLE_TEST_COVERAGE}" -eq 1 ]]; then
+  cmake_configure_args+=(-DMOONLIGHT_TEST_COVERAGE=ON)
+fi
 
 case "${HOST_SYSTEM}" in
   MINGW*|MSYS*|CYGWIN*)
