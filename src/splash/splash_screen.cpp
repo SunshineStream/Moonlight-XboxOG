@@ -231,15 +231,18 @@ namespace {
         const Uint32 background = SDL_MapSurfaceRGB(screenSurface, SPLASH_BACKGROUND.r, SPLASH_BACKGROUND.g, SPLASH_BACKGROUND.b);
         // Paint the full background once. Subsequent frames touch only the animated region.
         const SDL_Rect *dirty = lastFrame ? &logo.bounds : nullptr;
-        if (!SDL_FillSurfaceRect(screenSurface, dirty, background) || !draw_splash_logo(screenSurface, logo, frame) || !(dirty ? SDL_UpdateWindowSurfaceRects(window, dirty, 1) : SDL_UpdateWindowSurface(window))) {
+        const bool presented = SDL_FillSurfaceRect(screenSurface, dirty, background) &&
+                               draw_splash_logo(screenSurface, logo, frame) &&
+                               (dirty ? SDL_UpdateWindowSurfaceRects(window, dirty, 1) : SDL_UpdateWindowSurface(window));
+        if (presented && !surfaceRevealed) {
+          reveal_splash_surface();
+          surfaceRevealed = true;
+        }
+        if (presented) {
+          lastFrame = frame;
+        } else {
           printSDLErrorAndReboot();
           done = true;
-        } else {
-          if (!surfaceRevealed) {
-            reveal_splash_surface();
-            surfaceRevealed = true;
-          }
-          lastFrame = frame;
         }
       }
       done |= frame.finished;
