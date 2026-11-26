@@ -233,13 +233,14 @@ namespace {
         const SDL_Rect *dirty = lastFrame ? &logo.bounds : nullptr;
         if (!SDL_FillSurfaceRect(screenSurface, dirty, background) || !draw_splash_logo(screenSurface, logo, frame) || !(dirty ? SDL_UpdateWindowSurfaceRects(window, dirty, 1) : SDL_UpdateWindowSurface(window))) {
           printSDLErrorAndReboot();
-          break;
+          done = true;
+        } else {
+          if (!surfaceRevealed) {
+            reveal_splash_surface();
+            surfaceRevealed = true;
+          }
+          lastFrame = frame;
         }
-        if (!surfaceRevealed) {
-          reveal_splash_surface();
-          surfaceRevealed = true;
-        }
-        lastFrame = frame;
       }
       done |= frame.finished;
       if (!done) {

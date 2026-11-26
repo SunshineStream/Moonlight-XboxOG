@@ -9,7 +9,7 @@
 
 namespace ui {
 
-#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+#if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
   /**
    * @brief Restrict a handheld window to landscape for a stream or restore menu rotation.
    * @param window SDL window shared by the menu and stream.

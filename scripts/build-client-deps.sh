@@ -121,7 +121,9 @@ case "${target}" in
 esac
 
 jobs="${MOONLIGHT_BUILD_JOBS:-4}"
-meson_cc="${meson_cc:-'${cc}'}"
+if [[ -z "${meson_cc}" ]]; then
+  meson_cc="'${cc}'"
+fi
 cat > "${work_dir}/dav1d-cross.ini" <<EOF
 [binaries]
 c = ${meson_cc}
@@ -146,7 +148,7 @@ meson compile -C "${work_dir}/dav1d-build" -j "${jobs}"
 "${meson_install[@]}" -C "${work_dir}/dav1d-build"
 if [[ "${meson_prefix}" == / ]]; then
   # Override the target prefix in dav1d.pc before FFmpeg looks it up on the build host.
-  sed -i 's|^prefix=/$|prefix=${pcfiledir}/../..|' "${prefix}/lib/pkgconfig/dav1d.pc"
+  sed -i "s|^prefix=/\$|prefix=\${pcfiledir}/../..|" "${prefix}/lib/pkgconfig/dav1d.pc"
 fi
 
 # OpenSSL 4.1 generates this configuration header even with no-apps.
@@ -169,8 +171,8 @@ mkdir -p -- "${work_dir}/openssl-build/apps/include" "${work_dir}/ffmpeg-build"
 
 if [[ "${target}" == android ]]; then
   # The ARM64 libraries can be staged for Android Studio on a different host.
-  pkgconfig_prefix='${prefix}'
-  relative_prefix='prefix=${pcfiledir}/../..'
+  pkgconfig_prefix="\${prefix}"
+  relative_prefix="prefix=\${pcfiledir}/../.."
   build_prefixes=("${prefix}")
   if [[ "${meson_prefix}" == / ]]; then
     build_prefixes+=("$(cygpath -m "${prefix}")")

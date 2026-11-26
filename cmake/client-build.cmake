@@ -2,7 +2,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/client-media.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/sdl3.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/lucide.cmake")
 
-if(WIN32)
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # Enable both languages before SDL registers its Objective-C sources.
+    enable_language(OBJC OBJCXX)
+elseif(WIN32)
     enable_language(RC)
     if(MOONLIGHT_HOST_TOOL_DIR AND CMAKE_RC_COMPILER MATCHES "windres[.]exe$")
         # windres runs a separate preprocessor, and CLion's build may lack MSYS2 on PATH.
@@ -41,12 +44,13 @@ elseif(APPLE)
     set_source_files_properties("${_client_icon}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(moonlight_client PRIVATE "${_client_icon}")
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        set(MOONLIGHT_IOS_PORTRAIT_ORIENTATIONS
-                "<string>UIInterfaceOrientationPortrait</string>\n        <string>UIInterfaceOrientationPortraitUpsideDown</string>")
-        enable_language(OBJCXX)
+        string(CONCAT MOONLIGHT_IOS_PORTRAIT_ORIENTATIONS
+                "<string>UIInterfaceOrientationPortrait</string>\n"
+                "        <string>UIInterfaceOrientationPortraitUpsideDown</string>")
         set(_client_orientation "${CMAKE_SOURCE_DIR}/src/ui/mobile_orientation_ios.mm")
         set_source_files_properties("${_client_orientation}" PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         target_sources(moonlight_client PRIVATE "${_client_orientation}")
+        target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_IOS)
         target_link_libraries(moonlight_client PRIVATE "-framework UIKit")
     endif()
 elseif(WIN32)

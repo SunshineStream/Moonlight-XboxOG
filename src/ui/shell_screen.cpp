@@ -93,7 +93,7 @@ namespace {
   bool uses_responsive_shell([[maybe_unused]] SDL_Renderer *renderer) {
 #ifdef MOONLIGHT_DESKTOP
     return true;
-#elif defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+#elif defined(__ANDROID__) || defined(MOONLIGHT_IOS)
     return (SDL_GetWindowFlags(SDL_GetRenderWindow(renderer)) & SDL_WINDOW_RESIZABLE) != 0;
 #else
     return false;
@@ -4530,7 +4530,7 @@ namespace {
       return {};
     }
     if (uses_responsive_shell(renderer)) {
-#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+#if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
       // Mobile controls must fit between system bars and display cutouts.
       if (SDL_Rect safeArea {}; SDL_GetRenderSafeArea(renderer, &safeArea) && safeArea.w > 0 && safeArea.h > 0) {
         size.framebufferWidth = safeArea.w;
@@ -5758,7 +5758,7 @@ namespace {
     std::unique_ptr<SDL_Gamepad, decltype(&SDL_CloseGamepad)> retainedController(std::exchange(resources->controller, nullptr), &SDL_CloseGamepad);
     streaming::StreamSessionReport report;
     logging::info("stream", "Stream startup: menu preparation took " + std::to_string(SDL_GetTicks() - preparationStarted) + " ms");
-#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+#if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
     ui::set_mobile_streaming_orientation(window, true);
 #endif
     const bool streamStarted = streaming::run_stream_session(
@@ -5772,7 +5772,7 @@ namespace {
       },
       report
     );
-#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+#if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
     ui::set_mobile_streaming_orientation(window, false);
 #endif
     state.shell.statusMessage = std::move(report.message);
