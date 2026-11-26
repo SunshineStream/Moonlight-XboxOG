@@ -9,7 +9,7 @@ ctest --test-dir . --output-on-failure --no-tests=error \
 # are relative to the retained source tree so gcovr can read the reports on the host.
 build_dir="${PWD}"
 mapfile -d '' -t notes < <(find tests -name '*.gcno' -type f -print0)
-test "${#notes[@]}" -gt 0
+[[ "${#notes[@]}" -gt 0 ]]
 for note in "${notes[@]}"; do
   # Keep each object's reports separate so gcovr can merge coverage from shared headers.
   report_dir="${note%.gcno}.coverage"
