@@ -1,0 +1,18 @@
+---
+name: CI-Xbox
+permissions: {}
+
+on:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+jobs:
+  original:
+    name: Original
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-xbox-original.yml
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

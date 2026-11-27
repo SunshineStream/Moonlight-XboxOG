@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -133,6 +134,9 @@ namespace {
     bool initialized = false;
   };
 
+  /**
+   * @brief Keep socket support initialized until the owned HTTP socket closes.
+   */
   struct SocketGuard {
     SocketGuard() = default;
     SocketGuard(const SocketGuard &) = delete;
@@ -141,16 +145,43 @@ namespace {
     SocketGuard &operator=(SocketGuard &&) = delete;
 
     ~SocketGuard() {
-      if (handle != INVALID_SOCKET) {
+      if (handle_ != INVALID_SOCKET) {
 #if defined(_WIN32) && !defined(NXDK)
-        closesocket(handle);
+        closesocket(handle_);
 #else
-        close(handle);
+        close(handle_);
 #endif
       }
     }
 
-    SOCKET handle = INVALID_SOCKET;
+    /**
+     * @brief Open and take ownership of the TCP socket for this request.
+     * @return The socket handle, or INVALID_SOCKET on failure.
+     */
+    SOCKET open_tcp_socket() {
+      handle_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+      return handle_;
+    }
+
+    /**
+     * @brief Borrow the socket without transferring ownership.
+     * @return The current socket handle.
+     */
+    SOCKET handle() const {
+      return handle_;
+    }
+
+    /**
+     * @brief Check whether socket support was initialized for the request.
+     * @return True when the socket can be opened.
+     */
+    bool socket_support_available() const {
+      return winsock_.initialized;
+    }
+
+  private:
+    SOCKET handle_ = INVALID_SOCKET;  ///< Request socket closed by this guard.
+    WsaGuard winsock_;  ///< Released after the socket is closed in the destructor.
   };
 
   bool pairing_cancel_requested(const std::atomic<bool> *cancelRequested) {
@@ -424,6 +455,18 @@ namespace {
     return "&corever=1";
   }
 
+  /**
+   * @brief Serialize the first four IV bytes as the signed big-endian key ID used on the wire.
+   * @param ivHex Validated hex encoding of the 16-byte remote input IV.
+   * @return Decimal key ID used by the host to derive the audio encryption IV.
+   */
+  std::string stream_key_id(std::string_view ivHex) {
+    std::uint32_t prefix = 0;
+    std::from_chars(ivHex.data(), ivHex.data() + 8, prefix, 16);
+    const std::int64_t keyId = prefix < (1U << 31) ? prefix : static_cast<std::int64_t>(prefix) - (1LL << 32);
+    return std::to_string(keyId);
+  }
+
   std::string build_stream_resume_path(
     std::string_view uniqueId,
     const network::StreamLaunchConfiguration &configuration
@@ -431,7 +474,7 @@ namespace {
     const std::string queryPrefix = "/resume?uniqueid=" + std::string(uniqueId);
     std::string path = queryPrefix +
                        "&rikey=" + configuration.remoteInputAesKeyHex +
-                       "&rikeyid=" + configuration.remoteInputAesIvHex +
+                       "&rikeyid=" + stream_key_id(configuration.remoteInputAesIvHex) +
                        "&localAudioPlayMode=" + std::to_string(configuration.playAudioOnPc ? 1 : 0) +
                        "&surroundAudioInfo=" + std::to_string(surround_audio_info_from_audio_configuration(configuration.audioConfiguration));
     if (configuration.clientRefreshRateX100 > 0) {
@@ -451,7 +494,7 @@ namespace {
                        "&additionalStates=1" +
                        "&sops=1" +
                        "&rikey=" + configuration.remoteInputAesKeyHex +
-                       "&rikeyid=" + configuration.remoteInputAesIvHex +
+                       "&rikeyid=" + stream_key_id(configuration.remoteInputAesIvHex) +
                        "&localAudioPlayMode=" + std::to_string(configuration.playAudioOnPc ? 1 : 0) +
                        "&surroundAudioInfo=" + std::to_string(surround_audio_info_from_audio_configuration(configuration.audioConfiguration)) +
                        "&remoteControllersBitmap=1" +
@@ -1407,8 +1450,8 @@ namespace {
     }
 
     trace_pairing_phase("creating socket");
-    socketGuard->handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (socketGuard->handle == INVALID_SOCKET) {
+    const SOCKET socketHandle = socketGuard->open_tcp_socket();
+    if (socketHandle == INVALID_SOCKET) {
       return append_error(errorMessage, "Failed to create the host pairing socket");
     }
     trace_pairing_phase("socket created");
@@ -1419,7 +1462,7 @@ namespace {
     }
 
     trace_pairing_phase("setting non-blocking connect mode");
-    if (!set_socket_non_blocking(socketGuard->handle, true, errorMessage)) {
+    if (!set_socket_non_blocking(socketHandle, true, errorMessage)) {
       return false;
     }
 
@@ -1428,16 +1471,16 @@ namespace {
     static_assert(sizeof(connectAddress) == sizeof(socketAddress), "The socket API address must hold the full IPv4 address");
     // Preserve the complete IPv4 socket address in the type accepted by connect().
     std::memcpy(&connectAddress, &socketAddress, sizeof(connectAddress));
-    if (const int connectResult = connect(socketGuard->handle, &connectAddress, sizeof(connectAddress)); connectResult == SOCKET_ERROR) {
+    if (const int connectResult = connect(socketHandle, &connectAddress, sizeof(connectAddress)); connectResult == SOCKET_ERROR) {
       if (const int connectError = last_socket_error(); !is_connect_in_progress_error(connectError)) {
         return append_error(errorMessage, "Failed to connect to the host pairing endpoint at " + address + ":" + std::to_string(port) + " (socket error " + std::to_string(connectError) + ")");
       }
-      if (!wait_for_socket_connect_completion(socketGuard->handle, address, port, errorMessage, cancelRequested)) {
+      if (!wait_for_socket_connect_completion(socketHandle, address, port, errorMessage, cancelRequested)) {
         return false;
       }
     }
 
-    return finalize_connected_socket(socketGuard->handle, socketIoTimeoutMilliseconds, errorMessage);
+    return finalize_connected_socket(socketHandle, socketIoTimeoutMilliseconds, errorMessage);
   }
 
   bool recv_all_plain(SOCKET socketHandle, std::string *response, std::string *errorMessage, const std::atomic<bool> *cancelRequested = nullptr) {
@@ -1770,6 +1813,20 @@ namespace {
     return recv_all_ssl(ssl.get(), rawResponse, errorMessage, cancelRequested);
   }
 
+  /**
+   * @brief Fetch and parse an HTTP or HTTPS response from the host.
+   * @param address Host IPv4 address.
+   * @param port Port to connect to.
+   * @param pathAndQuery Request path and query string.
+   * @param useTls Whether to use TLS.
+   * @param tlsClientIdentity Optional client identity for TLS authentication.
+   * @param expectedTlsCertificatePem Expected server certificate, or empty when none is pinned.
+   * @param response Output for the parsed response.
+   * @param errorMessage Optional diagnostic output.
+   * @param cancelRequested Optional cancellation flag.
+   * @param socketIoTimeoutMilliseconds Timeout for socket reads and writes.
+   * @return True when an HTTP response was parsed successfully.
+   */
   bool http_get(  // NOSONAR(cpp:S107) HTTP transport keeps the request inputs explicit for callers
     const std::string &address,
     uint16_t port,
@@ -1811,11 +1868,11 @@ namespace {
     }
 
     trace_pairing_phase("http_get: socket initialization");
-    if (WsaGuard wsaGuard; !wsaGuard.initialized) {
+    SocketGuard socketGuard;
+    if (!socketGuard.socket_support_available()) {
       return append_error(errorMessage, "Failed to initialize socket support for host pairing");
     }
 
-    SocketGuard socketGuard;
     trace_pairing_phase("http_get: connect_socket");
     if (!connect_socket(address, port, &socketGuard, socketIoTimeoutMilliseconds, errorMessage, cancelRequested)) {
       return false;
@@ -1825,11 +1882,11 @@ namespace {
 
     std::string rawResponse;
     if (!useTls) {
-      if (!execute_plain_http_get(socketGuard.handle, request, &rawResponse, errorMessage, cancelRequested)) {
+      if (!execute_plain_http_get(socketGuard.handle(), request, &rawResponse, errorMessage, cancelRequested)) {
         return false;
       }
     } else {
-      if (!execute_tls_http_get(socketGuard.handle, request, tlsClientIdentity, expectedTlsCertificatePem, &rawResponse, errorMessage, cancelRequested)) {
+      if (!execute_tls_http_get(socketGuard.handle(), request, tlsClientIdentity, expectedTlsCertificatePem, &rawResponse, errorMessage, cancelRequested)) {
         return false;
       }
     }

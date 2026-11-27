@@ -1,6 +1,6 @@
 /**
  * @file src/main.cpp
- * @brief Runs the Moonlight Xbox startup sequence and main loop.
+ * @brief Runs the Moonlight startup sequence and main loop.
  */
 // standard includes
 #include <algorithm>
@@ -10,16 +10,25 @@
 #include <string>
 #include <vector>
 
+#if defined(MOONLIGHT_NATIVE_CLIENT) && !defined(_WIN32)
+  #include <csignal>
+#endif
+
 // lib includes
 #include <SDL3/SDL.h>
 
-// nxdk includes
-#include <hal/debug.h>
-#include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
+#ifdef NXDK
+  // nxdk includes
+  #include <hal/debug.h>
+  #include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
+#else
+  #include <SDL3/SDL_main.h>
+#endif
 
 // local includes
 #include "src/app/client_state.h"
 #include "src/app/settings_storage.h"
+#include "src/app/stream_bitrate.h"
 #include "src/logging/log_file.h"
 #include "src/logging/logger.h"
 #include "src/network/runtime_network.h"
@@ -81,7 +90,7 @@ namespace {
    * @param selection Detected Xbox output modes and preferred startup mode.
    * @param encoderSettings Active Xbox video encoder settings.
    */
-  void initialize_stream_video_mode_settings(app::ClientState &state, const startup::VideoModeSelection &selection, DWORD encoderSettings) {
+  void initialize_stream_video_mode_settings(app::ClientState &state, const startup::VideoModeSelection &selection, unsigned long encoderSettings) {
     state.settings.availableVideoModes = startup::filter_stream_video_modes_for_encoder_settings(selection.availableVideoModes, encoderSettings);
     if (state.settings.availableVideoModes.empty()) {
       state.settings.preferredVideoMode = {};
@@ -111,6 +120,9 @@ namespace {
 
     if (!loadResult.fileFound) {
       logging::info("settings", "No persisted settings file found. Using defaults.");
+#ifdef MOONLIGHT_NATIVE_CLIENT
+      state.settings.streamBitrateKbps = app::default_stream_bitrate_kbps(1920, 1080, state.settings.streamFramerate);
+#endif
       return;
     }
 
@@ -131,7 +143,9 @@ namespace {
   int report_startup_failure(const char *category, const std::string &message) {
     logging::error(category, message);
     logging::print_startup_console_line(logging::LogLevel::warning, category, "Holding failure screen for 5 seconds before exit.");
+#ifdef NXDK
     Sleep(5000);
+#endif
     return 1;
   }
 
@@ -154,6 +168,7 @@ namespace {
     }
   }
 
+#ifdef NXDK
   void debug_print_encoder_settings(DWORD encoderSettings) {
     std::array<char, 160> messageBuffer {};
     std::snprintf(
@@ -168,6 +183,7 @@ namespace {
     );
     logging::print_startup_console_line(logging::LogLevel::info, "video", messageBuffer.data());
   }
+#endif
 
   /**
    * @brief Load saved hosts and initialize networking, then publish the startup result.
@@ -221,9 +237,26 @@ namespace {
 /**
  * @brief Initialize the client runtime and enter the main shell loop.
  *
+ * @param argc Number of command-line arguments.
+ * @param argv Command-line arguments.
  * @return Process exit code.
  */
-int main() {
+int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+#if defined(MOONLIGHT_NATIVE_CLIENT) && !defined(_WIN32)
+  // A host can close a TCP connection while OpenSSL is writing to it.
+  std::signal(SIGPIPE, SIG_IGN);
+#endif
+#ifndef NXDK
+  // Route TV remotes to the same directional navigation as a keyboard.
+  SDL_SetHint(SDL_HINT_TV_REMOTE_AS_JOYSTICK, "0");
+  #ifdef __ANDROID__
+  SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+  #endif
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
+    std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+    return 1;
+  }
+#endif
   logging::Logger logger;
   logging::set_global_logger(&logger);
   logging::set_minimum_level(logging::LogLevel::trace);
@@ -251,15 +284,20 @@ int main() {
 
   logging::info("app", std::string("Initial screen: ") + app::to_string(clientState.shell.activeScreen));
   debug_print_startup_checkpoint("Runtime logging initialized");
+#ifdef NXDK
   const DWORD encoderSettings = XVideoGetEncoderSettings();
   debug_print_encoder_settings(encoderSettings);
+#else
+  const unsigned long encoderSettings = VIDEO_WIDESCREEN;
+#endif
 
   const startup::VideoModeSelection videoModeSelection = startup::select_best_video_mode();
   initialize_stream_video_mode_settings(clientState, videoModeSelection, encoderSettings);
   const VIDEO_MODE &bestVideoMode = videoModeSelection.bestVideoMode;
   debug_print_video_mode_selection(videoModeSelection);
-  startup::log_memory_statistics();
 
+#ifdef NXDK
+  startup::log_memory_statistics();
   debug_print_startup_checkpoint(
     (std::string("About to call XVideoSetMode with ") + std::to_string(bestVideoMode.width) + "x" + std::to_string(bestVideoMode.height) + ", bpp=" + std::to_string(bestVideoMode.bpp) + ", refresh=" + std::to_string(bestVideoMode.refresh)).c_str()
   );
@@ -274,13 +312,25 @@ int main() {
     return report_startup_failure("sdl", std::string("SDL_Init failed: ") + SDL_GetError());
   }
   debug_print_startup_checkpoint("SDL_Init succeeded");
+#endif
 
   debug_print_startup_checkpoint("About to create SDL window");
   SDL_Window *window = SDL_CreateWindow(
+#ifdef NXDK
     "Moonlight Xbox",
+#else
+    "Moonlight",
+#endif
     bestVideoMode.width,
     bestVideoMode.height,
+#ifdef NXDK
     0
+#else
+    SDL_WINDOW_HIGH_PIXEL_DENSITY | (SDL_IsTV() ? SDL_WINDOW_FULLSCREEN : 0)
+  #if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
+      | (SDL_IsTV() ? 0 : SDL_WINDOW_RESIZABLE)
+  #endif
+#endif
   );
   if (window == nullptr) {
     const int exitCode = report_startup_failure("sdl", std::string("SDL_CreateWindow failed: ") + SDL_GetError());
@@ -309,6 +359,16 @@ int main() {
   splash::show_splash_screen(window, bestVideoMode, [&startupTask]() {
     return !startupTask.completed.load();
   });
+
+#ifdef MOONLIGHT_DESKTOP
+  // Resizing invalidates the window surface used by the splash.
+  if (!SDL_SetWindowMinimumSize(window, 640, 360)) {
+    logging::warn("sdl", std::string("Could not set the minimum window size: ") + SDL_GetError());
+  }
+  if (!SDL_SetWindowResizable(window, true)) {
+    logging::warn("sdl", std::string("Could not enable window resizing: ") + SDL_GetError());
+  }
+#endif
 
   finish_startup_task(clientState, &startupTask);
   startup::log_video_modes(videoModeSelection);

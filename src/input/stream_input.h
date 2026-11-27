@@ -13,6 +13,17 @@
 
 namespace input {
   /**
+   * @brief Decide whether desktop gameplay should own the system pointer.
+   * @param playing True while the stream is connected and running.
+   * @param overlayVisible True while a local stream menu is open.
+   * @param focused True while the stream window has input focus.
+   * @return True when the window should use relative mouse input.
+   */
+  constexpr bool should_capture_stream_mouse(bool playing, bool overlayVisible, bool focused) {
+    return playing && !overlayVisible && focused;
+  }
+
+  /**
    * @brief One complete Moonlight gamepad sample.
    */
   struct ControllerState {
@@ -136,6 +147,12 @@ namespace input {
      * @return Bits zero through three.
      */
     std::uint16_t active_mask() const;
+    /**
+     * @brief Resolve a host slot to its current local device.
+     * @param slot Host controller number.
+     * @return SDL instance ID, or -1 when unassigned.
+     */
+    std::int64_t slot_device(unsigned int slot) const;
 
   private:
     /**

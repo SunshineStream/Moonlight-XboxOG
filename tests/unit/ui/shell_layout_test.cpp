@@ -1,6 +1,6 @@
 /**
  * @file tests/unit/ui/shell_layout_test.cpp
- * @brief Verifies TV-safe layout and focus visibility across Xbox display modes.
+ * @brief Verifies shell layout and focus visibility across Xbox and desktop sizes.
  */
 // test header include
 #include "src/ui/shell_layout.h"
@@ -266,6 +266,91 @@ namespace {
         EXPECT_LE(below - above, 1);
       }
     }
+  }
+
+  /**
+   * @brief Preserve the window's shape while accounting for display scale and short windows.
+   */
+  TEST(ShellLayoutTest, DesktopViewportUsesTheActualWindowAspect) {
+    const auto portrait = ui::calculate_desktop_shell_viewport(900, 1500, 1.5f);
+    EXPECT_EQ(portrait.w, 600);
+    EXPECT_EQ(portrait.h, 1000);
+    const auto shortWindow = ui::calculate_desktop_shell_viewport(640, 360, 1.5f);
+    EXPECT_EQ(shortWindow.w, 853);
+    EXPECT_EQ(shortWindow.h, 480);
+    const auto narrowWindow = ui::calculate_desktop_shell_viewport(480, 800, 1.5f);
+    EXPECT_EQ(narrowWindow.w, 440);
+    EXPECT_EQ(narrowWindow.h, 733);
+    EXPECT_EQ(ui::calculate_desktop_shell_viewport(0, 800, 1.5f).w, 0);
+    EXPECT_EQ(ui::calculate_desktop_shell_viewport(900, 600, 0.0f).w, 900);
+  }
+
+  /**
+   * @brief Move toolbar actions onto their own row and give added height to content.
+   */
+  TEST(ShellLayoutTest, DesktopPortraitHasStackedToolbarAndBottomFooter) {
+    const auto portrait = ui::calculate_shell_layout(550, 1000, 40, 64, {true, true});
+    const auto taller = ui::calculate_shell_layout(550, 1200, 40, 64, {true, true});
+    const auto wide = ui::calculate_shell_layout(1280, 720, 40, 0, {true, true});
+    EXPECT_EQ(portrait.toolbar.w, portrait.navigation.w);
+    EXPECT_EQ(portrait.toolbar.y, portrait.navigation.y + portrait.navigation.h + portrait.gap);
+    EXPECT_EQ(portrait.heading.y, portrait.toolbar.y + portrait.toolbar.h + portrait.gap);
+    EXPECT_EQ(portrait.footer.y + portrait.footer.h, 1000);
+    EXPECT_EQ(taller.heading.y, portrait.heading.y);
+    EXPECT_EQ(taller.content.h, portrait.content.h + 200);
+    EXPECT_EQ(wide.toolbar.y, wide.navigation.y);
+  }
+
+  /**
+   * @brief Use the same responsive toolbar and grid when a high-density phone rotates.
+   */
+  TEST(ShellLayoutTest, ReflowsTheToolbarAndGridAfterPhoneRotation) {
+    const auto portrait = ui::calculate_desktop_shell_viewport(1080, 2400, 3.0f);
+    const auto portraitLayout = ui::calculate_shell_layout(portrait.w, portrait.h, 40, 64, {true, true});
+    EXPECT_EQ(portraitLayout.toolbar.y, portraitLayout.navigation.y + portraitLayout.navigation.h + portraitLayout.gap);
+    EXPECT_EQ(portraitLayout.footer.y + portraitLayout.footer.h, portrait.h);
+    EXPECT_EQ(ui::calculate_desktop_grid_columns(portrait.w).hosts, 1U);
+    EXPECT_EQ(ui::calculate_desktop_grid_columns(portrait.w).apps, 1U);
+
+    const auto landscape = ui::calculate_desktop_shell_viewport(2400, 1080, 3.0f);
+    const auto landscapeLayout = ui::calculate_shell_layout(landscape.w, landscape.h, 40, 64, {true, true});
+    EXPECT_EQ(landscapeLayout.toolbar.y, landscapeLayout.navigation.y);
+    EXPECT_EQ(landscapeLayout.footer.y + landscapeLayout.footer.h, landscape.h);
+    EXPECT_GT(ui::calculate_desktop_grid_columns(landscape.w).hosts, 1U);
+    EXPECT_GT(ui::calculate_desktop_grid_columns(landscape.w).apps, 1U);
+  }
+
+  /**
+   * @brief Keep stacked panes within content and reserve enough height for options in short windows.
+   */
+  TEST(ShellLayoutTest, DesktopMenuPanesStackWhenTheWindowIsTall) {
+    const auto portrait = ui::calculate_shell_layout(640, 1040, 40, 0, {true, false});
+    const auto stacked = ui::calculate_desktop_menu_panels(portrait, true);
+    EXPECT_EQ(stacked.menu.w, portrait.content.w);
+    EXPECT_EQ(stacked.detail.w, portrait.content.w);
+    EXPECT_EQ(stacked.detail.y, stacked.menu.y + stacked.menu.h + portrait.gap);
+    EXPECT_EQ(stacked.detail.y + stacked.detail.h, portrait.content.y + portrait.content.h);
+    const auto shortWindow = ui::calculate_shell_layout(520, 480, 40, 0, {true, false});
+    const auto sideBySide = ui::calculate_desktop_menu_panels(shortWindow, true);
+    EXPECT_EQ(sideBySide.detail.y, shortWindow.navigation.y);
+    EXPECT_EQ(sideBySide.detail.x, sideBySide.menu.x + sideBySide.menu.w + shortWindow.gap);
+    EXPECT_GT(sideBySide.detail.w, sideBySide.menu.w);
+    EXPECT_EQ(ui::calculate_desktop_menu_panels(shortWindow, false).detail.y, shortWindow.content.y);
+  }
+
+  /**
+   * @brief Reduce columns as windows narrow and preserve the default counts at 1280 layout units.
+   */
+  TEST(ShellLayoutTest, DesktopGridColumnsFitTheViewportWidth) {
+    const auto narrow = ui::calculate_desktop_grid_columns(600);
+    EXPECT_EQ(narrow.hosts, 1U);
+    EXPECT_EQ(narrow.apps, 2U);
+    const auto defaultWindow = ui::calculate_desktop_grid_columns(1280);
+    EXPECT_EQ(defaultWindow.hosts, 3U);
+    EXPECT_EQ(defaultWindow.apps, 4U);
+    const auto wide = ui::calculate_desktop_grid_columns(1920);
+    EXPECT_GT(wide.hosts, defaultWindow.hosts);
+    EXPECT_GT(wide.apps, defaultWindow.apps);
   }
 
   /**

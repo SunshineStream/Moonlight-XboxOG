@@ -1,0 +1,144 @@
+include("${CMAKE_CURRENT_LIST_DIR}/client-media.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/sdl3.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/lucide.cmake")
+
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # Enable both languages before SDL registers its Objective-C sources.
+    enable_language(OBJC OBJCXX)
+elseif(WIN32)
+    enable_language(RC)
+    if(MOONLIGHT_HOST_TOOL_DIR AND CMAKE_RC_COMPILER MATCHES "windres[.]exe$")
+        # windres runs a separate preprocessor, and CLion's build may lack MSYS2 on PATH.
+        string(PREPEND CMAKE_RC_FLAGS "--preprocessor=\"${CMAKE_C_COMPILER}\" "
+                "--preprocessor-arg=-E --preprocessor-arg=-xc-header --preprocessor-arg=-DRC_INVOKED ")
+    endif()
+endif()
+
+moonlight_prepare_native_sdl3()
+moonlight_prepare_client_media()
+
+set(_client_sources ${MOONLIGHT_SOURCES})
+list(REMOVE_ITEM _client_sources
+        "${CMAKE_SOURCE_DIR}/src/platform/usb_input.cpp"
+        "${CMAKE_SOURCE_DIR}/src/startup/memory_stats.cpp")
+
+if(ANDROID)
+    # SDLActivity loads libmain.so through JNI.
+    add_library(moonlight_client SHARED ${_client_sources})
+    set_target_properties(moonlight_client PROPERTIES OUTPUT_NAME main)
+elseif(APPLE)
+    add_executable(moonlight_client MACOSX_BUNDLE ${_client_sources})
+    set_target_properties(moonlight_client PROPERTIES OUTPUT_NAME Moonlight
+            MACOSX_BUNDLE_GUI_IDENTIFIER dev.lizardbyte.app.Moonlight
+            MACOSX_BUNDLE_BUNDLE_NAME Moonlight
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+            MACOSX_BUNDLE_BUNDLE_VERSION "1"
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/packaging/apple/Info.plist.in")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(_client_icon "${CMAKE_SOURCE_DIR}/packaging/apple/Moonlight.icns")
+        set(MOONLIGHT_APPLE_ICON_PLIST "<key>CFBundleIconFile</key>\n    <string>Moonlight.icns</string>")
+    else()
+        set(_client_icon "${CMAKE_SOURCE_DIR}/packaging/apple/${CMAKE_SYSTEM_NAME}.xcassets")
+        set_target_properties(moonlight_client PROPERTIES XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon)
+    endif()
+    set_source_files_properties("${_client_icon}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(moonlight_client PRIVATE "${_client_icon}")
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        string(CONCAT MOONLIGHT_IOS_PORTRAIT_ORIENTATIONS
+                "<string>UIInterfaceOrientationPortrait</string>\n"
+                "        <string>UIInterfaceOrientationPortraitUpsideDown</string>")
+        set(_client_orientation "${CMAKE_SOURCE_DIR}/src/ui/mobile_orientation_ios.mm")
+        set_source_files_properties("${_client_orientation}" PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        target_sources(moonlight_client PRIVATE "${_client_orientation}")
+        target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_IOS)
+        target_link_libraries(moonlight_client PRIVATE "-framework UIKit")
+    endif()
+elseif(WIN32)
+    set(_windows_resources "${CMAKE_SOURCE_DIR}/packaging/windows/moonlight.rc")
+    set_source_files_properties("${_windows_resources}" PROPERTIES
+            OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/packaging/windows/moonlight.ico")
+    add_executable(moonlight_client WIN32 ${_client_sources} "${_windows_resources}")
+    set_target_properties(moonlight_client PROPERTIES OUTPUT_NAME Moonlight)
+else()
+    add_executable(moonlight_client ${_client_sources})
+    set_target_properties(moonlight_client PROPERTIES OUTPUT_NAME moonlight)
+endif()
+
+target_sources(moonlight_client PRIVATE "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg_memory.c")
+# Select the desktop and mobile platform adapters in shared sources.
+target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_NATIVE_CLIENT TOML_EXCEPTIONS=0)
+if(WIN32 OR CMAKE_SYSTEM_NAME MATCHES "^(Darwin|Linux)$")
+    target_compile_definitions(moonlight_client PRIVATE MOONLIGHT_DESKTOP)
+endif()
+target_include_directories(moonlight_client PRIVATE "${CMAKE_SOURCE_DIR}" "${tomlplusplus_SOURCE_DIR}/include")
+target_link_libraries(moonlight_client PRIVATE
+        Moonlight::OpenSSL moonlight-common-c PkgConfig::MOONLIGHT_CLIENT_FFMPEG
+        SDL3::SDL3 SDL3_ttf::SDL3_ttf-static SDL3_image::SDL3_image-static)
+moonlight_prioritize_bundled_openssl_headers(moonlight_client)
+if(ANDROID)
+    # FFmpeg's AArch64 assembly addresses private tables directly. Keep static
+    # library symbols local to libmain.so so those references cannot be interposed.
+    target_link_options(moonlight_client PRIVATE "LINKER:--exclude-libs,ALL")
+elseif(WIN32)
+    target_link_libraries(moonlight_client PRIVATE ws2_32)
+    target_link_options(moonlight_client PRIVATE -static-libgcc -static-libstdc++)
+endif()
+
+set(MOONLIGHT_CLIENT_ASSET_ROOT "${CMAKE_CURRENT_BINARY_DIR}/client-assets/assets"
+        CACHE PATH "Output directory for staged client assets")
+set(_client_assets "${MOONLIGHT_CLIENT_ASSET_ROOT}")
+add_custom_target(stage_client_assets
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_SOURCE_DIR}/xbe/assets" "${_client_assets}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_client_assets}/fonts"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/third-party/nxdk/samples/sdl_ttf/vegur-regular.ttf"
+            "${_client_assets}/fonts/vegur-regular.ttf"
+        COMMAND "${CMAKE_COMMAND}" "-DLUCIDE_SOURCE_DIR=${MOONLIGHT_LUCIDE_SOURCE_DIR}"
+            "-DLUCIDE_ASSET_DIR=${_client_assets}" -P "${CMAKE_CURRENT_LIST_DIR}/stage-lucide.cmake"
+        COMMENT "Stage Moonlight client assets"
+        VERBATIM)
+add_dependencies(moonlight_client stage_client_assets)
+
+if(APPLE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(_bundle_assets "$<TARGET_BUNDLE_CONTENT_DIR:moonlight_client>/Resources/assets")
+    else()
+        set(_bundle_assets "$<TARGET_BUNDLE_DIR:moonlight_client>/assets")
+    endif()
+    add_custom_command(TARGET moonlight_client POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_client_assets}"
+                "${_bundle_assets}"
+            COMMENT "Copy assets into the app bundle"
+            VERBATIM)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        install(TARGETS moonlight_client BUNDLE DESTINATION .)
+        set(CPACK_GENERATOR DragNDrop)
+        set(CPACK_PACKAGE_NAME Moonlight)
+        set(CPACK_PACKAGE_VERSION "0.1.0")
+        include(CPack)
+    endif()
+elseif(NOT ANDROID)
+    add_custom_command(TARGET moonlight_client POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_client_assets}"
+                "$<TARGET_FILE_DIR:moonlight_client>/assets"
+            COMMENT "Copy assets alongside the client executable"
+            VERBATIM)
+    include(GNUInstallDirs)
+    install(TARGETS moonlight_client RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    if(WIN32)
+        install(DIRECTORY "${_client_assets}/" DESTINATION "${CMAKE_INSTALL_BINDIR}/assets")
+    else()
+        target_compile_definitions(moonlight_client PRIVATE
+                MOONLIGHT_INSTALLED_ASSETS="${CMAKE_INSTALL_FULL_DATADIR}/moonlight/assets")
+        install(DIRECTORY "${_client_assets}/" DESTINATION "${CMAKE_INSTALL_DATADIR}/moonlight/assets")
+        set(_linux_app_id dev.lizardbyte.app.Moonlight)
+        set(_linux_metadata "${CMAKE_SOURCE_DIR}/packaging/linux/flatpak")
+        install(FILES "${_linux_metadata}/${_linux_app_id}.desktop"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+        install(FILES "${_linux_metadata}/${_linux_app_id}.metainfo.xml"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+        install(FILES "${CMAKE_SOURCE_DIR}/moonlight-logo.svg"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+                RENAME "${_linux_app_id}.svg")
+    endif()
+endif()

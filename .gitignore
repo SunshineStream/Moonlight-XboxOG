@@ -45,6 +45,16 @@ cmake-*/
 /_site/
 *.egg-info/
 
+# Android Studio and Gradle outputs
+/packaging/android/**/.gradle/
+/packaging/android/**/.cxx/
+/packaging/android/**/.externalNativeBuild/
+/packaging/android/**/.kotlin/
+/packaging/android/**/*.iml
+/packaging/android/**/*.apk
+/packaging/android/**/*.aab
+/packaging/android/local.properties
+
 # test output
 test-output/
 

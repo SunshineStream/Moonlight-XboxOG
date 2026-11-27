@@ -1082,8 +1082,8 @@ namespace ui {
     if (viewModel.notification.visible) {
       viewModel.notification.items = notification_views(state);
     }
-    viewModel.content.hostColumnCount = 3U;
-    viewModel.content.appColumnCount = 4U;
+    viewModel.content.hostColumnCount = state.hosts.columnCount;
+    viewModel.content.appColumnCount = state.apps.columnCount;
     viewModel.content.toolbarButtons = toolbar_buttons(state);
     viewModel.content.hostTiles = host_tiles(state);
     viewModel.content.appTiles = app_tiles(state);

@@ -1,7 +1,7 @@
 [project]
-name = "Moonlight-XboxOG"
+name = "Moonlight"
 version = "0.0.0"
-description = "Moonlight game streaming client for the original Xbox."
+description = "Moonlight game streaming client for desktop, Android, iOS/tvOS and the original Xbox."
 repository = "https://github.com/SunshineStream/Moonlight-XboxOG"
 logo = "moonlight-logo.svg"
 favicon = "moonlight-logo.svg"
@@ -14,13 +14,19 @@ clean = true
 
 [[targets]]
 name = "api"
-title = "Moonlight-XboxOG documentation"
+title = "Moonlight documentation"
 framework = "doxygen"
 source = "."
 home = true
 
 [targets.doxygen]
-inputs = ["README.md", "src", "experiments/README.md"]
+inputs = [
+  "README.md",
+  "src",
+  "experiments/README.md",
+  "docs/test-android.md",
+  "docs/test-apple-mobile.md",
+]
 image_paths = ["docs/images"]
 predefined = ["NXDK"]
 extra_stylesheets = [

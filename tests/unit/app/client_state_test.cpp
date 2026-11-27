@@ -484,7 +484,10 @@ namespace {
     EXPECT_EQ(state.shell.activeScreen, app::ScreenId::hosts);
   }
 
-  TEST(ClientStateTest, HostGridNavigationMatchesTheRenderedThreeColumnLayout) {
+  /**
+   * @brief Use the current host column count for vertical navigation after a window reflow.
+   */
+  TEST(ClientStateTest, HostGridNavigationMatchesTheRenderedColumnCount) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
                                 {"Host A", test_support::kTestIpv4Addresses[test_support::kIpHostGridA], 0, app::PairingState::paired, app::HostReachability::online},
@@ -500,6 +503,10 @@ namespace {
     EXPECT_EQ(state.hosts.selectedHostIndex, 2U);
     app::handle_command(state, input::UiCommand::move_down);
     EXPECT_EQ(state.hosts.selectedHostIndex, 3U);
+
+    state.hosts.columnCount = 2U;
+    app::handle_command(state, input::UiCommand::move_up);
+    EXPECT_EQ(state.hosts.selectedHostIndex, 1U);
   }
 
   TEST(ClientStateTest, HostGridCanMoveDownIntoAPartialNextRowFromAnyColumn) {
@@ -780,6 +787,9 @@ namespace {
     EXPECT_EQ(state.hosts.front().pairingState, app::PairingState::paired);
   }
 
+  /**
+   * @brief Navigate partial app rows and use the narrower grid after a window reflow.
+   */
   TEST(ClientStateTest, AppGridWrapsHorizontallyAndFindsTheClosestItemInPartialRows) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
@@ -808,6 +818,10 @@ namespace {
     state.apps.selectedAppIndex = 2U;
     app::handle_command(state, input::UiCommand::move_down);
     EXPECT_EQ(state.apps.selectedAppIndex, 4U);
+
+    state.apps.columnCount = 2U;
+    app::handle_command(state, input::UiCommand::move_up);
+    EXPECT_EQ(state.apps.selectedAppIndex, 2U);
   }
 
   TEST(ClientStateTest, LogViewerCanScrollAndCyclePlacement) {

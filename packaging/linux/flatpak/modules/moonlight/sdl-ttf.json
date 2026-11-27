@@ -1,0 +1,19 @@
+[
+  {
+    "type": "git",
+    "x-renovate": {
+      "datasource": "github-tags",
+      "depName": "libsdl-org/SDL_ttf",
+      "versioning": "regex:^release-(?<major>[0-9]+)[.](?<minor>[0-9]+)[.](?<patch>[0-9]+)$"
+    },
+    "url": "https://github.com/libsdl-org/SDL_ttf.git",
+    "tag": "release-3.2.2",
+    "commit": "a1ce3670aec736ecbf0936c43f2f0cc53aa61e5b",
+    "dest": "deps/sdl-ttf",
+    "x-checker-data": {
+      "type": "git",
+      "tag-pattern": "^release-([0-9]+[.][0-9]+[.][0-9]+)$",
+      "version-scheme": "semantic"
+    }
+  }
+]

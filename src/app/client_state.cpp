@@ -25,13 +25,16 @@ namespace {
   constexpr std::size_t LOG_VIEWER_FAST_SCROLL_STEP = 8U;
   constexpr std::size_t HOST_TOOLBAR_BUTTON_COUNT = 3U;
   constexpr std::size_t DEFAULT_EMPTY_HOSTS_TOOLBAR_INDEX = HOST_TOOLBAR_BUTTON_COUNT - 1U;
-  constexpr std::size_t HOST_GRID_COLUMN_COUNT = 3U;
-  constexpr std::size_t APP_GRID_COLUMN_COUNT = 4U;
   constexpr std::size_t ADD_HOST_KEYPAD_COLUMN_COUNT = 3U;
   constexpr const char *DELETE_SAVED_FILE_MENU_ID_PREFIX = "delete-saved-file:";
   constexpr const char *SETTINGS_CATEGORY_PREFIX = "settings-category:";
   constexpr std::array<char, 10> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr std::array<char, 10> ADD_HOST_PORT_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
+#ifdef MOONLIGHT_NATIVE_CLIENT
+  constexpr std::array<int, 7> STREAM_FRAMERATE_OPTIONS {24, 30, 50, 60, 90, 100, 120};
+  constexpr std::array<int, 20> STREAM_BITRATE_OPTIONS {1000, 2000, 3000, 5000, 8000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, 120000, 150000};
+  constexpr std::array<app::VideoCodecSelection, 2> VIDEO_CODEC_OPTIONS {app::VideoCodecSelection::autoDetect, app::VideoCodecSelection::h264};
+#else
   constexpr std::array<int, 6> STREAM_FRAMERATE_OPTIONS {15, 20, 24, 25, 30, 60};
   constexpr std::array<int, 24> STREAM_BITRATE_OPTIONS {500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000, 19000, 20000};
   constexpr std::array<app::VideoCodecSelection, 5> VIDEO_CODEC_OPTIONS {
@@ -41,6 +44,7 @@ namespace {
     app::VideoCodecSelection::mpeg2,
     app::VideoCodecSelection::h263p,
   };
+#endif
 
   /**
    * @brief Describes the keypad characters available for the active add-host field.
@@ -644,14 +648,16 @@ namespace {
         return {
           {"view-log-file", "View Log File", "Open the runtime log file viewer so you can inspect the most recent log lines without leaving the shell.", true},
           {"cycle-log-level", std::string("File Logging Level: ") + logging::to_string(state.settings.loggingLevel), "Choose the minimum severity written to moonlight.log. Lower levels produce more detail but increase disk writes.", true},
+#ifndef MOONLIGHT_NATIVE_CLIENT
           {"cycle-xemu-console-log-level", std::string("xemu Console Level: ") + logging::to_string(state.settings.xemuConsoleLoggingLevel), "Choose the minimum severity mirrored to xemu through DbgPrint() when you launch xemu with a serial console.", true},
+#endif
         };
       case app::SettingsCategory::display:
         return {
           {
             "cycle-stream-video-mode",
             std::string("Stream Resolution: ") + describe_stream_resolution(state.settings.preferredVideoMode),
-            "Cycle through detected Xbox video modes enabled by the console settings. Changing resolution resets the bitrate to a recommended default for the resolution and frame rate.",
+            "Change the requested stream resolution and reset the bitrate to its recommended default.",
             true,
           },
           {
@@ -669,9 +675,14 @@ namespace {
           {
             "cycle-video-codec",
             std::string("Video Codec: ") + video_codec_selection_label(state.settings.video.codec),
+#ifdef MOONLIGHT_NATIVE_CLIENT
+            "Automatically negotiate H.264, HEVC, or AV1, or request H.264 for compatibility.",
+#else
             "Prefer MPEG-2 for faster decoding, use standard automatic negotiation, or request a specific codec.",
+#endif
             true,
           },
+#ifndef MOONLIGHT_NATIVE_CLIENT
           {
             "toggle-gpu-presentation",
             std::string("Video Presentation: ") + (state.settings.video.gpuPresentation ? "GPU" : "Software"),
@@ -684,6 +695,7 @@ namespace {
             "Choose Auto, 2, or 3 buffers for GPU presentation on new streams. Auto tries three at 720p. The third buffer needs extra RAM.",
             true,
           },
+#endif
           {
             "toggle-show-performance-stats",
             std::string("Performance Stats: ") + (state.settings.video.showPerformanceStats ? "On" : "Off"),
@@ -696,13 +708,18 @@ namespace {
           {
             "toggle-play-audio-on-pc",
             std::string("Play Audio on PC: ") + (state.settings.audio.playOnPc ? "On" : "Off"),
-            "Toggle whether the host PC should continue local audio playback while also streaming audio to this Xbox client.",
+            "Choose whether the host PC plays audio during the stream.",
             true,
           },
           {
             "toggle-play-audio-on-xbox",
+#ifdef MOONLIGHT_NATIVE_CLIENT
+            std::string("Play Audio Locally: ") + (state.settings.audio.playOnXbox ? "On" : "Off"),
+            "Play stream audio on this device.",
+#else
             std::string("Play Audio on Xbox: ") + (state.settings.audio.playOnXbox ? "On" : "Off"),
             "Toggle local audio playback on the Xbox. Disable this to skip Opus decode work when video latency matters more than sound.",
+#endif
             true,
           },
           {
@@ -1230,7 +1247,7 @@ namespace {
     }
 
     bool movedAboveFirstRow = false;
-    move_grid_selection(state.hosts.items.size(), HOST_GRID_COLUMN_COUNT, rowDelta, columnDelta, &state.hosts.selectedHostIndex, &movedAboveFirstRow);
+    move_grid_selection(state.hosts.items.size(), state.hosts.columnCount, rowDelta, columnDelta, &state.hosts.selectedHostIndex, &movedAboveFirstRow);
     if (movedAboveFirstRow) {
       state.hosts.focusArea = app::HostsFocusArea::toolbar;
       return;
@@ -1251,7 +1268,7 @@ namespace {
       return;
     }
 
-    move_grid_selection(indices.size(), APP_GRID_COLUMN_COUNT, rowDelta, columnDelta, &state.apps.selectedAppIndex);
+    move_grid_selection(indices.size(), state.apps.columnCount, rowDelta, columnDelta, &state.apps.selectedAppIndex);
   }
 
   void enter_add_host_screen(app::ClientState &state) {

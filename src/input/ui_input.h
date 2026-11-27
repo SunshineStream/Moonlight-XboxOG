@@ -172,6 +172,42 @@ namespace input {
   };
 
   /**
+   * @brief Directional repeat state for the shell's primary controller.
+   */
+  struct ControllerNavigationHolds {
+    ControllerNavigationHoldState up {};  ///< Up repeat state.
+    ControllerNavigationHoldState down {};  ///< Down repeat state.
+    ControllerNavigationHoldState left {};  ///< Left repeat state.
+    ControllerNavigationHoldState right {};  ///< Right repeat state.
+  };
+
+  /**
+   * @brief Origin and timing of the active shell touch gesture.
+   */
+  struct ShellTouchGesture {
+    std::uint64_t finger = 0;  ///< Active touch ID, or zero when idle.
+    std::uint64_t startedAt = 0;  ///< Touch timestamp used to distinguish a tap from a hold.
+    float x = 0;  ///< Normalized horizontal origin.
+    float y = 0;  ///< Normalized vertical origin.
+
+    /**
+     * @brief Clear the active gesture when its finger is canceled.
+     * @param fingerId Canceled finger ID.
+     */
+    void cancel(std::uint64_t fingerId);
+
+    /**
+     * @brief Interpret a matching finger release and clear the gesture.
+     * @param fingerId Released finger ID.
+     * @param endX Normalized horizontal release position.
+     * @param endY Normalized vertical release position.
+     * @param now Monotonic time in milliseconds.
+     * @return Shell command, or none for an unrelated or canceled gesture.
+     */
+    UiCommand release(std::uint64_t fingerId, float endX, float endY, std::uint64_t now);
+  };
+
+  /**
    * @brief Shell input lifetime, separate from the stream's input ownership.
    */
   struct ShellInputState {
@@ -191,10 +227,10 @@ namespace input {
     std::uint32_t rightShoulderRepeatTick = 0;  ///< Press or repeat tick for this input.
     std::uint32_t leftTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
     std::uint32_t rightTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
-    ControllerNavigationHoldState moveUpHoldState {};  ///< Directional repeat state.
-    ControllerNavigationHoldState moveDownHoldState {};  ///< Directional repeat state.
-    ControllerNavigationHoldState moveLeftHoldState {};  ///< Directional repeat state.
-    ControllerNavigationHoldState moveRightHoldState {};  ///< Directional repeat state.
+    ControllerNavigationHolds controllerNavigation;  ///< Directional repeat state.
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    ShellTouchGesture touch;  ///< Active gesture used for shell navigation.
+#endif
 
     /**
      * @brief Clear stale holds after streaming consumed their release events, then wait for neutral.

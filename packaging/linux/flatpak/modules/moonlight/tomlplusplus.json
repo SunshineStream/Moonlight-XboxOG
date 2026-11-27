@@ -1,0 +1,19 @@
+[
+  {
+    "type": "git",
+    "x-renovate": {
+      "datasource": "github-tags",
+      "depName": "marzer/tomlplusplus",
+      "versioning": "semver"
+    },
+    "url": "https://github.com/marzer/tomlplusplus.git",
+    "tag": "v3.5.1",
+    "commit": "efd80e03356af65c7d4e61c56ffb326b34f8d0f4",
+    "dest": "deps/tomlplusplus",
+    "x-checker-data": {
+      "type": "git",
+      "tag-pattern": "^v([0-9]+[.][0-9]+[.][0-9]+)$",
+      "version-scheme": "semantic"
+    }
+  }
+]

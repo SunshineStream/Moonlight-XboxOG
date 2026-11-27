@@ -30,8 +30,17 @@ endif()
 
 set(TEST_COVERAGE_COMPILE_OPTIONS)
 set(TEST_COVERAGE_LINK_OPTIONS)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
-        OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT WIN32))
+if(WIN32)
+    set(_coverage_default OFF)
+else()
+    set(_coverage_default ON)
+endif()
+option(MOONLIGHT_TEST_COVERAGE "Instrument host tests for code coverage" ${_coverage_default})
+if(MOONLIGHT_TEST_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND WIN32)
+    list(APPEND TEST_COVERAGE_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping -O0)
+    # LLD keeps the COFF coverage metadata and its associated counters together.
+    list(APPEND TEST_COVERAGE_LINK_OPTIONS -fprofile-instr-generate -fuse-ld=lld)
+elseif(MOONLIGHT_TEST_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     list(APPEND TEST_COVERAGE_COMPILE_OPTIONS -fprofile-arcs -ftest-coverage -ggdb -O0)
     list(APPEND TEST_COVERAGE_LINK_OPTIONS -fprofile-arcs -ftest-coverage)
 endif()
@@ -67,6 +76,7 @@ target_link_libraries(${PROJECT_NAME}
         Moonlight::OpenSSL
         lizardbyte::test_support
         moonlight-common-c)
+moonlight_prioritize_bundled_openssl_headers(${PROJECT_NAME})
 target_compile_definitions(${PROJECT_NAME}
         PRIVATE
         TOML_EXCEPTIONS=0

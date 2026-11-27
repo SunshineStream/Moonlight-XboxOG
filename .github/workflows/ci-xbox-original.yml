@@ -1,0 +1,126 @@
+---
+name: CI-Xbox Original
+permissions: {}
+
+on:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+jobs:
+  build:
+    name: ${{ matrix.toolchain }} toolchain
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            toolchain: macOS
+            shell: "bash"
+          - os: ubuntu-latest
+            toolchain: Linux
+            shell: "bash"
+          - os: windows-latest
+            toolchain: Windows
+            shell: "msys2 {0}"
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    env:
+      CMAKE_BUILD: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Setup Dependencies Linux
+        if: runner.os == 'Linux'
+        run: |
+          nxdk_dependencies=(
+            "bison"
+            "build-essential"
+            "clang"
+            "cmake"
+            "flex"
+            "git"
+            "lld"
+            "llvm"
+            "nasm"
+          )
+          moonlight_dependencies=(
+            "patch"
+          )
+          dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y "${dependencies[@]}"
+
+      - name: Setup Dependencies macOS
+        if: runner.os == 'macOS'
+        run: |
+          nxdk_dependencies=(
+            "cmake"
+            "coreutils"
+            "lld"
+            "llvm"
+            "nasm"
+          )
+          moonlight_dependencies=(
+          )
+          dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
+          brew install "${dependencies[@]}"
+
+      - name: Setup Dependencies Windows
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c  # v2.34.0
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            bison
+            diffutils
+            flex
+            git
+            make
+            patch
+            perl
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-compiler-rt
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-lld
+            mingw-w64-ucrt-x86_64-llvm
+            mingw-w64-ucrt-x86_64-llvm-tools
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-nasm
+
+      - name: Build
+        run: |
+          chmod +x build.sh
+          ./build.sh --build-dir "${CMAKE_BUILD}" --coverage
+
+          # recursively list all files in build directory
+          ls -R "${CMAKE_BUILD}"
+
+          # move artifacts
+          mkdir -p artifacts
+          tar -czf artifacts/Moonlight-XboxOG-XBE.tar.gz "./${CMAKE_BUILD}/xbox/xbe"
+          cp "${CMAKE_BUILD}/xbox/Moonlight.iso" artifacts/Moonlight-XboxOG.iso
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-XboxOG-${{ runner.os }}
+          path: artifacts/
+
+      - name: Test and report coverage
+        uses: ./.github/actions/test-and-report
+        with:
+          build-dir: ${{ env.CMAKE_BUILD }}
+          platform: Xbox-host-${{ runner.os }}
+          test-shell: '${{ matrix.shell }}'
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}

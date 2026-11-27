@@ -104,6 +104,15 @@ endif()
 if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
     find_program(OPENSSL_MAKE_EXECUTABLE NAMES make REQUIRED)
 
+    if(MOONLIGHT_OPENSSL_WINDOWS_HOST AND MOONLIGHT_NXDK_NATIVE_COMPILER)
+        # CLion launches the build separately from configure. Give each OpenSSL step its tools.
+        moonlight_get_windows_msys2_usr_bin(_openssl_msys_bin)
+        moonlight_get_windows_msys2_msystem_bin(_openssl_ucrt_bin)
+        list(APPEND OPENSSL_ENV
+                --modify "PATH=path_list_prepend:${_openssl_msys_bin}"
+                --modify "PATH=path_list_prepend:${_openssl_ucrt_bin}")
+    endif()
+
     set(OPENSSL_CONFIGURE_TARGET linux-x86)
     list(APPEND OPENSSL_CONFIGURE_OPTIONS
             no-sock
@@ -162,7 +171,13 @@ if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
             install_dev)
 else()
     if(MOONLIGHT_OPENSSL_WINDOWS_HOST)
-        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_openssl_msystem -ucrt64)
+        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _openssl_processor)
+        if(_openssl_processor MATCHES "^(arm64|aarch64)$")
+            set(OPENSSL_CONFIGURE_TARGET mingwarm64)
+            set(_openssl_msystem -clangarm64)
+        elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            # OpenSSL calls its x64 GNU Windows recipe mingw64. _openssl_msystem selects UCRT64.
             set(OPENSSL_CONFIGURE_TARGET mingw64)
         else()
             set(OPENSSL_CONFIGURE_TARGET mingw)
@@ -210,15 +225,15 @@ else()
                 "${_openssl_tool_prefix} exec make ${OPENSSL_MAKE_ARGS} build_libs")
         set(OPENSSL_CONFIGURE_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
-                -defterm -here -no-start -mingw64
+                -defterm -here -no-start "${_openssl_msystem}"
                 -c "${_openssl_configure_script}")
         set(OPENSSL_BUILD_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
-                -defterm -here -no-start -mingw64
+                -defterm -here -no-start "${_openssl_msystem}"
                 -c "${_openssl_build_script}")
         set(OPENSSL_INSTALL_COMMAND
                 "${OPENSSL_MSYS2_SHELL}"
-                -defterm -here -no-start -mingw64
+                -defterm -here -no-start "${_openssl_msystem}"
                 -c "cd ${_openssl_build_dir_msys_quoted} && ${_openssl_tool_prefix} exec make -j1 install_dev")
     elseif(APPLE)
         find_program(OPENSSL_MAKE_EXECUTABLE NAMES gmake make REQUIRED)

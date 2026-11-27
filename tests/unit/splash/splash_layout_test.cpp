@@ -2,17 +2,20 @@
  * @file tests/unit/splash/splash_layout_test.cpp
  * @brief Verifies splash screen layout calculations.
  */
-// test includes
-#include <lizardbyte/common/testing.h>
+// test header include
+#include "src/splash/splash_layout.h"
 
 // standard includes
 #include <array>
 #include <cfenv>
 #include <limits>
+#include <utility>
+
+// lib includes
+#include <lizardbyte/common/testing.h>
 
 // local includes
 #include "src/app/stream_bitrate.h"
-#include "src/splash/splash_layout.h"
 
 namespace {
 
@@ -134,6 +137,20 @@ namespace {
     EXPECT_EQ(layout.height, 92);
     EXPECT_EQ(layout.x, 90);
     EXPECT_EQ(layout.y, 194);
+  }
+
+  /**
+   * @brief Keep square splash artwork centered as the phone framebuffer rotates.
+   */
+  TEST(SplashLayoutTest, CentersAnUndistortedLogoInBothPhoneOrientations) {
+    const VIDEO_MODE videoMode {1280, 720, 32, 60};
+    for (const auto &[width, height] : {std::pair {1080, 2400}, std::pair {2400, 1080}}) {
+      const auto layout = splash::calculate_logo_destination(width, height, 512, 512, videoMode, VIDEO_WIDESCREEN);
+      EXPECT_GT(layout.width, 0);
+      EXPECT_EQ(layout.width, layout.height);
+      EXPECT_EQ(layout.x, (width - layout.width) / 2);
+      EXPECT_EQ(layout.y, (height - layout.height) / 2);
+    }
   }
 
 }  // namespace

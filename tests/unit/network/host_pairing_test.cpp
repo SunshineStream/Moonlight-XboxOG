@@ -773,6 +773,17 @@ namespace {
     EXPECT_TRUE(network::resolve_reachable_address({}, serverInfo).empty());
   }
 
+  /**
+   * @brief Exercise socket creation without the scripted transport or a listening server.
+   */
+  TEST(HostPairingTest, OpensSocketBeforeCheckingTheHostAddress) {
+    network::HostPairingServerInfo serverInfo {};
+    std::string errorMessage;
+
+    EXPECT_FALSE(network::query_server_info("not-an-ip-address", 47989, nullptr, &serverInfo, &errorMessage));
+    EXPECT_NE(errorMessage.find("Pairing currently requires a dotted IPv4 host address"), std::string::npos) << errorMessage;
+  }
+
   TEST(HostPairingTest, QueriesServerInfoAcrossFallbackPortsWhenTheDefaultPortFails) {
     ScriptedHostPairingHttpHandler handler({
       {
@@ -922,6 +933,7 @@ namespace {
     EXPECT_NE(errorMessage.find("serverinfo unavailable"), std::string::npos);
   }
 
+  /** @brief Encode the key ID in the authenticated launch request using network byte order. */
   TEST(HostPairingTest, LaunchesANewStreamSessionWithAuthenticatedHttpsRequest) {
     const network::PairingIdentity identity = network::create_pairing_identity();
     ASSERT_TRUE(network::is_valid_pairing_identity(identity));
@@ -951,7 +963,7 @@ namespace {
           EXPECT_EQ(extract_query_parameter(request.pathAndQuery, "localAudioPlayMode"), "1");
           EXPECT_EQ(extract_query_parameter(request.pathAndQuery, "surroundAudioInfo"), std::to_string(SURROUNDAUDIOINFO_FROM_AUDIO_CONFIGURATION(AUDIO_CONFIGURATION_STEREO)));
           EXPECT_EQ(extract_query_parameter(request.pathAndQuery, "rikey"), std::string(32U, '1'));
-          EXPECT_EQ(extract_query_parameter(request.pathAndQuery, "rikeyid"), std::string(32U, '2'));
+          EXPECT_EQ(extract_query_parameter(request.pathAndQuery, "rikeyid"), "16909060");
         },
         true,
         200,
@@ -977,7 +989,7 @@ namespace {
           true,
           6000,
           std::string(32U, '1'),
-          std::string(32U, '2'),
+          "01020304" + std::string(24U, '2'),
         },
         &result,
         &errorMessage
@@ -1050,6 +1062,7 @@ namespace {
     EXPECT_EQ(result.rtspSessionUrl, "rtsp://127.0.0.1:48010");
   }
 
+  /** @brief Preserve the sign bit of the key ID when resuming a stream. */
   TEST(HostPairingTest, ResumesTheRunningSessionWhenTheRequestedAppIsAlreadyActive) {
     const network::PairingIdentity identity = network::create_pairing_identity();
     ASSERT_TRUE(network::is_valid_pairing_identity(identity));
@@ -1079,6 +1092,7 @@ namespace {
           EXPECT_NE(request.pathAndQuery.find("/resume?uniqueid=" + identity.uniqueId), std::string::npos);
           EXPECT_TRUE(extract_query_parameter(request.pathAndQuery, "appid").empty());
           EXPECT_TRUE(extract_query_parameter(request.pathAndQuery, "mode").empty());
+          EXPECT_EQ(extract_query_parameter(request.pathAndQuery, "rikeyid"), "-19088744");
         },
         true,
         200,
@@ -1104,7 +1118,7 @@ namespace {
           false,
           6000,
           std::string(32U, 'a'),
-          std::string(32U, 'b'),
+          "fedcba98" + std::string(24U, 'b'),
         },
         &result,
         &errorMessage

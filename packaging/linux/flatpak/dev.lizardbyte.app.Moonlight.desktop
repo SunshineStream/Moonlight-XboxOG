@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Moonlight
+Comment=Stream games from Sunshine
+Exec=moonlight
+Icon=dev.lizardbyte.app.Moonlight
+Terminal=false
+Type=Application
+Categories=Game;

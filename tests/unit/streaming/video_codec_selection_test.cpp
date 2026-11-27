@@ -35,3 +35,14 @@ TEST(VideoCodecSelectionTest, ExplicitChoicesAdvertiseOnlyTheRequestedCodec) {
   EXPECT_EQ(streaming::supported_video_formats(app::VideoCodecSelection::mpeg2, SCM_H264), VIDEO_FORMAT_MPEG2);
   EXPECT_EQ(streaming::supported_video_formats(app::VideoCodecSelection::h263p, SCM_H264), VIDEO_FORMAT_H263P);
 }
+
+/** @brief Negotiation only advertises decoder and host intersections for portable SDR. */
+TEST(VideoCodecSelectionTest, PortableFormatsRequireMatchingDecodersAndHostCapabilities) {
+  constexpr int modern = VIDEO_FORMAT_H264 | VIDEO_FORMAT_H265 | VIDEO_FORMAT_AV1_MAIN8;
+  constexpr int host = SCM_H264 | SCM_HEVC | SCM_AV1_MAIN8;
+  EXPECT_EQ(streaming::portable_video_formats(modern, host), modern);
+  EXPECT_EQ(streaming::portable_video_formats(modern, 0), VIDEO_FORMAT_H264);
+  EXPECT_EQ(streaming::portable_video_formats(modern, SCM_AV1_MAIN10 | SCM_HEVC_MAIN10), VIDEO_FORMAT_H264);
+  EXPECT_EQ(streaming::portable_video_formats(VIDEO_FORMAT_H264 | VIDEO_FORMAT_AV1_MAIN8, host), VIDEO_FORMAT_H264 | VIDEO_FORMAT_AV1_MAIN8);
+  EXPECT_EQ(streaming::portable_video_formats(VIDEO_FORMAT_H265_MAIN10, host), 0);
+}

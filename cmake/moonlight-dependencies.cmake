@@ -211,7 +211,7 @@ function(_moonlight_run_windows_ffmpeg_command description nxdk_shell_path ffmpe
             "cd ${quoted_ffmpeg_build_shell_path}; "
             "exec ${ffmpeg_command}")
     execute_process(
-            COMMAND "${msys2_shell}" -defterm -here -no-start -mingw64 -c "${ffmpeg_script}"
+            COMMAND "${msys2_shell}" -defterm -here -no-start -ucrt64 -c "${ffmpeg_script}"
             RESULT_VARIABLE ffmpeg_command_result
     )
     if(NOT ffmpeg_command_result EQUAL 0)
@@ -351,6 +351,11 @@ function(_moonlight_configure_common_warnings)
         return()
     endif()
 
+    if(CMAKE_GENERATOR STREQUAL "Xcode")
+        # Xcode enables this warning for the pinned dependency's SDP integer conversions.
+        target_compile_options(moonlight-common-c PRIVATE -Wno-error=shorten-64-to-32)
+    endif()
+
     # Clang 23 diagnoses upstream's debug counters when NDEBUG removes their assertion reads.
     # Probe the warning directly because nxdk wrappers can have an unknown CMake compiler ID.
     include(CheckCCompilerFlag)
@@ -360,9 +365,23 @@ function(_moonlight_configure_common_warnings)
     endif()
 endfunction()
 
+# Keep Homebrew's headers behind the bundled OpenSSL headers on native macOS builds.
+function(moonlight_prioritize_bundled_openssl_headers target)
+    if(APPLE AND NOT CMAKE_CROSSCOMPILING)
+        set_property(TARGET "${target}" PROPERTY NO_SYSTEM_FROM_IMPORTED TRUE)
+        target_include_directories("${target}" BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
+    endif()
+endfunction()
+
 # Prepare dependencies that are common to multiple Moonlight components
 macro(MOONLIGHT_PREPARE_COMMON_DEPENDENCIES)
-    include(GetOpenSSL REQUIRED)
+    if(BUILD_NATIVE_CLIENT AND CMAKE_CROSSCOMPILING AND NOT MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
+        # Cross SDKs supply their own static OpenSSL builds for the selected ABI.
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+        find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto SSL)
+    else()
+        include(GetOpenSSL REQUIRED)
+    endif()
 
     if(NOT TARGET moonlight-openssl)
         add_library(moonlight-openssl INTERFACE)

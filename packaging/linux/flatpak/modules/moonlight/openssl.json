@@ -1,0 +1,20 @@
+[
+  {
+    "type": "git",
+    "x-renovate": {
+      "datasource": "github-tags",
+      "depName": "openssl/openssl",
+      "versioning": "regex:^openssl-(?<major>[0-9]+)[.](?<minor>[0-9]+)[.](?<patch>[0-9]+)$"
+    },
+    "url": "https://github.com/openssl/openssl.git",
+    "tag": "openssl-4.1.0",
+    "commit": "2f4e3a5fec05394068cfa7379890ab552483a8a6",
+    "disable-submodules": true,
+    "dest": "deps/openssl",
+    "x-checker-data": {
+      "type": "git",
+      "tag-pattern": "^openssl-([0-9]+[.][0-9]+[.][0-9]+)$",
+      "version-scheme": "semantic"
+    }
+  }
+]

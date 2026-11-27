@@ -7,18 +7,47 @@
   },
   "configurePresets": [
     {
-      "name": "nxdk-release (mingw64)",
-      "displayName": "Release (mingw64)",
+      "name": "client",
+      "displayName": "SDL client",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/cmake-build-client",
+      "cacheVariables": {
+        "BUILD_NATIVE_CLIENT": "ON",
+        "BUILD_XBOX": "OFF",
+        "BUILD_DOCS": "OFF",
+        "BUILD_TESTS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "client-ucrt64",
+      "displayName": "SDL client (UCRT64)",
+      "inherits": "client",
+      "generator": "Ninja",
+      "toolchainFile": "${sourceDir}/cmake/host-ucrt64-clang.cmake",
+      "binaryDir": "${sourceDir}/cmake-build-client-ucrt64",
+      "environment": {
+        "MSYSTEM": "UCRT64"
+      },
+      "cacheVariables": {
+        "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
+        "MOONLIGHT_USE_PREBUILT_FFMPEG": "ON"
+      }
+    },
+    {
+      "name": "nxdk-release (ucrt64)",
+      "displayName": "Xbox and Host Tests Release (UCRT64)",
       "description": "Build host tests natively with MinGW Makefiles and drive the Xbox target through an internal nxdk child configure",
       "generator": "MinGW Makefiles",
-      "toolchainFile": "${sourceDir}/cmake/host-mingw64-clang.cmake",
-      "binaryDir": "${sourceDir}/cmake-build-release",
+      "toolchainFile": "${sourceDir}/cmake/host-ucrt64-clang.cmake",
+      "binaryDir": "${sourceDir}/cmake-build-release-ucrt64",
       "environment": {
         "CHERE_INVOKING": "1",
-        "MSYSTEM": "MINGW64"
+        "MSYSTEM": "UCRT64"
       },
       "cacheVariables": {
         "BUILD_DOCS": "ON",
+        "BUILD_NATIVE_CLIENT": "OFF",
         "BUILD_TESTS": "ON",
         "BUILD_XBOX": "ON",
         "CMAKE_DEPENDS_USE_COMPILER": "FALSE",
@@ -26,43 +55,44 @@
       }
     },
     {
-      "name": "nxdk-debug (mingw64)",
-      "displayName": "Debug (mingw64)",
+      "name": "nxdk-debug (ucrt64)",
+      "displayName": "Xbox and Host Tests Debug (UCRT64)",
       "description": "Debug host build with the internal nxdk Xbox child configure enabled",
-      "inherits": "nxdk-release (mingw64)",
-      "binaryDir": "${sourceDir}/cmake-build-nxdk-debug",
+      "inherits": "nxdk-release (ucrt64)",
+      "binaryDir": "${sourceDir}/cmake-build-nxdk-debug-ucrt64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
     },
     {
-      "name": "xbox-release (mingw64)",
-      "displayName": "Xbox Release (mingw64)",
-      "description": "Direct nxdk Xbox configure for IDE/code-model support on Xbox-only sources",
+      "name": "xbox-release (ucrt64)",
+      "displayName": "Xbox Release (UCRT64)",
+      "description": "Build the Original Xbox ISO directly with nxdk",
       "generator": "Unix Makefiles",
       "toolchainFile": "${sourceDir}/cmake/nxdk-toolchain.cmake",
-      "binaryDir": "${sourceDir}/cmake-build-xbox-release",
+      "binaryDir": "${sourceDir}/cmake-build-xbox-release-ucrt64",
       "environment": {
         "CHERE_INVOKING": "1",
-        "MSYSTEM": "MINGW64"
+        "MSYSTEM": "UCRT64"
       },
       "cacheVariables": {
         "BUILD_DOCS": "OFF",
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_DEPENDS_USE_COMPILER": "FALSE",
+        "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_MAKE_PROGRAM": "C:/msys64/usr/bin/make.exe",
         "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
         "MOONLIGHT_BUILD_KIND": "XBOX",
+        "MOONLIGHT_NXDK_NATIVE_COMPILER": "ON",
         "MOONLIGHT_NXDK_DIR": "${sourceDir}/third-party/nxdk"
       }
     },
     {
-      "name": "xbox-debug (mingw64)",
-      "displayName": "Xbox Debug (mingw64)",
-      "description": "Direct nxdk Xbox configure for IDE/code-model support on Xbox-only sources",
-      "inherits": "xbox-release (mingw64)",
-      "binaryDir": "${sourceDir}/cmake-build-xbox-debug",
+      "name": "xbox-debug (ucrt64)",
+      "displayName": "Xbox Debug (UCRT64)",
+      "description": "Build the Original Xbox ISO directly with nxdk and debug symbols",
+      "inherits": "xbox-release (ucrt64)",
+      "binaryDir": "${sourceDir}/cmake-build-xbox-debug-ucrt64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -70,20 +100,32 @@
   ],
   "buildPresets": [
     {
-      "name": "nxdk-release (mingw64)",
-      "configurePreset": "nxdk-release (mingw64)"
+      "name": "client",
+      "configurePreset": "client",
+      "targets": ["moonlight_client"]
     },
     {
-      "name": "nxdk-debug (mingw64)",
-      "configurePreset": "nxdk-debug (mingw64)"
+      "name": "client-ucrt64",
+      "configurePreset": "client-ucrt64",
+      "targets": ["moonlight_client"]
     },
     {
-      "name": "xbox-release (mingw64)",
-      "configurePreset": "xbox-release (mingw64)"
+      "name": "nxdk-release (ucrt64)",
+      "configurePreset": "nxdk-release (ucrt64)"
     },
     {
-      "name": "xbox-debug (mingw64)",
-      "configurePreset": "xbox-debug (mingw64)"
+      "name": "nxdk-debug (ucrt64)",
+      "configurePreset": "nxdk-debug (ucrt64)"
+    },
+    {
+      "name": "xbox-release (ucrt64)",
+      "configurePreset": "xbox-release (ucrt64)",
+      "targets": ["moonlight_xbox"]
+    },
+    {
+      "name": "xbox-debug (ucrt64)",
+      "configurePreset": "xbox-debug (ucrt64)",
+      "targets": ["moonlight_xbox"]
     }
   ]
 }

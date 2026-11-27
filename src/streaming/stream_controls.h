@@ -119,6 +119,29 @@ namespace streaming {
      * @return True when the user confirms quit or closes the application window.
      */
     bool pump(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool active, bool &statisticsEnabled);
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    /**
+     * @brief Apply host feedback to the local SDL device in a protocol slot.
+     * @param slot Host controller number.
+     * @param first Left trigger or low-frequency motor level.
+     * @param second Right trigger or high-frequency motor level.
+     * @param triggers True for trigger motors.
+     */
+    void rumble(unsigned int slot, std::uint16_t first, std::uint16_t second, bool triggers);
+    /**
+     * @brief Start or stop motion reports for one host controller.
+     * @param slot Host controller number.
+     * @param motionType Protocol motion sensor selector.
+     * @param rate Requested reports per second, or zero to stop.
+     */
+    void set_motion_reporting(unsigned int slot, std::uint8_t motionType, std::uint16_t rate);
+    /**
+     * @brief Set the light color of a controller assigned to a host slot.
+     * @param slot Host controller number.
+     * @param rgb Packed red, green and blue values.
+     */
+    void set_controller_led(unsigned int slot, std::uint32_t rgb);
+#endif
     /**
      * @brief Check whether a local screen currently owns the video overlay.
      * @return True while the radial menu, keyboard, log viewer or confirmation is visible.
@@ -145,20 +168,6 @@ namespace streaming {
     };
 
     /**
-     * @brief Release panel caches before destroying their renderer and surface.
-     */
-    void clear_panel();
-    /**
-     * @brief Draw cached text without rerasterizing unchanged labels on each selection.
-     * @param renderer Retained panel renderer.
-     * @param font Label font.
-     * @param text UTF-8 label.
-     * @param bounds Label bounds.
-     * @param style Text alignment, background and color.
-     */
-    void label(SDL_Renderer *renderer, TTF_Font *font, const std::string &text, SDL_Rect bounds, const StreamLabelStyle &style = {});
-
-    /**
      * @brief Independent controller state and shortcut latch.
      */
     struct Device {
@@ -167,13 +176,27 @@ namespace streaming {
       input::StreamExitChord chord;  ///< Event-order chord detection.
       input::ControllerState sample {};  ///< Latest sampled state.
       bool chordDown = false;  ///< Chord edge latch.
+#ifdef MOONLIGHT_NATIVE_CLIENT
+      std::array<std::uint16_t, 2> motionRate {};  ///< Accelerometer and gyro rates requested by the host.
+      std::array<Uint64, 2> lastMotionTimestamp {};  ///< Last event timestamp forwarded per sensor.
+#endif
     };
 
+#ifdef MOONLIGHT_NATIVE_CLIENT
     /**
-     * @brief Refresh live log entries while preserving a scrolled reading position.
-     * @param now Monotonic millisecond tick.
+     * @brief Forward controller touch, sensor and battery events for an active stream.
+     * @param event SDL event consumed by the input pump.
      */
-    void refresh_logs(Uint32 now);
+    void forward_gamepad_event(const SDL_Event &event);
+
+    /**
+     * @brief Resolve a local gamepad to its stable host slot.
+     * @param device SDL joystick ID.
+     * @return Host slot, or -1 when the device has yet to connect.
+     */
+    int gamepad_slot(SDL_JoystickID device) const;
+#endif
+
     /**
      * @brief Publish local controls or capture feedback through the shared overlay.
      * @param backend Streaming backend.
@@ -260,22 +283,6 @@ namespace streaming {
      */
     void render_exit_confirmation(SDL_Renderer *renderer, TTF_Font *font, int width, int height);
     /**
-     * @brief Allocate panel geometry when needed and enforce the raster cache budget.
-     * @param backend Presentation owner of the previous raster.
-     * @param width Panel width.
-     * @param height Panel height.
-     * @return True when a panel renderer is available.
-     */
-    bool prepare_panel(FfmpegStreamBackend &backend, int width, int height);
-    /**
-     * @brief Publish changed panel regions through the shared GPU and software overlay.
-     * @param backend Overlay backend.
-     * @param keyboard Opaque docked keyboard placement.
-     * @param focusOnly Publish only damaged regions.
-     * @param scale Output pixels per raster sample.
-     */
-    void publish_panel(FfmpegStreamBackend &backend, bool keyboard, bool focusOnly, int scale) const;
-    /**
      * @brief Draw the keyboard, optionally repainting only the old and new focus cells.
      * @param renderer Software panel renderer.
      * @param font Keyboard font.
@@ -285,15 +292,6 @@ namespace streaming {
      * @param focusOnly Retain unchanged keys and helpers during directional navigation.
      */
     void render_keyboard(SDL_Renderer *renderer, TTF_Font *font, int width, int height, int rowHeight, bool focusOnly = false);
-    /**
-     * @brief Draw a cached SVG raster on the current software panel.
-     * @param renderer Panel renderer.
-     * @param asset Icon filename under assets/icons.
-     * @param bounds Destination bounds.
-     * @param clip Optional repaint rectangle, applied through source cropping rather than renderer clipping.
-     * @return True when the icon was drawn.
-     */
-    bool render_icon(SDL_Renderer *renderer, const char *asset, SDL_Rect bounds, const SDL_Rect *clip = nullptr);
     /**
      * @brief Draw a controller glyph or keyboard keycap beside its action label.
      * @param renderer Panel renderer.
@@ -489,6 +487,52 @@ namespace streaming {
      * @brief Retained overlay surfaces, rasters and content invalidation.
      */
     struct PanelCache {
+      /**
+       * @brief Release panel caches before destroying their renderer and surface.
+       */
+      void clear();
+      /**
+       * @brief Draw cached text without rerasterizing unchanged labels on each selection.
+       * @param target Retained panel renderer.
+       * @param font Label font.
+       * @param caption UTF-8 label.
+       * @param bounds Label bounds.
+       * @param style Text alignment, background and color.
+       */
+      void label(SDL_Renderer *target, TTF_Font *font, const std::string &caption, SDL_Rect bounds, const StreamLabelStyle &style = {});
+      /**
+       * @brief Draw a cached SVG raster on the current software panel.
+       * @param target Panel renderer.
+       * @param asset Icon filename under assets/icons.
+       * @param bounds Destination bounds.
+       * @param clip Optional repaint rectangle, applied through source cropping rather than renderer clipping.
+       * @return True when the icon was drawn.
+       */
+      bool render_icon(SDL_Renderer *target, const char *asset, SDL_Rect bounds, const SDL_Rect *clip = nullptr);
+      /**
+       * @brief Refresh live log entries while preserving a scrolled reading position.
+       * @param menu Log page and scroll offset.
+       * @param now Monotonic millisecond tick.
+       */
+      void refresh_logs(input::StreamMenu &menu, Uint32 now);
+      /**
+       * @brief Allocate panel geometry when needed and enforce the raster cache budget.
+       * @param backend Presentation owner of the previous raster.
+       * @param panelWidth Panel width.
+       * @param panelHeight Panel height.
+       * @return True when a panel renderer is available.
+       */
+      bool prepare(FfmpegStreamBackend &backend, int panelWidth, int panelHeight);
+      /**
+       * @brief Publish changed panel regions through the shared GPU and software overlay.
+       * @param backend Overlay backend.
+       * @param keyboard Opaque docked keyboard placement.
+       * @param dockTop Place the keyboard at the top edge.
+       * @param focusOnly Publish only damaged regions.
+       * @param scale Output pixels per raster sample.
+       */
+      void publish(FfmpegStreamBackend &backend, bool keyboard, bool dockTop, bool focusOnly, int scale) const;
+
       bool dirty = false;  ///< Overlay requires rasterization.
       std::string message;  ///< Last action result.
       std::vector<std::string> logs;  ///< Snapshot of runtime log lines.

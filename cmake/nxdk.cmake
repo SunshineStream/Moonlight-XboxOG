@@ -90,9 +90,9 @@ function(_moonlight_get_nxdk_path out_var nxdk_dir)
     endif()
 
     if(CMAKE_HOST_WIN32)
-        moonlight_get_windows_msys2_msystem_bin(_msys2_mingw_bin mingw64)
+        moonlight_get_windows_msys2_msystem_bin(_msys2_ucrt_bin)
         moonlight_get_windows_msys2_usr_bin(_msys2_usr_bin)
-        list(APPEND path_entries "${_msys2_mingw_bin}" "${_msys2_usr_bin}")
+        list(APPEND path_entries "${_msys2_ucrt_bin}" "${_msys2_usr_bin}")
         file(TO_CMAKE_PATH "$ENV{PATH}" _existing_path)
         if(NOT _existing_path STREQUAL "")
             list(APPEND path_entries ${_existing_path})
@@ -129,7 +129,7 @@ function(moonlight_run_nxdk_command description nxdk_dir working_directory)
         )
 
         execute_process(
-                COMMAND "${_msys2_shell}" -defterm -here -no-start -mingw64 -c "${_shell_script}"
+                COMMAND "${_msys2_shell}" -defterm -here -no-start -ucrt64 -c "${_shell_script}"
                 RESULT_VARIABLE _moonlight_command_result
         )
     else()
@@ -176,6 +176,16 @@ function(_moonlight_has_missing_output out_var)
     set(${out_var} "${missing_output}" PARENT_SCOPE)
 endfunction()
 
+# Run the SDK's packaging tool builds with a host compiler, including from a direct Xbox configure.
+function(_moonlight_run_nxdk_host_tool_command description nxdk_dir working_directory)
+    set(host_command ${ARGN})
+    if(CMAKE_CROSSCOMPILING)
+        # CMake can export the target compiler through CC and CXX during project().
+        list(PREPEND host_command "${CMAKE_COMMAND}" -E env --unset=CC --unset=CXX)
+    endif()
+    moonlight_run_nxdk_command("${description}" "${nxdk_dir}" "${working_directory}" ${host_command})
+endfunction()
+
 # Build the vendored cxbe tool when it is missing.
 function(_moonlight_prepare_cxbe nxdk_dir cxbe_path)
     if(EXISTS "${cxbe_path}")
@@ -184,12 +194,12 @@ function(_moonlight_prepare_cxbe nxdk_dir cxbe_path)
 
     message(STATUS "Preparing cxbe at ${nxdk_dir}")
     if(CMAKE_HOST_WIN32)
-        moonlight_run_nxdk_command("cxbe build" "${nxdk_dir}" "${nxdk_dir}/tools/cxbe" make)
+        _moonlight_run_nxdk_host_tool_command("cxbe build" "${nxdk_dir}" "${nxdk_dir}/tools/cxbe" make)
         return()
     endif()
 
     _moonlight_get_xbox_make_program(host_make_program)
-    moonlight_run_nxdk_command("cxbe build" "${nxdk_dir}" "${nxdk_dir}/tools/cxbe" "${host_make_program}")
+    _moonlight_run_nxdk_host_tool_command("cxbe build" "${nxdk_dir}" "${nxdk_dir}/tools/cxbe" "${host_make_program}")
 endfunction()
 
 # Configure and build the vendored extract-xiso tool when it is missing.
@@ -201,7 +211,7 @@ function(_moonlight_prepare_extract_xiso nxdk_dir source_dir build_dir output_pa
     message(STATUS "Preparing extract-xiso at ${nxdk_dir}")
     file(REMOVE_RECURSE "${build_dir}")
     file(MAKE_DIRECTORY "${build_dir}")
-    moonlight_run_nxdk_command(
+    _moonlight_run_nxdk_host_tool_command(
             "extract-xiso configure"
             "${nxdk_dir}"
             "${nxdk_dir}"
@@ -210,7 +220,7 @@ function(_moonlight_prepare_extract_xiso nxdk_dir source_dir build_dir output_pa
             -B "${build_dir}"
             -G "Unix Makefiles"
     )
-    moonlight_run_nxdk_command(
+    _moonlight_run_nxdk_host_tool_command(
             "extract-xiso build"
             "${nxdk_dir}"
             "${nxdk_dir}"

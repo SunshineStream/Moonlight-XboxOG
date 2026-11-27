@@ -11,23 +11,54 @@
 #include <optional>
 #include <string>
 
-// nxdk includes
-#include <hal/xbox.h>
+// lib includes
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
-#include <windows.h>  // NOSONAR(cpp:S3806) nxdk requires lowercase header names
+
+#ifdef __ANDROID__
+  #include <jni.h>
+#endif
+
+#ifdef NXDK
+  #include <hal/xbox.h>
+#endif
 
 // local includes
 #include "src/logging/logger.h"
-#include "src/os.h"
 #include "src/splash/splash_animation.h"
 #include "src/splash/splash_layout.h"
+#include "src/ui/asset_path.h"
 
 namespace {
 
-  constexpr Uint8 SPLASH_BACKGROUND_RED = 0x56;
-  constexpr Uint8 SPLASH_BACKGROUND_GREEN = 0x5C;
-  constexpr Uint8 SPLASH_BACKGROUND_BLUE = 0x64;
+  constexpr SDL_Color SPLASH_BACKGROUND {0x56, 0x5C, 0x64, 0xFF};
+
+  /**
+   * @brief Remove the Android window cover after SDL has a frame ready to display.
+   */
+  void reveal_splash_surface() {
+#ifdef __ANDROID__
+    auto *env = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+    if (env == nullptr) {
+      return;
+    }
+    auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+    if (activity == nullptr) {
+      return;
+    }
+    if (const auto activityClass = env->GetObjectClass(activity); activityClass != nullptr) {
+      if (const auto reveal = env->GetMethodID(activityClass, "revealStartupSurface", "()V"); reveal != nullptr) {
+        env->CallVoidMethod(activity, reveal);
+      }
+      env->DeleteLocalRef(activityClass);
+    }
+    env->DeleteLocalRef(activity);
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      logging::warn("splash", "Could not remove the Android launch background.");
+    }
+#endif
+  }
 
   /**
    * @brief One independently animated wedge of the Moonlight logo.
@@ -46,13 +77,15 @@ namespace {
   };
 
   /**
-   * @brief Log a splash rendering error and reboot after a delay.
+   * @brief Log a splash rendering error and reboot the original Xbox after a delay.
    */
   void printSDLErrorAndReboot() {
     logging::error("splash", std::string("SDL error: ") + SDL_GetError());
+#ifdef NXDK
     logging::warn("splash", "Rebooting in 5 seconds.");
-    Sleep(5000);
+    SDL_Delay(5000);
     XReboot();
+#endif
   }
 
   /**
@@ -78,7 +111,7 @@ namespace {
    * @return True when all wedge surfaces are ready to blend onto the splash background.
    */
   bool load_splash_logo(const SDL_Surface &screenSurface, const VIDEO_MODE &videoMode, SplashLogo &logo) {
-    const auto path = std::string(DATA_PATH) + "assets" + PATH_SEP + "moonlight-logo-wedges.svg";
+    const auto path = ui::build_asset_path("moonlight-logo-wedges.svg");
     const std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> atlas(IMG_Load(path.c_str()), SDL_DestroySurface);
     if (!atlas) {
       logging::error("splash", "Failed to load splash asset " + path + ": " + SDL_GetError());
@@ -94,7 +127,12 @@ namespace {
       return false;
     }
 
-    const auto layout = splash::calculate_logo_destination(screenSurface.w, screenSurface.h, tileSize * 2, tileSize * 2, videoMode, XVideoGetEncoderSettings());
+#ifdef NXDK
+    const auto encoderSettings = XVideoGetEncoderSettings();
+#else
+    const auto encoderSettings = VIDEO_WIDESCREEN;
+#endif
+    const auto layout = splash::calculate_logo_destination(screenSurface.w, screenSurface.h, tileSize * 2, tileSize * 2, videoMode, encoderSettings);
     const int left = layout.width / 2;
     const int top = layout.height / 2;
     const int right = layout.width - left;
@@ -149,7 +187,7 @@ namespace {
   }
 
   /**
-   * @brief Present the boot splash on the CPU framebuffer while startup runs.
+   * @brief Present the boot splash while startup runs, rebuilding its artwork on resize.
    *
    * @param window Startup window.
    * @param videoMode Active Xbox display mode.
@@ -159,36 +197,53 @@ namespace {
   void run_splash_screen(SDL_Window *window, const VIDEO_MODE &videoMode, const std::function<bool()> &keepShowing, splash::SplashAnimation animation) {  // NOSONAR(cpp:S5213) splash callback API is cold-path and already shared by callers
     SDL_SetLogPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
     SDL_Surface *screenSurface = SDL_GetWindowSurface(window);
-    if (screenSurface == nullptr) {
-      printSDLErrorAndReboot();
-      return;
-    }
-
     SplashLogo logo;
-    if (!load_splash_logo(*screenSurface, videoMode, logo)) {
+    if (screenSurface == nullptr || !load_splash_logo(*screenSurface, videoMode, logo)) {
       printSDLErrorAndReboot();
+      SDL_DestroyWindowSurface(window);
+      reveal_splash_surface();
       return;
     }
 
-    const Uint32 background = SDL_MapSurfaceRGB(screenSurface, SPLASH_BACKGROUND_RED, SPLASH_BACKGROUND_GREEN, SPLASH_BACKGROUND_BLUE);
     const Uint64 startTicks = SDL_GetTicks();
     std::optional<splash::SplashAnimationFrame> lastFrame;
+    const SDL_WindowID windowId = SDL_GetWindowID(window);
+    bool surfaceRevealed = false;
     bool done = false;
     do {
+      bool resized = false;
       SDL_Event event;
       while (SDL_PollEvent(&event)) {
         done |= event.type == SDL_EVENT_QUIT;
+        resized |= event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED && event.window.windowID == windowId;
+      }
+      if (resized) {
+        screenSurface = SDL_GetWindowSurface(window);
+        if (screenSurface == nullptr || !load_splash_logo(*screenSurface, videoMode, logo)) {
+          printSDLErrorAndReboot();
+          break;
+        }
+        lastFrame.reset();
       }
       const Uint64 elapsed = SDL_GetTicks() - startTicks;
       const auto frame = animation.advance(elapsed, !keepShowing());
       if (!lastFrame || lastFrame->firstWedgeScale != frame.firstWedgeScale || lastFrame->brightness != frame.brightness) {
+        const Uint32 background = SDL_MapSurfaceRGB(screenSurface, SPLASH_BACKGROUND.r, SPLASH_BACKGROUND.g, SPLASH_BACKGROUND.b);
         // Paint the full background once. Subsequent frames touch only the animated region.
         const SDL_Rect *dirty = lastFrame ? &logo.bounds : nullptr;
-        if (!SDL_FillSurfaceRect(screenSurface, dirty, background) || !draw_splash_logo(screenSurface, logo, frame) || !(dirty ? SDL_UpdateWindowSurfaceRects(window, dirty, 1) : SDL_UpdateWindowSurface(window))) {
-          printSDLErrorAndReboot();
-          break;
+        const bool presented = SDL_FillSurfaceRect(screenSurface, dirty, background) &&
+                               draw_splash_logo(screenSurface, logo, frame) &&
+                               (dirty ? SDL_UpdateWindowSurfaceRects(window, dirty, 1) : SDL_UpdateWindowSurface(window));
+        if (presented && !surfaceRevealed) {
+          reveal_splash_surface();
+          surfaceRevealed = true;
         }
-        lastFrame = frame;
+        if (presented) {
+          lastFrame = frame;
+        } else {
+          printSDLErrorAndReboot();
+          done = true;
+        }
       }
       done |= frame.finished;
       if (!done) {
@@ -198,6 +253,9 @@ namespace {
 
     // Release the splash framebuffer before creating the interactive renderer.
     SDL_DestroyWindowSurface(window);
+    if (!surfaceRevealed) {
+      reveal_splash_surface();
+    }
   }
 
 }  // namespace

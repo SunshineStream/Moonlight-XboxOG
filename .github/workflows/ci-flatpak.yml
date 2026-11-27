@@ -1,0 +1,83 @@
+---
+name: CI-Flatpak
+permissions: {}
+
+on:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    env:
+      FLATPAK_APP_ID: dev.lizardbyte.app.Moonlight
+      FLATPAK_ARCH: ${{ matrix.arch }}
+      FLATPAK_MODULE_DIR: cmake-build-flatpak/.flatpak-builder/build/moonlight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Configure Flatpak manifest
+        env:
+          REPOSITORY_CLONE_URL: ${{ github.event.repository.clone_url }}
+        run: |
+          commit="$(git rev-parse HEAD)"
+          mkdir -p cmake-build-flatpak
+          cd cmake-build-flatpak || exit
+          cmake "-DGITHUB_CLONE_URL=${REPOSITORY_CLONE_URL}" \
+            "-DGITHUB_COMMIT=${commit}" -P ../packaging/linux/flatpak/configure.cmake
+
+      - name: Install Flatpak SDK
+        working-directory: cmake-build-flatpak
+        run: |
+          runtime_version="$(sed -nE "s/^runtime-version: '([^']+)'$/\1/p" "${FLATPAK_APP_ID}.yml")"
+          test -n "${runtime_version}"
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --or-update flathub org.flatpak.Builder \
+            "org.freedesktop.Platform/${FLATPAK_ARCH}/${runtime_version}" \
+            "org.freedesktop.Sdk/${FLATPAK_ARCH}/${runtime_version}"
+
+      - name: Build Flatpak
+        id: flatpak
+        working-directory: cmake-build-flatpak
+        run: |
+          sudo su "$(whoami)" -c "flatpak run org.flatpak.Builder \
+            --arch=${FLATPAK_ARCH} --force-clean --keep-build-dirs --repo=repo --sandbox \
+            build-moonlight ${FLATPAK_APP_ID}.yml"
+          sudo su "$(whoami)" -c "flatpak build-bundle --arch=${FLATPAK_ARCH} \
+            repo ../Moonlight-${FLATPAK_ARCH}.flatpak ${FLATPAK_APP_ID}"
+
+      - name: Upload Flatpak
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Moonlight-Flatpak-${{ matrix.arch }}
+          path: Moonlight-*.flatpak
+
+      - name: Publish Flatpak test reports
+        if: >-
+          ${{ !cancelled() &&
+          (steps.flatpak.outcome == 'success' ||
+          hashFiles(format('{0}/_flatpak_build/tests/test_results.xml', env.FLATPAK_MODULE_DIR)) != '') }}
+        uses: ./.github/actions/test-and-report
+        with:
+          build-dir: ${{ env.FLATPAK_MODULE_DIR }}/_flatpak_build
+          gcov-source-root: ${{ env.FLATPAK_MODULE_DIR }}
+          platform: Linux-${{ matrix.arch }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}

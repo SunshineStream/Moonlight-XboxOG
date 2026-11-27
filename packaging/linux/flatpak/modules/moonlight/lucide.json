@@ -1,0 +1,19 @@
+[
+  {
+    "type": "git",
+    "x-renovate": {
+      "datasource": "github-tags",
+      "depName": "lucide-icons/lucide",
+      "versioning": "semver"
+    },
+    "url": "https://github.com/lucide-icons/lucide.git",
+    "tag": "1.78.0",
+    "commit": "e00b2b26350fe4dfb6f5273aa366f94974430903",
+    "dest": "deps/lucide",
+    "x-checker-data": {
+      "type": "git",
+      "tag-pattern": "^([0-9]+[.][0-9]+[.][0-9]+)$",
+      "version-scheme": "semantic"
+    }
+  }
+]

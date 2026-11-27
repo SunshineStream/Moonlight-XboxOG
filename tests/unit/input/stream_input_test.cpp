@@ -14,6 +14,16 @@
 #include <lizardbyte/common/testing.h>
 
 /**
+ * @brief Relative mouse capture requires focused gameplay with the stream menu closed.
+ */
+TEST(StreamMouseCaptureTest, RequiresActiveFocusedGameplay) {
+  EXPECT_TRUE(input::should_capture_stream_mouse(true, false, true));
+  EXPECT_FALSE(input::should_capture_stream_mouse(false, false, true));
+  EXPECT_FALSE(input::should_capture_stream_mouse(true, true, true));
+  EXPECT_FALSE(input::should_capture_stream_mouse(true, false, false));
+}
+
+/**
  * @brief Captures ordered transport packets without a host connection.
  */
 class StreamInputTest: public testing::Test {
@@ -31,6 +41,7 @@ TEST_F(StreamInputTest, MaintainsFourStableSlotsAndRemovalMask) {
   EXPECT_EQ(router.connect(-1), -1);
   for (int i = 0; i < 4; ++i) {
     EXPECT_EQ(router.connect(10 + i), i);
+    EXPECT_EQ(router.slot_device(i), 10 + i);
     ASSERT_EQ(packets.size(), static_cast<std::size_t>((i + 1) * 2));
     EXPECT_EQ(packets[packets.size() - 2].type, input::StreamPacketType::arrival);
     EXPECT_EQ(packets.back().mask, (1 << (i + 1)) - 1);
@@ -39,10 +50,13 @@ TEST_F(StreamInputTest, MaintainsFourStableSlotsAndRemovalMask) {
   EXPECT_EQ(router.connect(99), -1);
   EXPECT_EQ(router.active_mask(), 15);
   router.disconnect(11);
+  EXPECT_EQ(router.slot_device(1), -1);
+  EXPECT_EQ(router.slot_device(4), -1);
   EXPECT_EQ(packets.back().slot, 1);
   EXPECT_EQ(packets.back().mask, 13);
   EXPECT_EQ(packets.back().controller.buttonFlags, 0);
   EXPECT_EQ(router.connect(99), 1);
+  EXPECT_EQ(router.slot_device(1), 99);
   EXPECT_EQ(router.connect(12), 2);
   EXPECT_EQ(router.connect(13), 3);
   const auto count = packets.size();

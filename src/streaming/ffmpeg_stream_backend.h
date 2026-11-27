@@ -1,6 +1,6 @@
 /**
  * @file src/streaming/ffmpeg_stream_backend.h
- * @brief Declares the FFmpeg-backed streaming decode backend for Xbox sessions.
+ * @brief Declares the FFmpeg-backed streaming decode backend.
  */
 #pragma once
 
@@ -25,6 +25,7 @@
 #include "src/streaming/stats_overlay.h"
 
 struct AVCodecContext;
+struct AVCodec;
 struct AVFrame;
 struct AVPacket;
 struct SwsContext;
@@ -45,6 +46,14 @@ namespace streaming {
    */
   class FfmpegStreamBackend {
   public:
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    /**
+     * @brief Query the portable FFmpeg decoders available to streaming.
+     * @return Supported 8-bit Moonlight video format flags.
+     */
+    static int available_video_formats();
+#endif
+
     /**
      * @brief Construct an empty backend.
      */
@@ -241,6 +250,12 @@ namespace streaming {
      * @return Moonlight decoder status code.
      */
     int decode_video_decode_unit(PDECODE_UNIT decodeUnit);
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    /**
+     * @brief Reopen the negotiated codec in software after a hardware failure.
+     */
+    void fallback_to_software_decoder();
+#endif
 
     /**
      * @brief Drain decoded frames currently available from FFmpeg.
@@ -269,26 +284,24 @@ namespace streaming {
       std::string directory;  ///< Destination at request time.
       std::int64_t capturedAt = 0;  ///< UTC capture time.
       std::string result;  ///< Detail read only after the worker completes.
-    };
 
-    /**
-     * @brief Convert and save an owned YUV snapshot with lower priority than streaming.
-     * @param context ScreenshotTask owned by this backend until the worker is joined.
-     * @return Zero after publishing a completion result.
-     */
-    static int save_screenshot_worker(ScreenshotTask *context);
-    /**
-     * @brief Convert the owned YUV snapshot into a BGR screenshot without retaining conversion buffers.
-     * @param frame Stable screenshot snapshot.
-     * @return Owned BGR surface, or nullptr when conversion fails.
-     */
-    static SDL_Surface *convert_screenshot_frame(const Yuv420FrameView &frame);
+      /**
+       * @brief Convert and save an owned YUV snapshot with lower priority than streaming.
+       * @param context ScreenshotTask owned by the backend until the worker is joined.
+       * @return Zero after publishing a completion result.
+       */
+      static int save(ScreenshotTask *context);
+    };
 
     /**
      * @brief Hold FFmpeg and SDL state used by the video path.
      */
     struct VideoState {  // NOSONAR(cpp:S1820) Owned video pipeline state intentionally groups FFmpeg, SDL, queue, and metric lifetimes.
       AVCodecContext *codecContext = nullptr;
+#ifdef MOONLIGHT_NATIVE_CLIENT
+      int hardwareFormat = -1;  ///< FFmpeg pixel format returned by the hardware format callback.
+      const AVCodec *softwareFallback = nullptr;  ///< Software implementation of the negotiated hardware codec.
+#endif
       SwsContext *scaleContext = nullptr;
       AVFrame *decodedFrame = nullptr;
       AVFrame *convertedFrame = nullptr;

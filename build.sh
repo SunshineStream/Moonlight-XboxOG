@@ -4,13 +4,18 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--build-dir <dir> | <dir>] [--clean|clean] [--distclean|distclean]"
+  echo "Usage: $0 [--build-dir <dir> | <dir>] [--clean|clean] [--distclean|distclean] [--coverage]"
   return 0
 }
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="cmake-build-release"
+HOST_SYSTEM="$(uname -s)"
+case "${HOST_SYSTEM}" in
+  MINGW*|MSYS*|CYGWIN*) BUILD_DIR="cmake-build-release-ucrt64" ;;
+  *) BUILD_DIR="cmake-build-release" ;;
+esac
 CLEAN_BUILD=0
+ENABLE_TEST_COVERAGE=0
 POSITIONAL_BUILD_DIR_SET=0
 
 while [[ "$#" -gt 0 ]]; do
@@ -30,6 +35,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --distclean|distclean)
       CLEAN_BUILD=1
+      shift
+      ;;
+    --coverage)
+      ENABLE_TEST_COVERAGE=1
       shift
       ;;
     -h|--help)
@@ -59,35 +68,45 @@ case "${BUILD_DIR}" in
     ;;
 esac
 
-if [[ "${CLEAN_BUILD}" -eq 1 ]]; then
-  rm -rf "${BUILD_DIR_PATH}"
-fi
-
 cmake_configure_args=(
   -S .
   -B "${BUILD_DIR_PATH}"
   -DBUILD_DOCS=OFF
+  -DBUILD_NATIVE_CLIENT=OFF
   -DBUILD_TESTS=ON
   -DBUILD_XBOX=ON
   -DCMAKE_DEPENDS_USE_COMPILER=FALSE
   -DCMAKE_BUILD_TYPE=Release
 )
 
-case "$(uname -s)" in
+if [[ "${ENABLE_TEST_COVERAGE}" -eq 1 ]]; then
+  cmake_configure_args+=(-DMOONLIGHT_TEST_COVERAGE=ON)
+fi
+
+case "${HOST_SYSTEM}" in
   MINGW*|MSYS*|CYGWIN*)
+    if [[ "${MSYSTEM:-}" != "UCRT64" ]]; then
+      echo "Run this build from the MSYS2 UCRT64 shell or use build-ucrt64.bat."
+      exit 1
+    fi
     if ! cmake --help 2>/dev/null | grep -q "MinGW Makefiles"; then
-      echo "Windows builds require a CMake that supports MinGW Makefiles. Install the MSYS2 package 'mingw-w64-x86_64-cmake'."
+      echo "Windows builds require a CMake that supports MinGW Makefiles."
+      echo "Install the MSYS2 package 'mingw-w64-ucrt-x86_64-cmake'."
       exit 1
     fi
 
     cmake_configure_args+=(
       -G "MinGW Makefiles"
-      -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/host-mingw64-clang.cmake"
+      -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/host-ucrt64-clang.cmake"
     )
     ;;
   *)
     ;;
 esac
+
+if [[ "${CLEAN_BUILD}" -eq 1 ]]; then
+  rm -rf "${BUILD_DIR_PATH}"
+fi
 
 cmake "${cmake_configure_args[@]}"
 

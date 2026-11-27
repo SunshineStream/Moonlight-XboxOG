@@ -1,6 +1,6 @@
 /**
  * @file src/streaming/ffmpeg_stream_backend.cpp
- * @brief Implements the FFmpeg-backed streaming decode backend for Xbox sessions.
+ * @brief Implements the FFmpeg-backed streaming decode backend.
  */
 // class header include
 #include "src/streaming/ffmpeg_stream_backend.h"
@@ -20,6 +20,9 @@
 // lib includes
 extern "C" {
 #include <libavcodec/avcodec.h>
+#ifdef MOONLIGHT_NATIVE_CLIENT
+  #include <libavutil/hwcontext.h>
+#endif
 #include <libavutil/cpu.h>
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
@@ -101,6 +104,26 @@ namespace {
     av_strerror(errorCode, buffer.data(), buffer.size());
     return std::string(buffer.data());
   }
+
+  /**
+   * @brief Distinguish a receive failure from the normal end of a decoder drain.
+   * @param result FFmpeg frame receive result.
+   * @return True when receiving frames failed and the caller needs a new keyframe.
+   */
+  bool video_receive_failed(int result) {
+    return result < 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
+  }
+
+#ifdef MOONLIGHT_NATIVE_CLIENT
+  /**
+   * @brief Recognize decoder errors that may require switching away from hardware.
+   * @param errorCode FFmpeg packet submission or frame receive result.
+   * @return True for a hardware, I/O or unsupported-operation failure.
+   */
+  bool is_hardware_decoder_failure(int errorCode) {
+    return errorCode == AVERROR_EXTERNAL || errorCode == AVERROR(EIO) || errorCode == AVERROR(ENOSYS);
+  }
+#endif
 
   /**
    * @brief Remove trailing CR and LF characters from an FFmpeg log line.
@@ -210,8 +233,198 @@ namespace {
       selection->displayName = "H.264";
       return true;
     }
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    if ((videoFormat & VIDEO_FORMAT_H265) != 0) {
+      *selection = {AV_CODEC_ID_HEVC, "HEVC"};
+      return true;
+    }
+    if ((videoFormat & VIDEO_FORMAT_AV1_MAIN8) != 0) {
+      *selection = {AV_CODEC_ID_AV1, "AV1"};
+      return true;
+    }
+#endif
 
     return false;
+  }
+
+#ifdef MOONLIGHT_NATIVE_CLIENT
+  /**
+   * @brief Find an FFmpeg software decoder for a portable format.
+   * @param id FFmpeg codec ID.
+   * @return Software decoder, or nullptr when unavailable.
+   */
+  const AVCodec *find_software_decoder(AVCodecID id) {
+    if (id == AV_CODEC_ID_AV1) {
+      if (const AVCodec *decoder = avcodec_find_decoder_by_name("libdav1d"); decoder != nullptr) {
+        return decoder;
+      }
+      return avcodec_find_decoder_by_name("libaom-av1");
+    }
+    return avcodec_find_decoder(id);
+  }
+
+  /**
+   * @brief Find Android's byte-buffer MediaCodec decoder, if built.
+   * @param id FFmpeg codec ID.
+   * @return Matching MediaCodec wrapper on Android, or nullptr.
+   */
+  const AVCodec *find_mediacodec_decoder(AVCodecID id) {
+  #ifdef __ANDROID__
+    switch (id) {
+      case AV_CODEC_ID_H264:
+        return avcodec_find_decoder_by_name("h264_mediacodec");
+      case AV_CODEC_ID_HEVC:
+        return avcodec_find_decoder_by_name("hevc_mediacodec");
+      case AV_CODEC_ID_AV1:
+        return avcodec_find_decoder_by_name("av1_mediacodec");
+      default:
+        return nullptr;
+    }
+  #else
+    (void) id;
+    return nullptr;
+  #endif
+  }
+
+  /**
+   * @brief Prefer the hardware format if the decoder offers it for this stream.
+   * @param context Decoder context with the selected hardware format.
+   * @param formats Candidate formats for the negotiated stream.
+   * @return An available hardware or software pixel format.
+   */
+  AVPixelFormat select_hardware_pixel_format(AVCodecContext *context, const AVPixelFormat *formats) {
+    const auto requested = *static_cast<const int *>(context->opaque);
+    for (const AVPixelFormat *format = formats; *format != AV_PIX_FMT_NONE; ++format) {
+      if (static_cast<int>(*format) == requested) {
+        return *format;
+      }
+    }
+    return avcodec_default_get_format(context, formats);
+  }
+
+  /**
+   * @brief Attach the first available platform device supported by this decoder.
+   * @param context Decoder context to prepare.
+   * @param codec Codec advertised by FFmpeg.
+   * @param hardwareFormat Receives the device's hardware pixel format.
+   * @return Device name when initialized, or nullptr for software decoding.
+   */
+  const char *attach_hardware_decoder(AVCodecContext &context, const AVCodec &codec, AVPixelFormat &hardwareFormat) {
+  #if defined(_WIN32)
+    constexpr std::array devices {AV_HWDEVICE_TYPE_D3D11VA, AV_HWDEVICE_TYPE_DXVA2};
+  #elif defined(__APPLE__)
+    constexpr std::array devices {AV_HWDEVICE_TYPE_VIDEOTOOLBOX};
+  #elif defined(__linux__) && !defined(__ANDROID__)
+    constexpr std::array devices {AV_HWDEVICE_TYPE_VAAPI, AV_HWDEVICE_TYPE_CUDA};
+  #else
+    constexpr std::array<AVHWDeviceType, 0> devices {};
+  #endif
+    for (const auto device : devices) {
+      for (int index = 0;; ++index) {
+        const AVCodecHWConfig *config = avcodec_get_hw_config(&codec, index);
+        if (config == nullptr) {
+          break;
+        }
+        if (config->device_type == device && (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) != 0 && av_hwdevice_ctx_create(&context.hw_device_ctx, device, nullptr, nullptr, 0) == 0) {
+          hardwareFormat = config->pix_fmt;
+          context.get_format = select_hardware_pixel_format;
+          return av_hwdevice_get_type_name(device);
+        }
+      }
+    }
+    return nullptr;
+  }
+
+  /**
+   * @brief Open a portable FFmpeg decoder with the negotiated picture dimensions.
+   * @param context Allocated decoder context, which may be null after an allocation failure.
+   * @param decoder FFmpeg implementation to open.
+   * @param width Negotiated width in pixels.
+   * @param height Negotiated height in pixels.
+   * @return FFmpeg status code.
+   */
+  int open_portable_decoder(AVCodecContext *context, const AVCodec *decoder, int width, int height) {
+    if (context == nullptr) {
+      return AVERROR(ENOMEM);
+    }
+    context->width = width;
+    context->height = height;
+    context->thread_count = 0;
+    context->thread_type = FF_THREAD_SLICE;
+    context->flags |= AV_CODEC_FLAG_LOW_DELAY;
+    return avcodec_open2(context, decoder, nullptr);
+  }
+
+  /**
+   * @brief Replace a hardware frame with its software copy for conversion and presentation.
+   * @param frame Decoded frame to read back, or an existing software frame to leave in place.
+   * @param staging Temporary frame used for the transfer.
+   * @return Zero on success or a negative FFmpeg error.
+   */
+  int read_hardware_frame(AVFrame &frame, AVFrame &staging) {
+    if (frame.hw_frames_ctx == nullptr) {
+      return 0;
+    }
+    av_frame_unref(&staging);
+    int transfer = av_hwframe_transfer_data(&staging, &frame, 0);
+    if (transfer >= 0) {
+      transfer = av_frame_copy_props(&staging, &frame);
+    }
+    av_frame_unref(&frame);
+    if (transfer < 0) {
+      logging::warn("stream", std::string("Could not read a hardware video frame: ") + describe_ffmpeg_error(transfer));
+      av_frame_unref(&staging);
+      return transfer;
+    }
+    av_frame_move_ref(&frame, &staging);
+    return 0;
+  }
+#endif
+
+  /**
+   * @brief Convert a software frame to the presenter's I420 format.
+   * @param frame Decoded software frame.
+   * @param converted Receives the I420 pixels and presentation metadata.
+   * @param scaleContext Decoder-owned conversion context, replaced when the format changes.
+   * @return Zero on success or a negative FFmpeg error.
+   */
+  int convert_video_frame(const AVFrame &frame, AVFrame &converted, SwsContext *&scaleContext) {
+    scaleContext = sws_getCachedContext(
+      scaleContext,
+      frame.width,
+      frame.height,
+      static_cast<AVPixelFormat>(frame.format),
+      frame.width,
+      frame.height,
+      AV_PIX_FMT_YUV420P,
+      SWS_FAST_BILINEAR,
+      nullptr,
+      nullptr,
+      nullptr
+    );
+    if (scaleContext == nullptr) {
+      logging::warn("stream", "sws_getCachedContext failed for video conversion");
+      return AVERROR(EINVAL);
+    }
+
+    av_frame_unref(&converted);
+    converted.format = AV_PIX_FMT_YUV420P;
+    converted.width = frame.width;
+    converted.height = frame.height;
+    converted.color_range = frame.color_range;
+    converted.colorspace = frame.colorspace;
+    converted.flags = frame.flags;
+    if (const int allocation = av_frame_get_buffer(&converted, 32); allocation < 0) {
+      logging::warn("stream", "av_frame_get_buffer failed for converted video frame");
+      return allocation;
+    }
+
+    if (const int scaled = sws_scale(scaleContext, frame.data, frame.linesize, 0, frame.height, converted.data, converted.linesize); scaled != converted.height) {
+      logging::warn("stream", "sws_scale failed to convert the full video frame");
+      av_frame_unref(&converted);
+      return scaled < 0 ? scaled : AVERROR(EINVAL);
+    }
+    return 0;
   }
 
   int on_video_setup(int videoFormat, int width, int height, int redrawRate, MoonlightCallbackContext *context, int drFlags) {  // NOSONAR(cpp:S5008) moonlight-common-c requires a void* render context callback.
@@ -344,6 +557,18 @@ extern "C" std::size_t moonlight_screenshot_file_write(void *context, const void
 }
 
 namespace streaming {
+#ifdef MOONLIGHT_NATIVE_CLIENT
+  int FfmpegStreamBackend::available_video_formats() {
+    int formats = 0;
+    for (const int format : {VIDEO_FORMAT_H264, VIDEO_FORMAT_H265, VIDEO_FORMAT_AV1_MAIN8}) {
+      VideoCodecSelection selection;
+      if (select_video_codec(format, &selection) && find_software_decoder(selection.codecId) != nullptr) {
+        formats |= format;
+      }
+    }
+    return formats;
+  }
+#endif
 
   VideoAccelerationReport FfmpegStreamBackend::acceleration_report() const {
     return acceleration_;
@@ -372,7 +597,7 @@ namespace streaming {
     screenshot_.progress.store(0);
     screenshot_.complete.store(false);
     screenshot_.thread = SDL_CreateThread([](auto *context) {
-      return save_screenshot_worker(static_cast<ScreenshotTask *>(context));
+      return ScreenshotTask::save(static_cast<ScreenshotTask *>(context));
     },
                                           "save-screenshot",
                                           &screenshot_);
@@ -423,7 +648,12 @@ namespace streaming {
     return saved;
   }
 
-  SDL_Surface *FfmpegStreamBackend::convert_screenshot_frame(const Yuv420FrameView &frame) {
+  /**
+   * @brief Convert the owned YUV snapshot into a BGR screenshot without retaining conversion buffers.
+   * @param frame Stable screenshot snapshot.
+   * @return Owned BGR surface, or nullptr when conversion fails.
+   */
+  static SDL_Surface *convert_screenshot_frame(const Yuv420FrameView &frame) {
     SDL_Surface *surface = SDL_CreateSurface(frame.width, frame.height, SDL_PIXELFORMAT_BGR24);
     if (surface == nullptr) {
       return nullptr;
@@ -448,7 +678,7 @@ namespace streaming {
     return surface;
   }
 
-  int FfmpegStreamBackend::save_screenshot_worker(ScreenshotTask *context) {
+  int FfmpegStreamBackend::ScreenshotTask::save(ScreenshotTask *context) {
     auto &job = *context;
     // Stay below the streaming event loop without starving behind USB/audio work.
     SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL);
@@ -603,11 +833,19 @@ namespace streaming {
 
     VideoCodecSelection codecSelection;
     if (!select_video_codec(videoFormat, &codecSelection)) {
-      logging::error("stream", "The FFmpeg backend supports H.264, MPEG-2/H.262, and H.263+ video streams");
+      logging::error("stream", "The negotiated video format is unsupported by the FFmpeg backend");
       return -1;
     }
 
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    const AVCodec *softwareCodec = find_software_decoder(codecSelection.codecId);
+    const AVCodec *mediaCodec = find_mediacodec_decoder(codecSelection.codecId);
+    const AVCodec *nativeCodec = codecSelection.codecId == AV_CODEC_ID_AV1 ? avcodec_find_decoder_by_name("av1") : softwareCodec;
+    const AVCodec *platformCodec = nativeCodec != nullptr ? nativeCodec : softwareCodec;
+    const AVCodec *codec = mediaCodec != nullptr ? mediaCodec : platformCodec;
+#else
     const AVCodec *codec = avcodec_find_decoder(codecSelection.codecId);
+#endif
     if (codec == nullptr) {
       logging::error("stream", std::string("FFmpeg did not provide a ") + codecSelection.displayName + " decoder");
       return -1;
@@ -624,6 +862,7 @@ namespace streaming {
       return -1;
     }
 
+#ifdef NXDK
     // One decoder worker avoids frame-threading latency on the single-core CPU.
     // FFmpeg's w32threads support still provides its internal synchronization.
     video_.codecContext->thread_count = 1;
@@ -633,15 +872,62 @@ namespace streaming {
     video_.codecContext->err_recognition = AV_EF_EXPLODE;
     video_.codecContext->skip_loop_filter = AVDISCARD_ALL;
     video_.codecContext->skip_idct = AVDISCARD_NONREF;
-    if (const int openResult = avcodec_open2(video_.codecContext, codec, nullptr); openResult < 0) {
+#endif
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    AVPixelFormat hardwareFormat = AV_PIX_FMT_NONE;
+    const char *hardware = mediaCodec != nullptr ? "MediaCodec" : attach_hardware_decoder(*video_.codecContext, *codec, hardwareFormat);
+    if (hardwareFormat != AV_PIX_FMT_NONE) {
+      video_.codecContext->opaque = &video_.hardwareFormat;
+      video_.hardwareFormat = static_cast<int>(hardwareFormat);
+    }
+    if (hardware == nullptr && softwareCodec != nullptr && codec != softwareCodec) {
+      avcodec_free_context(&video_.codecContext);
+      codec = softwareCodec;
+      video_.codecContext = avcodec_alloc_context3(codec);
+    }
+    int openResult = open_portable_decoder(video_.codecContext, codec, width, height);
+    if (openResult < 0 && hardware != nullptr && softwareCodec != nullptr) {
+      avcodec_free_context(&video_.codecContext);
+      video_.codecContext = avcodec_alloc_context3(softwareCodec);
+      hardware = nullptr;
+      openResult = open_portable_decoder(video_.codecContext, softwareCodec, width, height);
+    }
+#else
+    const int openResult = avcodec_open2(video_.codecContext, codec, nullptr);
+#endif
+    if (openResult < 0) {
       logging::error("stream", std::string("avcodec_open2 failed for ") + video_.codecName + ": " + describe_ffmpeg_error(openResult));
       cleanup_video_decoder();
       return openResult;
     }
 
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    if (hardware != nullptr) {
+      video_.softwareFallback = softwareCodec;
+      logging::info("stream", std::string("Opened FFmpeg ") + video_.codecName + " with " + hardware + " acceleration");
+      return 0;
+    }
+#endif
     logging::info("stream", std::string("Using FFmpeg ") + video_.codecName + " software decoding");
     return 0;
   }
+
+#ifdef MOONLIGHT_NATIVE_CLIENT
+  void FfmpegStreamBackend::fallback_to_software_decoder() {
+    const auto *codec = std::exchange(video_.softwareFallback, nullptr);
+    if (codec == nullptr) {
+      return;
+    }
+    AVCodecContext *replacement = avcodec_alloc_context3(codec);
+    if (open_portable_decoder(replacement, codec, video_.codecContext->width, video_.codecContext->height) < 0) {
+      avcodec_free_context(&replacement);
+      return;
+    }
+    avcodec_free_context(&video_.codecContext);
+    video_.codecContext = replacement;
+    logging::warn("stream", std::string("Switched ") + video_.codecName + " decoding to software");
+  }
+#endif
 
   void FfmpegStreamBackend::start_video_decoder() {
     if (video_.decoderThread != nullptr) {
@@ -701,6 +987,9 @@ namespace streaming {
     video_.renderedFrameVersion = 0;
     video_.publishedFrameVersion.store(0);
     video_.codecName = "video";
+#ifdef MOONLIGHT_NATIVE_CLIENT
+    video_.softwareFallback = nullptr;
+#endif
     video_.decoderStopRequested.store(false);
     video_.hasFrame.store(false);
     video_.submittedDecodeUnitCount.store(0);
@@ -840,48 +1129,25 @@ namespace streaming {
       }
       if (receiveResult < 0) {
         logging::warn("stream", std::string("avcodec_receive_frame failed for ") + video_.codecName + ": " + describe_ffmpeg_error(receiveResult));
+#ifdef MOONLIGHT_NATIVE_CLIENT
+        if (is_hardware_decoder_failure(receiveResult)) {
+          fallback_to_software_decoder();
+        }
+#endif
         return receiveResult;
       }
 
+#ifdef MOONLIGHT_NATIVE_CLIENT
+      if (const int transfer = read_hardware_frame(*video_.decodedFrame, *video_.convertedFrame); transfer < 0) {
+        fallback_to_software_decoder();
+        return transfer;
+      }
+#endif
       AVFrame *frameToPresent = video_.decodedFrame;
       if (video_.decodedFrame->format != AV_PIX_FMT_YUV420P) {
-        video_.scaleContext = sws_getCachedContext(
-          video_.scaleContext,
-          video_.decodedFrame->width,
-          video_.decodedFrame->height,
-          static_cast<AVPixelFormat>(video_.decodedFrame->format),
-          video_.decodedFrame->width,
-          video_.decodedFrame->height,
-          AV_PIX_FMT_YUV420P,
-          SWS_FAST_BILINEAR,
-          nullptr,
-          nullptr,
-          nullptr
-        );
-        if (video_.scaleContext == nullptr) {
-          logging::warn("stream", "sws_getCachedContext failed for video conversion");
+        if (const int converted = convert_video_frame(*video_.decodedFrame, *video_.convertedFrame, video_.scaleContext); converted < 0) {
           av_frame_unref(video_.decodedFrame);
-          return AVERROR(EINVAL);
-        }
-
-        av_frame_unref(video_.convertedFrame);
-        video_.convertedFrame->format = AV_PIX_FMT_YUV420P;
-        video_.convertedFrame->width = video_.decodedFrame->width;
-        video_.convertedFrame->height = video_.decodedFrame->height;
-        video_.convertedFrame->color_range = video_.decodedFrame->color_range;
-        video_.convertedFrame->colorspace = video_.decodedFrame->colorspace;
-        video_.convertedFrame->flags = video_.decodedFrame->flags;
-        if (const int allocation = av_frame_get_buffer(video_.convertedFrame, 32); allocation < 0) {
-          logging::warn("stream", "av_frame_get_buffer failed for converted video frame");
-          av_frame_unref(video_.decodedFrame);
-          return allocation;
-        }
-
-        if (const int scaled = sws_scale(video_.scaleContext, video_.decodedFrame->data, video_.decodedFrame->linesize, 0, video_.decodedFrame->height, video_.convertedFrame->data, video_.convertedFrame->linesize); scaled != video_.convertedFrame->height) {
-          logging::warn("stream", "sws_scale failed to convert the full video frame");
-          av_frame_unref(video_.decodedFrame);
-          av_frame_unref(video_.convertedFrame);
-          return scaled < 0 ? scaled : AVERROR(EINVAL);
+          return converted;
         }
         frameToPresent = video_.convertedFrame;
       }
@@ -949,7 +1215,7 @@ namespace streaming {
 
     int sendResult = avcodec_send_packet(video_.codecContext, video_.packet);
     if (sendResult == AVERROR(EAGAIN)) {
-      if (const int drainResult = receive_available_video_frames(); drainResult < 0 && drainResult != AVERROR(EAGAIN) && drainResult != AVERROR_EOF) {
+      if (video_receive_failed(receive_available_video_frames())) {
         av_packet_unref(video_.packet);
         return DR_NEED_IDR;
       }
@@ -958,10 +1224,15 @@ namespace streaming {
     av_packet_unref(video_.packet);
     if (sendResult < 0) {
       logging::warn("stream", std::string("avcodec_send_packet failed for ") + video_.codecName + ": " + describe_ffmpeg_error(sendResult));
+#ifdef MOONLIGHT_NATIVE_CLIENT
+      if (is_hardware_decoder_failure(sendResult)) {
+        fallback_to_software_decoder();
+      }
+#endif
       return DR_NEED_IDR;
     }
 
-    if (const int receiveResult = receive_available_video_frames(); receiveResult < 0 && receiveResult != AVERROR(EAGAIN) && receiveResult != AVERROR_EOF) {
+    if (video_receive_failed(receive_available_video_frames())) {
       return DR_NEED_IDR;
     }
 

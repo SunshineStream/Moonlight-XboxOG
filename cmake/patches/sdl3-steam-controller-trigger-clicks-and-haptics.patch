@@ -1,0 +1,90 @@
+From bc0cbbdd98f18730cce4cf2a26591a89d15ddebf Mon Sep 17 00:00:00 2001
+From: ReenigneArcher <42013603+ReenigneArcher@users.noreply.github.com>
+Date: Tue, 22 Sep 2026 10:02:52 -0400
+Subject: [PATCH] hidapi: expose Steam Controller trigger clicks and haptics
+
+
+Backport to SDL 3.4.18. The stable driver already exposes capacitive
+contacts as raw joystick buttons. Preserve their raw indices and map the
+new trigger clicks through misc3 and misc4, as in the upstream commit.
+
+diff --git a/src/joystick/SDL_gamepad.c b/src/joystick/SDL_gamepad.c
+index 9867eb0..051eb47 100644
+--- a/src/joystick/SDL_gamepad.c
++++ b/src/joystick/SDL_gamepad.c
+@@ -1255,8 +1255,8 @@ static GamepadMapping_t *SDL_CreateMappingForHIDAPIGamepad(SDL_GUID guid)
+             // The Steam Deck's built-in controller has QAM, 4 back buttons, L/R trackpads, and L/R capacitive touch sticks
+             SDL_strlcat(mapping_string, "misc1:b11,paddle1:b12,paddle2:b13,paddle3:b14,paddle4:b15,touchpad:b17,misc2:b16,misc3:b19,misc4:b18", sizeof(mapping_string));
+         } else if (SDL_IsJoystickSteamTriton(vendor, product)) {
+-            // Second generation Steam controllers have 4 back paddle buttons
+-            SDL_strlcat(mapping_string, "misc1:b11,paddle1:b12,paddle2:b13,paddle3:b14,paddle4:b15,touchpad:b17,misc2:b16,misc3:b19,misc4:b18,misc5:b21,misc6:b20", sizeof(mapping_string));
++            // Steam Controller 2 paddles, trackpad clicks, digital triggers, and capacitive grips
++            SDL_strlcat(mapping_string, "misc1:b11,paddle1:b12,paddle2:b13,paddle3:b14,paddle4:b15,touchpad:b17,misc2:b16,misc3:b22,misc4:b23,misc5:b21,misc6:b20", sizeof(mapping_string));
+         } else if (SDL_IsJoystickNintendoSwitchPro(vendor, product) ||
+                    SDL_IsJoystickNintendoSwitchProInputOnly(vendor, product)) {
+             // Nintendo Switch Pro controllers have a screenshot button
+diff --git a/src/joystick/hidapi/SDL_hidapi_steam_triton.c b/src/joystick/hidapi/SDL_hidapi_steam_triton.c
+index 01e4eff..34d4946 100644
+--- a/src/joystick/hidapi/SDL_hidapi_steam_triton.c
++++ b/src/joystick/hidapi/SDL_hidapi_steam_triton.c
+@@ -56,6 +56,8 @@ enum
+     SDL_GAMEPAD_BUTTON_TRITON_LEFT_JOYSTICK_TOUCH,
+     SDL_GAMEPAD_BUTTON_TRITON_RIGHT_GRIP_TOUCH,
+     SDL_GAMEPAD_BUTTON_TRITON_LEFT_GRIP_TOUCH,
++    SDL_GAMEPAD_BUTTON_TRITON_LEFT_TRIGGER_CLICK,
++    SDL_GAMEPAD_BUTTON_TRITON_RIGHT_TRIGGER_CLICK,
+     SDL_GAMEPAD_NUM_TRITON_BUTTONS,
+ };
+ 
+@@ -196,6 +198,11 @@ static void HIDAPI_DriverSteamTriton_HandleGenericState(SDL_DriverSteamTriton_Co
+         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_TRITON_LEFT_TOUCHPAD,
+                                ((pTritonReport->buttons & TRITON_LEFT_TOUCHPAD_CLICK) != 0));
+ 
++        SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_TRITON_LEFT_TRIGGER_CLICK,
++                               ((pTritonReport->buttons & TRITON_LEFT_TRIGGER_CLICK) != 0));
++        SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_TRITON_RIGHT_TRIGGER_CLICK,
++                               ((pTritonReport->buttons & TRITON_RIGHT_TRIGGER_CLICK) != 0));
++
+         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_TRITON_RIGHT_JOYSTICK_TOUCH,
+                                ((pTritonReport->buttons & TRITON_RIGHT_JOYSTICK_TOUCH) != 0));
+         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_TRITON_LEFT_JOYSTICK_TOUCH,
+@@ -646,6 +653,39 @@ static bool HIDAPI_DriverSteamTriton_SendJoystickEffect(SDL_HIDAPI_Device *devic
+         }
+         return true;
+     }
++
++    // Haptic effects use short HID output reports, unlike the feature reports above
++    if (data && size > 0) {
++        const Uint8 report_id = *(const Uint8 *)data;
++        int expected_size = 0;
++
++        // Accept only known haptic report IDs and their fixed sizes
++        switch (report_id) {
++        case ID_OUT_REPORT_HAPTIC_PULSE:
++            expected_size = HID_HAPTIC_PULSE_OUTPUT_REPORT_BYTES;
++            break;
++        case ID_OUT_REPORT_HAPTIC_COMMAND:
++            expected_size = HID_HAPTIC_COMMAND_REPORT_BYTES;
++            break;
++        case ID_OUT_REPORT_HAPTIC_LFO_TONE:
++            expected_size = HID_HAPTIC_LFO_TONE_REPORT_BYTES;
++            break;
++        case ID_OUT_REPORT_HAPTIC_LOG_SWEEP:
++            expected_size = HID_HAPTIC_LOG_SWEEP_REPORT_BYTES;
++            break;
++        case ID_OUT_REPORT_HAPTIC_SCRIPT:
++            expected_size = HID_HAPTIC_SCRIPT_REPORT_BYTES;
++            break;
++        default:
++            break;
++        }
++
++        if (size == expected_size) {
++            // Windows HIDAPI may return the padded output report length.
++            return SDL_hid_write(device->dev, data, size) >= size;
++        }
++    }
++
+     return SDL_Unsupported();
+ }
+ 

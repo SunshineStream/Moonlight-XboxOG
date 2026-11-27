@@ -10,7 +10,7 @@ It also expands compact question-mark SVG arc flags for the older NanoSVG parser
 Downloaded sources remain in the build directory. The complete Lucide license, including Feather
 attribution, is included at `assets/licenses/lucide.txt` on the ISO.
 
-The grayscale host moons are first-party SVG artwork inspired by One's home page. Full, half and
+The grayscale host moons are first-party SVG artwork. Full, half and
 crescent phases indicate online paired, online unpaired and offline PCs respectively. The orbit is
 rendered separately so selection remains independent of reachability.
 

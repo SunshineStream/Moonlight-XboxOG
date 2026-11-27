@@ -12,7 +12,7 @@ cmake -S . -B cmake-build-experiments -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OF
 cmake --build cmake-build-experiments
 ```
 
-On Windows, use an MSYS2 MinGW64 shell and add `-G "MinGW Makefiles"` to the configure command.
+On Windows, use an MSYS2 UCRT64 shell and add `-G "MinGW Makefiles"` to the configure command.
 The Xbox child build selects Unix Makefiles automatically. The generated files are:
 
 | Probe             | ISO                                                        | XBE                                                                  |

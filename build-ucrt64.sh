@@ -18,4 +18,4 @@ for ARG in "$@"; do
 done
 
 cd "${SCRIPT_DIR}"
-exec "${MSYS2_SHELL}" -defterm -here -no-start -mingw64 -c "./build.sh${BUILD_ARGS}"
+exec "${MSYS2_SHELL}" -defterm -here -no-start -ucrt64 -c "./build.sh${BUILD_ARGS}"
