@@ -112,7 +112,7 @@ sunshine_declare_source_package(sdl3_image
 # SDL3 for desktop and mobile clients
 # renovate: datasource=github-tags depName=libsdl-org/SDL versioning=semver
 # extractVersion=^release-(?<version>\d+\.\d+\.\d+)$
-set(SDL3_VERSION 3.4.18)
+set(SDL3_VERSION 3.4.20)
 set(SDL3_STEAM_CONTROLLER_PATCH
         "${CMAKE_CURRENT_LIST_DIR}/cmake/patches/sdl3-steam-controller-trigger-clicks-and-haptics.patch")
 _sunshine_patched_source_dir(SDL3_PATCHED_SOURCE_DIR sdl3 "${SDL3_VERSION}" "${SDL3_STEAM_CONTROLLER_PATCH}")
