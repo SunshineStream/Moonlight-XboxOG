@@ -76,6 +76,7 @@ target_link_libraries(${PROJECT_NAME}
         Moonlight::OpenSSL
         lizardbyte::test_support
         moonlight-common-c)
+moonlight_prioritize_bundled_openssl_headers(${PROJECT_NAME})
 target_compile_definitions(${PROJECT_NAME}
         PRIVATE
         TOML_EXCEPTIONS=0

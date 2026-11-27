@@ -365,6 +365,14 @@ function(_moonlight_configure_common_warnings)
     endif()
 endfunction()
 
+# Keep Homebrew's headers behind the bundled OpenSSL headers on native macOS builds.
+function(moonlight_prioritize_bundled_openssl_headers target)
+    if(APPLE AND NOT CMAKE_CROSSCOMPILING)
+        set_property(TARGET "${target}" PROPERTY NO_SYSTEM_FROM_IMPORTED TRUE)
+        target_include_directories("${target}" BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
+    endif()
+endfunction()
+
 # Prepare dependencies that are common to multiple Moonlight components
 macro(MOONLIGHT_PREPARE_COMMON_DEPENDENCIES)
     if(BUILD_NATIVE_CLIENT AND CMAKE_CROSSCOMPILING AND NOT MOONLIGHT_BUILD_KIND STREQUAL "XBOX")

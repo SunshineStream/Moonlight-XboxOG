@@ -69,12 +69,16 @@ jobs:
             ${{ matrix.packages }}-pkgconf
             ${{ matrix.runtime }}
 
-      - name: Build client and tests
+      - name: Configure client and tests
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Use Ninja in CI to avoid missing MinGW Makefiles dependency stamps on clean builds.
           cmake --preset client -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DMOONLIGHT_TEST_COVERAGE=ON
-          cmake --build cmake-build-client --parallel
+
+      - name: Build client and tests
+        run: cmake --build cmake-build-client --parallel
 
       - name: Test and report coverage
         uses: ./.github/actions/test-and-report

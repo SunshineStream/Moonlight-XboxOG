@@ -74,11 +74,7 @@ target_include_directories(moonlight_client PRIVATE "${CMAKE_SOURCE_DIR}" "${tom
 target_link_libraries(moonlight_client PRIVATE
         Moonlight::OpenSSL moonlight-common-c PkgConfig::MOONLIGHT_CLIENT_FFMPEG
         SDL3::SDL3 SDL3_ttf::SDL3_ttf-static SDL3_image::SDL3_image-static)
-if(APPLE AND NOT CMAKE_CROSSCOMPILING)
-    # Use the headers matching the bundled libraries before Homebrew's include directories.
-    set_property(TARGET moonlight_client PROPERTY NO_SYSTEM_FROM_IMPORTED TRUE)
-    target_include_directories(moonlight_client BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
-endif()
+moonlight_prioritize_bundled_openssl_headers(moonlight_client)
 if(ANDROID)
     # FFmpeg's AArch64 assembly addresses private tables directly. Keep static
     # library symbols local to libmain.so so those references cannot be interposed.

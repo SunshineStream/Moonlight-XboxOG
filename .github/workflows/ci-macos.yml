@@ -48,11 +48,17 @@ jobs:
         with:
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
           p12-password: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD }}
+
+      - name: Install dependencies
+        run: brew install pkgconf
+
+      - name: Configure client and tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DMOONLIGHT_TEST_COVERAGE=ON
+
       - name: Build client and tests
-        run: |
-          brew install pkgconf
-          cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DMOONLIGHT_TEST_COVERAGE=ON
-          cmake --build cmake-build-client --parallel
+        run: cmake --build cmake-build-client --parallel
 
       - name: Test and report coverage
         uses: ./.github/actions/test-and-report
