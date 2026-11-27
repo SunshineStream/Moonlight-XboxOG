@@ -4128,13 +4128,14 @@ namespace {
    * @return True when a moving corona frame was drawn.
    */
   bool render_host_sun(SDL_Renderer *renderer, AssetTextureCache *assets, ui::HostSunState state, const ui::HostSunLayer &layer, const SDL_Rect &bounds, int frame) {
-    const auto alpha = static_cast<Uint8>(std::lround(layer.opacity * 255.0f));
+    // nxdk leaves lroundf unimplemented. The opacity and scaled dimensions are nonnegative.
+    const auto alpha = static_cast<Uint8>(layer.opacity * 255.0f + 0.5f);
     if (alpha == 0) {
       return false;
     }
 
     constexpr std::array paths {"hosts\\sun-corona.png", "hosts\\sun-corona-blue.png", "hosts\\sun-ash.png"};
-    const int size = std::max(1, static_cast<int>(std::lround(bounds.w * layer.scale)));
+    const int size = std::max(1, static_cast<int>(bounds.w * layer.scale + 0.5f));
     const SDL_Rect destination {bounds.x + (bounds.w - size) / 2, bounds.y + (bounds.h - size) / 2, size, size};
     SDL_Texture *texture = load_cached_asset_texture(renderer, assets, paths[static_cast<std::size_t>(state)]);
     const bool animated = state != ui::HostSunState::offline;
