@@ -4099,6 +4099,25 @@ namespace {
   };
 
   /**
+   * @brief Drop transition state for removed hosts and hosts scrolled offscreen.
+   * @param animation Current host-grid animation state.
+   * @param first First visible tile.
+   * @param end End of the visible tile range.
+   */
+  void retain_visible_host_suns(HostSunGridAnimation &animation, std::vector<ui::ShellHostTile>::const_iterator first, std::vector<ui::ShellHostTile>::const_iterator end) {
+    for (auto entry = animation.tiles.begin(); entry != animation.tiles.end();) {
+      const bool visible = std::any_of(first, end, [&entry](const auto &tile) {
+        return tile.id == entry->first;
+      });
+      if (visible) {
+        ++entry;
+      } else {
+        entry = animation.tiles.erase(entry);
+      }
+    }
+  }
+
+  /**
    * @brief Draw one layer of the host's centered artwork, using the bundled vector if loading fails.
    * @param renderer Active renderer, including the software fallback.
    * @param assets Cache shared by all visible host tiles.
@@ -4155,18 +4174,7 @@ namespace {
     const auto grid = ui::calculate_shell_grid(bounds, viewModel.content.hostTiles.size(), viewModel.content.hostColumnCount, selected_host_tile_index(viewModel.content.hostTiles), preferredHeight, gap);
     const auto first = static_cast<std::size_t>(grid.startRow * grid.columns);
     const std::size_t end = std::min(viewModel.content.hostTiles.size(), static_cast<std::size_t>((grid.startRow + grid.visibleRows) * grid.columns));
-    const auto visibleStart = viewModel.content.hostTiles.begin() + first;
-    const auto visibleEnd = viewModel.content.hostTiles.begin() + end;
-    for (auto entry = animation.tiles.begin(); entry != animation.tiles.end();) {
-      const bool visible = std::any_of(visibleStart, visibleEnd, [&entry](const auto &tile) {
-        return tile.id == entry->first;
-      });
-      if (visible) {
-        ++entry;
-      } else {
-        entry = animation.tiles.erase(entry);
-      }
-    }
+    retain_visible_host_suns(animation, viewModel.content.hostTiles.begin() + first, viewModel.content.hostTiles.begin() + end);
 
     const Uint64 now = SDL_GetTicks();
     const bool animate = !viewModel.modal.visible && !viewModel.overlay.visible;
@@ -4315,6 +4323,37 @@ namespace {
   }
 
   /**
+   * @brief Render the current keypad input as text or as separately focusable address segments.
+   * @param renderer Active shell renderer.
+   * @param font Font used for the entered value.
+   * @param keypad Current keypad view and input focus.
+   * @param bounds Space reserved for the entered value.
+   * @return True when the complete value rendered.
+   */
+  bool render_keypad_value(SDL_Renderer *renderer, TTF_Font *font, const ui::ShellKeypadModalView &keypad, const SDL_Rect &bounds) {
+    if (!keypad.segmentedAddress) {
+      fill_rounded_rect(renderer, bounds, BACKGROUND, 6);
+      return render_text_line_simple(renderer, font, keypad.value, TEXT, bounds.x + 12, bounds.y + 8, bounds.w - 24);
+    }
+
+    constexpr int separatorWidth = 18;
+    const auto octets = ui::calculate_keypad_columns({bounds.x, bounds.y, bounds.w, bounds.h}, keypad.addressOctets.size(), TTF_GetFontLineSkip(font) * 4, separatorWidth);
+    for (std::size_t index = 0; index < keypad.addressOctets.size(); ++index) {
+      const SDL_Rect octetRect = sdl_rect(octets[index]);
+      render_card_surface(renderer, octetRect, index == keypad.activeOctet);
+      const auto &digits = keypad.addressOctets[index];
+      const SDL_Color color = digits.empty() ? MUTED : TEXT;
+      if (!render_text_centered_simple(renderer, font, digits.empty() ? "___" : digits, color, octetRect)) {
+        return false;
+      }
+      if (index + 1U < keypad.addressOctets.size() && !render_text_centered_simple(renderer, font, ".", MUTED, {octetRect.x + octetRect.w, bounds.y, separatorWidth, bounds.h})) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * @brief Render local numeric or text entry with cached labels and optional shared keyboard geometry.
    *
    * @param renderer Active renderer.
@@ -4359,26 +4398,8 @@ namespace {
       cursorY += drawnHeight + 6;
     }
     const SDL_Rect valueRect {bounds.x + padding, cursorY + 2, innerWidth, valueHeight};
-    if (viewModel.keypad.segmentedAddress) {
-      const int separatorWidth = 18;
-      const auto octets = ui::calculate_keypad_columns({valueRect.x, valueRect.y, valueRect.w, valueRect.h}, viewModel.keypad.addressOctets.size(), TTF_GetFontLineSkip(bodyFont) * 4, separatorWidth);
-      for (std::size_t index = 0; index < viewModel.keypad.addressOctets.size(); ++index) {
-        const SDL_Rect octetRect = sdl_rect(octets[index]);
-        render_card_surface(renderer, octetRect, index == viewModel.keypad.activeOctet);
-        const auto &digits = viewModel.keypad.addressOctets[index];
-        const SDL_Color color = digits.empty() ? MUTED : TEXT;
-        if (!render_text_centered_simple(renderer, bodyFont, digits.empty() ? "___" : digits, color, octetRect)) {
-          return false;
-        }
-        if (index < 3U && !render_text_centered_simple(renderer, bodyFont, ".", MUTED, {octetRect.x + octetRect.w, valueRect.y, separatorWidth, valueRect.h})) {
-          return false;
-        }
-      }
-    } else {
-      fill_rounded_rect(renderer, valueRect, BACKGROUND, 6);
-      if (!render_text_line_simple(renderer, bodyFont, viewModel.keypad.value, TEXT, valueRect.x + 12, valueRect.y + 8, valueRect.w - 24)) {
-        return false;
-      }
+    if (!render_keypad_value(renderer, bodyFont, viewModel.keypad, valueRect)) {
+      return false;
     }
     const int keysY = valueRect.y + valueRect.h + 12;
     const int footerY = bounds.y + bounds.h - padding - footerHeight;

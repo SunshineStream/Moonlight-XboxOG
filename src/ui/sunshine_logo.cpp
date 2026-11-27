@@ -16,7 +16,7 @@
 namespace ui {
 
   bool SunshineLogo::load(int width, int height) {
-    constexpr int arcCount = static_cast<int>(splash::LOGO_ARC_COUNT);
+    constexpr auto arcCount = static_cast<int>(splash::LOGO_ARC_COUNT);
     const int size = std::max(width, height);
     atlas_.reset(load_svg_surface(build_asset_path("sunshine-logo-arcs.svg"), size * arcCount, size));
     if (!atlas_) {

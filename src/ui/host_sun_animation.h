@@ -136,7 +136,7 @@ namespace ui {
         return result;
       }
 
-      const float elapsed = static_cast<float>(nowMilliseconds - startTime_);
+      const auto elapsed = static_cast<float>(nowMilliseconds - startTime_);
       const float fade = std::min(elapsed / HOST_SUN_FADE_MS, 1.0f);
       const float fadeAmount = fade * fade * (3.0f - 2.0f * fade);
       const float scaleRemaining = 1.0f - elapsed / HOST_SUN_TRANSITION_MS;
