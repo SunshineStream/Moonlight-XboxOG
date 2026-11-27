@@ -105,6 +105,15 @@ namespace {
     return std::string(buffer.data());
   }
 
+  /**
+   * @brief Distinguish a receive failure from the normal end of a decoder drain.
+   * @param result FFmpeg frame receive result.
+   * @return True when receiving frames failed and the caller needs a new keyframe.
+   */
+  bool video_receive_failed(int result) {
+    return result < 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
+  }
+
 #ifdef MOONLIGHT_NATIVE_CLIENT
   /**
    * @brief Recognize decoder errors that may require switching away from hardware.
@@ -1206,7 +1215,7 @@ namespace streaming {
 
     int sendResult = avcodec_send_packet(video_.codecContext, video_.packet);
     if (sendResult == AVERROR(EAGAIN)) {
-      if (const int drainResult = receive_available_video_frames(); drainResult < 0 && drainResult != AVERROR(EAGAIN) && drainResult != AVERROR_EOF) {
+      if (video_receive_failed(receive_available_video_frames())) {
         av_packet_unref(video_.packet);
         return DR_NEED_IDR;
       }
@@ -1223,7 +1232,7 @@ namespace streaming {
       return DR_NEED_IDR;
     }
 
-    if (const int receiveResult = receive_available_video_frames(); receiveResult < 0 && receiveResult != AVERROR(EAGAIN) && receiveResult != AVERROR_EOF) {
+    if (video_receive_failed(receive_available_video_frames())) {
       return DR_NEED_IDR;
     }
 
