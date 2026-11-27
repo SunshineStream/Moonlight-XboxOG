@@ -20,7 +20,7 @@ def main():
     logo = ElementTree.parse(source).getroot()
     arcs = logo.findall("{*}path")
     size = int(logo.attrib["width"])
-    assets = root / "xbe" / "assets"
+    assets = root / "assets"
     (assets / source.name).write_bytes(source.read_bytes())
     width = size * len(arcs)
     atlas = (

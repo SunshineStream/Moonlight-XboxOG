@@ -13,9 +13,9 @@
 
 namespace {
   /**
-   * @brief Select the appropriate artwork and retain a static fallback for each host state.
+   * @brief Select the appropriate bundled PNG artwork for each host state.
    */
-  TEST(HostSunAnimationTest, SelectsArtworkAndFallbacks) {
+  TEST(HostSunAnimationTest, SelectsArtworkForEachHostState) {
     using app::HostReachability;
     using app::PairingState;
     using ui::HostSunState;
@@ -25,9 +25,9 @@ namespace {
       EXPECT_EQ(ui::host_sun_state(reachability, PairingState::paired), HostSunState::offline);
       EXPECT_EQ(ui::host_sun_state(reachability, PairingState::not_paired), HostSunState::offline);
     }
-    EXPECT_STREQ(ui::host_sun_fallback(HostSunState::online), "hosts\\sun-paired.svg");
-    EXPECT_STREQ(ui::host_sun_fallback(HostSunState::needs_pairing), "hosts\\sun-unpaired.svg");
-    EXPECT_STREQ(ui::host_sun_fallback(HostSunState::offline), "hosts\\sun-offline.svg");
+    EXPECT_STREQ(ui::host_sun_asset(HostSunState::online), "hosts\\sun-corona.png");
+    EXPECT_STREQ(ui::host_sun_asset(HostSunState::needs_pairing), "hosts\\sun-corona-blue.png");
+    EXPECT_STREQ(ui::host_sun_asset(HostSunState::offline), "hosts\\sun-ash.png");
   }
 
   /**

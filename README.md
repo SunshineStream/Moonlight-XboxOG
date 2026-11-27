@@ -33,11 +33,11 @@ earlier client under the Moonlight name.
 ## Desktop
 
 <details>
-<summary>Windows screenshots</summary>
+<summary>Desktop screenshots</summary>
 
-![Sunshine startup on Windows](./docs/images/screenshots/windows-splash.png)
+![Sunshine startup on desktop](./docs/images/screenshots/desktop-splash.png)
 
-![Sunshine host browser on Windows](./docs/images/screenshots/windows-hosts.png)
+![Sunshine host browser on desktop](./docs/images/screenshots/desktop-hosts.png)
 
 </details>
 

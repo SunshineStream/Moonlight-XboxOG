@@ -1,12 +1,12 @@
 # Screenshots
 
-## Windows
+## Desktop client
 
-![Sunshine startup on Windows](images/screenshots/windows-splash.png)
+![Sunshine startup on desktop](images/screenshots/desktop-splash.png)
 
-![Windows host browser showing online, unpaired, and offline PCs](images/screenshots/windows-hosts.png)
+![Desktop host browser showing online, unpaired, and offline PCs](images/screenshots/desktop-hosts.png)
 
-![A sample app library on Windows](images/screenshots/windows-apps.png)
+![A sample app library on desktop](images/screenshots/desktop-apps.png)
 
 ## Original Xbox in xemu
 
@@ -48,14 +48,16 @@ state. The demo uses isolated storage and disables live discovery, polling, pair
 Run the Windows and Xbox commands from the repository root in the MSYS2 UCRT64 shell. Use dedicated
 build directories so the regular CLion profiles retain their normal behavior.
 
-### Windows
+### Desktop screenshots
+
+Use the Windows UCRT64 build to export the desktop screenshots.
 
 ```bash
-cmake --preset client-ucrt64 -B cmake-build-screenshots-windows -DSUNSHINE_SCREENSHOT_DEMO=ON
-cmake --build cmake-build-screenshots-windows --target sunshine_client --parallel
+cmake --preset client-ucrt64 -B cmake-build-screenshots-desktop -DSUNSHINE_SCREENSHOT_DEMO=ON
+cmake --build cmake-build-screenshots-desktop --target sunshine_client --parallel
 SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy SDL_RENDER_DRIVER=software \
   SUNSHINE_SCREENSHOT_OUTPUT_DIR="$(cygpath -m "$PWD/docs/images/screenshots")" \
-  ./cmake-build-screenshots-windows/SunshineClientDemo.exe
+  ./cmake-build-screenshots-desktop/SunshineClientDemo.exe
 ```
 
 The client exports the splash, host browser, and library as PNGs. Launch it without

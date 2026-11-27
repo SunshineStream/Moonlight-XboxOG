@@ -92,7 +92,7 @@ set(SUNSHINE_CLIENT_ASSET_ROOT "${CMAKE_CURRENT_BINARY_DIR}/client-assets/assets
         CACHE PATH "Output directory for staged client assets")
 set(_client_assets "${SUNSHINE_CLIENT_ASSET_ROOT}")
 add_custom_target(stage_client_assets
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_SOURCE_DIR}/xbe/assets" "${_client_assets}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "${_client_assets}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_client_assets}/fonts"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_SOURCE_DIR}/third-party/nxdk/samples/sdl_ttf/vegur-regular.ttf"

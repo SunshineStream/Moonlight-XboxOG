@@ -131,7 +131,7 @@ set(_extract_xiso ${_packaging_env} "${NXDK_DIR}/tools/extract-xiso/build/extrac
 # Expose the same ISO target in the direct Xbox profile and its host parent.
 add_custom_target(sunshine_xbox ALL
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/xbe" "${XBOX_XBE_DIR}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets" "${XBOX_XBE_DIR}/assets"
         COMMAND "${CMAKE_COMMAND}" -E copy
             "${NXDK_DIR}/samples/sdl_ttf/vegur-regular.ttf" "${XBOX_XBE_DIR}/assets/fonts/vegur-regular.ttf"
         COMMAND "${CMAKE_COMMAND}"

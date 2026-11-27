@@ -47,12 +47,12 @@ namespace ui {
   }
 
   /**
-   * @brief Find the host icon to use when the corresponding raster artwork cannot be loaded.
+   * @brief Select the raster artwork for a host state.
    * @param state Artwork requested for the tile.
-   * @return Bundled vector asset path.
+   * @return Bundled PNG asset path.
    */
-  constexpr const char *host_sun_fallback(HostSunState state) {
-    constexpr std::array paths {"hosts\\sun-paired.svg", "hosts\\sun-unpaired.svg", "hosts\\sun-offline.svg"};
+  constexpr const char *host_sun_asset(HostSunState state) {
+    constexpr std::array paths {"hosts\\sun-corona.png", "hosts\\sun-corona-blue.png", "hosts\\sun-ash.png"};
     return paths[static_cast<std::size_t>(state)];
   }
 

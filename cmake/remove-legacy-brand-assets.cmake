@@ -8,4 +8,7 @@ file(REMOVE
         "${ASSET_DIR}/moonlight-logo.ppm"
         "${ASSET_DIR}/hosts/moon-full.svg"
         "${ASSET_DIR}/hosts/moon-half.svg"
-        "${ASSET_DIR}/hosts/moon-crescent.svg")
+        "${ASSET_DIR}/hosts/moon-crescent.svg"
+        "${ASSET_DIR}/hosts/sun-offline.svg"
+        "${ASSET_DIR}/hosts/sun-paired.svg"
+        "${ASSET_DIR}/hosts/sun-unpaired.svg")

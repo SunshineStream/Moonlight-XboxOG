@@ -156,11 +156,11 @@ sunshine_declare_source_package(tomlplusplus
 # moonlight-common-c
 # renovate: datasource=git-refs depName=moonlight-stream/moonlight-common-c
 # ref=master
-set(SUNSHINE_COMMON_C_COMMIT b4ee1cea3d19e13c0b37c26585e6b1ee174effcb)
+set(MOONLIGHT_COMMON_C_COMMIT b4ee1cea3d19e13c0b37c26585e6b1ee174effcb)
 CPMDeclarePackage(moonlight-common-c
         NAME moonlight-common-c
         GIT_REPOSITORY https://github.com/moonlight-stream/moonlight-common-c.git
-        GIT_TAG ${SUNSHINE_COMMON_C_COMMIT}
+        GIT_TAG ${MOONLIGHT_COMMON_C_COMMIT}
         GIT_SUBMODULES enet nanors
         EXCLUDE_FROM_ALL YES
         OPTIONS "BUILD_SHARED_LIBS OFF"

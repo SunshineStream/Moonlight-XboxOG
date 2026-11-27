@@ -4128,7 +4128,7 @@ namespace {
   }
 
   /**
-   * @brief Draw one layer of the host's centered artwork, using the bundled vector if loading fails.
+   * @brief Draw one layer of the bundled host artwork.
    * @param renderer Active renderer, including the software fallback.
    * @param assets Cache shared by all visible host tiles.
    * @param state Host artwork to render.
@@ -4144,25 +4144,18 @@ namespace {
       return false;
     }
 
-    constexpr std::array paths {"hosts\\sun-corona.png", "hosts\\sun-corona-blue.png", "hosts\\sun-ash.png"};
     const int size = std::max(1, static_cast<int>(bounds.w * layer.scale + 0.5f));
     const SDL_Rect destination {bounds.x + (bounds.w - size) / 2, bounds.y + (bounds.h - size) / 2, size, size};
-    SDL_Texture *texture = load_cached_asset_texture(renderer, assets, paths[static_cast<std::size_t>(state)]);
+    SDL_Texture *texture = load_cached_asset_texture(renderer, assets, ui::host_sun_asset(state));
+    if (texture == nullptr || !SDL_SetTextureAlphaMod(texture, alpha)) {
+      return false;
+    }
+
     const bool animated = state != ui::HostSunState::offline;
     const auto source = sdl_rect(ui::host_sun_frame_bounds(frame));
-    const auto draw = [&](SDL_Texture *art, const SDL_Rect *region) {
-      if (art == nullptr || !SDL_SetTextureAlphaMod(art, alpha)) {
-        return false;
-      }
-      const bool drawn = ui::render_texture(renderer, art, region, &destination);
-      SDL_SetTextureAlphaMod(art, 255);
-      return drawn;
-    };
-    if (draw(texture, animated ? &source : nullptr)) {
-      return animated;
-    }
-    draw(load_cached_asset_texture(renderer, assets, ui::host_sun_fallback(state), bounds.w, bounds.h), nullptr);
-    return false;
+    const bool drawn = ui::render_texture(renderer, texture, animated ? &source : nullptr, &destination);
+    SDL_SetTextureAlphaMod(texture, 255);
+    return drawn && animated;
   }
 
   /**
@@ -6144,8 +6137,8 @@ namespace ui {
     if constexpr (app::SCREENSHOT_DEMO_ENABLED) {
       const char *directory = SDL_getenv("SUNSHINE_SCREENSHOT_OUTPUT_DIR");
       if (directory != nullptr && *directory != '\0') {
-        const std::string hostsPath = platform::join_path(directory, "windows-hosts.png");
-        const std::string appsPath = platform::join_path(directory, "windows-apps.png");
+        const std::string hostsPath = platform::join_path(directory, "desktop-hosts.png");
+        const std::string appsPath = platform::join_path(directory, "desktop-apps.png");
         const bool hostsSaved = draw_current_shell_frame(activeVideoMode, state, &resources, &runtime, hostsPath.c_str());
         bool appsSaved = false;
         if (hostsSaved && app::begin_selected_host_app_browse(state, false)) {

@@ -163,7 +163,7 @@ namespace {
 #if defined(SUNSHINE_DESKTOP) && defined(SUNSHINE_SCREENSHOT_DEMO)
     const char *directory = SDL_getenv("SUNSHINE_SCREENSHOT_OUTPUT_DIR");
     if (directory != nullptr && *directory != '\0' && screenSurface != nullptr && lastOpacity.has_value()) {
-      const std::string path = platform::join_path(directory, "windows-splash.png");
+      const std::string path = platform::join_path(directory, "desktop-splash.png");
       if (!SDL_SavePNG(screenSurface, path.c_str())) {
         logging::warn("splash", std::string("Could not save splash PNG: ") + SDL_GetError());
       }
