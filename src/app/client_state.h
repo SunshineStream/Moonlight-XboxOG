@@ -29,6 +29,17 @@
 #include "src/ui/menu_model.h"
 
 namespace app {
+#ifdef SUNSHINE_SCREENSHOT_DEMO
+  constexpr bool SCREENSHOT_DEMO_ENABLED = true;  ///< Use isolated storage and fictional data for captures.
+#else
+  constexpr bool SCREENSHOT_DEMO_ENABLED = false;  ///< Use the normal startup and network flows.
+#endif
+
+  /**
+   * @brief Build three fictional host states and a cached library with documentation-only addresses.
+   * @return Fictional PCs in the order shown in the host browser.
+   */
+  std::vector<HostRecord> screenshot_demo_hosts();
 
   /**
    * @brief Top-level screens used by the Sunshine client shell.

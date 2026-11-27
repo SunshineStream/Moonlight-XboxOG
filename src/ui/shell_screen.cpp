@@ -2448,8 +2448,18 @@ namespace {
     targetHost->lastAppListRefreshTick = sourceHost.lastAppListRefreshTick;
   }
 
+  /**
+   * @brief Restore the host browser from the demo fixture or saved records when reopened.
+   * @param state Shell state that owns the visible hosts.
+   * @return True once the active screen has the host data it needs.
+   */
   bool ensure_hosts_loaded_for_active_screen(app::ClientState &state) {
     if (state.shell.activeScreen != app::ScreenId::hosts || state.hosts.loaded) {
+      return true;
+    }
+
+    if constexpr (app::SCREENSHOT_DEMO_ENABLED) {
+      app::replace_hosts(state, app::screenshot_demo_hosts(), "");
       return true;
     }
 
@@ -4665,6 +4675,7 @@ namespace {
    * @param saveIndicator Cached save artwork.
    * @param saveFrame Sampled save animation time, or no active save.
    * @param hostSunAnimation Retains visible status artwork and schedules host-grid redraws.
+   * @param screenshotPath Optional PNG file that receives the desktop demo frame before presentation.
    * @return True when the complete frame was presented successfully.
    */
   bool draw_shell(  // NOSONAR(cpp:S107) one-frame shell rendering keeps layout dependencies explicit
@@ -4677,7 +4688,8 @@ namespace {
     KeypadModalLayoutCache *keypadModalLayoutCache,
     ui::SaveIndicator &saveIndicator,
     const std::optional<Uint64> &saveFrame,
-    HostSunGridAnimation &hostSunAnimation
+    HostSunGridAnimation &hostSunAnimation,
+    const char *screenshotPath
   ) {
     hostSunAnimation.coronaFrame.reset();
     hostSunAnimation.nextTransitionRedraw.reset();
@@ -4919,6 +4931,12 @@ namespace {
     }
 
     draw_shell_save_indicator(renderer, saveIndicator, saveFrame, layout.saveIndicator);
+    if (screenshotPath != nullptr) {
+      std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> frame(SDL_RenderReadPixels(renderer, nullptr), SDL_DestroySurface);
+      if (!frame || !SDL_SavePNG(frame.get(), screenshotPath)) {
+        return false;
+      }
+    }
     SDL_RenderPresent(renderer);
     if (folder != nullptr && folderBrowser && !saveFrame.has_value()) {
       folder->content = viewModel.modal;
@@ -5690,9 +5708,10 @@ namespace {
    * @param state Client state to visualize.
    * @param resources Shell resources supplying the renderer and caches.
    * @param runtime Runtime state receiving redraw and shutdown updates.
+   * @param screenshotPath Optional desktop demo PNG filename.
    * @return True when the frame rendered successfully.
    */
-  bool draw_current_shell_frame(const VIDEO_MODE &videoMode, app::ClientState &state, ShellResources *resources, ShellRuntimeState *runtime) {
+  bool draw_current_shell_frame(const VIDEO_MODE &videoMode, app::ClientState &state, ShellResources *resources, ShellRuntimeState *runtime, const char *screenshotPath = nullptr) {
     if (resources == nullptr || runtime == nullptr) {
       return false;
     }
@@ -5709,7 +5728,7 @@ namespace {
     const auto viewModel = ui::build_shell_view_model(state, retainedEntries);
     const auto saveFrame = ui::save_indicator_frame(SDL_GetTicks());
     const DialogFonts fonts {resources->titleFont, resources->bodyFont, resources->smallFont, {resources->hintGlyphSize}};
-    const bool drawn = draw_shell(resources->renderer, size, fonts, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache, resources->saveIndicator, saveFrame, runtime->hostSunAnimation);
+    const bool drawn = draw_shell(resources->renderer, size, fonts, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache, resources->saveIndicator, saveFrame, runtime->hostSunAnimation, screenshotPath);
     if (size.origin.x != 0 || size.origin.y != 0) {
       SDL_SetRenderViewport(resources->renderer, nullptr);
     }
@@ -5759,14 +5778,14 @@ namespace {
   }
 
   /**
-   * @brief Start any background shell tasks that are due to run on this frame.
+   * @brief Start background shell tasks when live networking is enabled.
    *
    * @param state Client state used to decide which tasks are eligible.
    * @param runtime Runtime state that owns the background tasks.
    * @param now Current SDL tick count.
    */
   void start_shell_background_tasks_if_needed(app::ClientState &state, ShellRuntimeState *runtime, Uint32 now) {
-    if (runtime == nullptr) {
+    if (runtime == nullptr || app::SCREENSHOT_DEMO_ENABLED) {
       return;
     }
 
@@ -5921,7 +5940,7 @@ namespace {
     const app::ScreenId previousScreen = state.shell.activeScreen;
     app::AppUpdate update = app::handle_command(state, command);
     process_directory_picker_requests(state, update);
-    if (update.requests.quitAppRequested) {
+    if (!app::SCREENSHOT_DEMO_ENABLED && update.requests.quitAppRequested) {
       start_app_quit_task(state, runtime->appQuitTask);
     }
     if (update.requests.screenshotDeleteRequested && !state.screenshotViewer.entries.empty()) {
@@ -5949,10 +5968,17 @@ namespace {
     logging::set_debugger_console_minimum_level(state.settings.xemuConsoleLoggingLevel);
     log_app_update(state, update);
     show_log_file_if_requested(state, update);
-    cancel_pairing_if_requested(state, update, &runtime->pairingTask);
-    test_host_connection_if_requested(state, update, &runtime->connectionTestTask);
-    browse_host_apps_if_requested(state, update, runtime->saveFeedback);
-    pair_host_if_requested(state, update, &runtime->pairingTask, runtime->saveFeedback);
+    if constexpr (app::SCREENSHOT_DEMO_ENABLED) {
+      if (update.requests.appsBrowseRequested && app::begin_selected_host_app_browse(state, update.requests.appsBrowseShowHidden)) {
+        state.hosts.active.appListState = app::HostAppListState::ready;
+        state.hosts.active.appListStatusMessage.clear();
+      }
+    } else {
+      cancel_pairing_if_requested(state, update, &runtime->pairingTask);
+      test_host_connection_if_requested(state, update, &runtime->connectionTestTask);
+      browse_host_apps_if_requested(state, update, runtime->saveFeedback);
+      pair_host_if_requested(state, update, &runtime->pairingTask, runtime->saveFeedback);
+    }
     delete_host_data_if_requested(state, update, &resources->coverArtTextureCache);
     delete_saved_file_if_requested(state, update, &resources->coverArtTextureCache);
     factory_reset_if_requested(state, update, &resources->coverArtTextureCache);
@@ -5961,7 +5987,7 @@ namespace {
     persist_hosts_if_needed(state, update, runtime->saveFeedback);
 
     const VIDEO_MODE activeVideoMode = videoMode != nullptr ? *videoMode : VIDEO_MODE {};
-    if (!launch_stream_if_requested(window, activeVideoMode, state, update, resources, runtime)) {
+    if (!app::SCREENSHOT_DEMO_ENABLED && !launch_stream_if_requested(window, activeVideoMode, state, update, resources, runtime)) {
       return;
     }
 
@@ -6114,6 +6140,25 @@ namespace ui {
 
     ShellRuntimeState runtime {};
     initialize_shell_runtime(state, &runtime);
+#ifdef SUNSHINE_DESKTOP
+    if constexpr (app::SCREENSHOT_DEMO_ENABLED) {
+      const char *directory = SDL_getenv("SUNSHINE_SCREENSHOT_OUTPUT_DIR");
+      if (directory != nullptr && *directory != '\0') {
+        const std::string hostsPath = platform::join_path(directory, "windows-hosts.png");
+        const std::string appsPath = platform::join_path(directory, "windows-apps.png");
+        const bool hostsSaved = draw_current_shell_frame(activeVideoMode, state, &resources, &runtime, hostsPath.c_str());
+        bool appsSaved = false;
+        if (hostsSaved && app::begin_selected_host_app_browse(state, false)) {
+          state.hosts.active.appListState = app::HostAppListState::ready;
+          appsSaved = draw_current_shell_frame(activeVideoMode, state, &resources, &runtime, appsPath.c_str());
+        }
+        finalize_shell_tasks(runtime);
+        close_shell_resources(&resources);
+        return hostsSaved && appsSaved ? 0 : 1;
+      }
+    }
+#endif
+
     runtime.saveFeedback.redraw = [&] {
       if (runtime.running && resources.renderer != nullptr) {
         draw_current_shell_frame(activeVideoMode, state, &resources, &runtime);

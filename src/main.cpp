@@ -186,19 +186,21 @@ namespace {
 #endif
 
   /**
-   * @brief Load saved hosts and initialize networking, then publish the startup result.
+   * @brief Prepare saved hosts and networking for a normal run, then publish the startup result.
    * @param task Startup state owned by the main thread.
    * @return Zero after publishing the result.
    */
   int run_startup_task(StartupTaskState &task) {
-    task.loadedHosts = startup::load_saved_hosts();
-    task.runtimeNetworkStatus = network::initialize_runtime_networking();
+    if constexpr (!app::SCREENSHOT_DEMO_ENABLED) {
+      task.loadedHosts = startup::load_saved_hosts();
+      task.runtimeNetworkStatus = network::initialize_runtime_networking();
+    }
     task.completed.store(true);
     return 0;
   }
 
   /**
-   * @brief Apply startup data and surface an actionable network error independently of diagnostics.
+   * @brief Apply demo hosts or saved startup data and report any network error.
    *
    * @param clientState Client state receiving startup data and notifications.
    * @param task Startup worker to join and read.
@@ -213,6 +215,12 @@ namespace {
       SDL_WaitThread(task->thread, &threadResult);
       (void) threadResult;
       task->thread = nullptr;
+    }
+
+    if constexpr (app::SCREENSHOT_DEMO_ENABLED) {
+      app::replace_hosts(clientState, app::screenshot_demo_hosts(), "");
+      clientState.hosts.selectedToolbarButtonIndex = 0;
+      return;
     }
 
     for (const std::string &warning : task->loadedHosts.warnings) {
@@ -263,7 +271,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
   logging::set_minimum_level(logging::LogLevel::trace);
 
   app::ClientState clientState = app::create_initial_state();
-  load_persisted_settings(clientState);
+  if constexpr (!app::SCREENSHOT_DEMO_ENABLED) {
+    load_persisted_settings(clientState);
+  }
   logging::set_file_minimum_level(clientState.settings.loggingLevel);
   logging::set_debugger_console_minimum_level(clientState.settings.xemuConsoleLoggingLevel);
 

@@ -28,13 +28,16 @@ earlier client under the Moonlight name.
 - [Android](#android) (phones and Android TV)
 - [iOS and tvOS](#ios-and-tvos)
 - [Original Xbox](#original-xbox)
+- [Screenshots](docs/screenshots.md)
 
 ## Desktop
 
 <details>
-<summary>Windows screenshot</summary>
+<summary>Windows screenshots</summary>
 
 ![Sunshine startup on Windows](./docs/images/screenshots/windows-splash.png)
+
+![Sunshine host browser on Windows](./docs/images/screenshots/windows-hosts.png)
 
 </details>
 
@@ -90,6 +93,13 @@ The release workflow signs, notarizes, and staples the macOS DMG.
 
 ## Android
 
+<details>
+<summary>Android screenshot</summary>
+
+![Sunshine host browser in portrait on Android](./docs/images/screenshots/android-portrait.png)
+
+</details>
+
 The APK includes Android and Android TV launcher entries. See [Testing on Android and Android TV](docs/test-android.md)
 for building, installing on hardware, and running in Android Studio.
 
@@ -99,6 +109,13 @@ iOS and tvOS use separate SDKs and dependency builds. See [Testing on iPhone and
 for Xcode setup, development signing, and simulator builds.
 
 ## Original Xbox
+
+<details>
+<summary>Original Xbox screenshot</summary>
+
+![Sunshine host browser in xemu](./docs/images/screenshots/xbox-hosts.png)
+
+</details>
 
 The interface takes its compact navigation and PC cards from Moonlight Qt, with a library designed
 for a controller and a television. Select a PC to pair or open its apps. Game covers have separate

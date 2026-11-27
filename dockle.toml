@@ -24,6 +24,7 @@ inputs = [
   "README.md",
   "src",
   "experiments/README.md",
+  "docs/screenshots.md",
   "docs/test-android.md",
   "docs/test-apple-mobile.md",
 ]

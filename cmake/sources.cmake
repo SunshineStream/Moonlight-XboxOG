@@ -34,4 +34,13 @@ set(SUNSHINE_TEST_EXCLUDED_SOURCES
 set(SUNSHINE_HOST_TESTABLE_SOURCES ${SUNSHINE_SOURCES})
 list(REMOVE_ITEM SUNSHINE_HOST_TESTABLE_SOURCES ${SUNSHINE_TEST_EXCLUDED_SOURCES})
 
+if(SUNSHINE_SCREENSHOT_DEMO)
+    set_property(SOURCE
+            "${SUNSHINE_SOURCE_ROOT}/src/main.cpp"
+            "${SUNSHINE_SOURCE_ROOT}/src/splash/splash_screen.cpp"
+            "${SUNSHINE_SOURCE_ROOT}/src/startup/storage_paths.cpp"
+            "${SUNSHINE_SOURCE_ROOT}/src/ui/shell_screen.cpp"
+            APPEND PROPERTY COMPILE_DEFINITIONS SUNSHINE_SCREENSHOT_DEMO)
+endif()
+
 set(SUNSHINE_COMPILE_OPTIONS -Wno-builtin-macro-redefined)

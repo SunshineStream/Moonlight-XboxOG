@@ -10,7 +10,11 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sunshine-dependencies.cmake")
 #
 set(XBE_TITLE Sunshine)
 set(XBOX_XBE_DIR "${CMAKE_CURRENT_BINARY_DIR}/xbe")
-set(XBOX_ISO_NAME "${XBE_TITLE}.iso")
+set(XBOX_ISO_NAME "Sunshine.iso")
+if(SUNSHINE_SCREENSHOT_DEMO)
+    set(XBE_TITLE "Sunshine Demo")
+    set(XBOX_ISO_NAME "SunshineDemo.iso")
+endif()
 set(XBOX_ISO "${CMAKE_CURRENT_BINARY_DIR}/${XBOX_ISO_NAME}")
 
 if(NOT EXISTS "${NXDK_DIR}/.moonlight-nxdk-copy")

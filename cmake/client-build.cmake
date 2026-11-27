@@ -64,6 +64,10 @@ else()
     set_target_properties(sunshine_client PROPERTIES OUTPUT_NAME sunshine-client)
 endif()
 
+if(SUNSHINE_SCREENSHOT_DEMO AND WIN32)
+    set_target_properties(sunshine_client PROPERTIES OUTPUT_NAME SunshineClientDemo)
+endif()
+
 target_sources(sunshine_client PRIVATE "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg_memory.c")
 # Select the desktop and mobile platform adapters in shared sources.
 target_compile_definitions(sunshine_client PRIVATE SUNSHINE_NATIVE_CLIENT TOML_EXCEPTIONS=0)

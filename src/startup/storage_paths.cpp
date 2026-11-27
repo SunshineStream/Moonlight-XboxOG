@@ -49,18 +49,24 @@ namespace startup {
 #ifdef SUNSHINE_NATIVE_CLIENT
     // Keep the original SDL directory so existing installations can still read their settings and pairing identity.
     static const auto root = [] {
-      char *path = SDL_GetPrefPath("SunshineStream", "Moonlight");
+  #ifdef SUNSHINE_SCREENSHOT_DEMO
+      const char *appDirectory = "SunshineDocsDemo";
+  #else
+      const char *appDirectory = "Moonlight";
+  #endif
+      char *path = SDL_GetPrefPath("SunshineStream", appDirectory);
       std::string result = path == nullptr ? "" : path;
       SDL_free(path);
       return result;
     }();
     return root + std::string(entryName);
 #else
-    if (const std::string titleScopedRoot = title_scoped_storage_root(); !titleScopedRoot.empty()) {
-      return titleScopedRoot + std::string(entryName);
-    }
-
-    return std::string(entryName);
+  #ifdef SUNSHINE_SCREENSHOT_DEMO
+    const char *prefix = "demo-";
+  #else
+    const char *prefix = "";
+  #endif
+    return title_scoped_storage_root() + prefix + std::string(entryName);
 #endif
   }
 

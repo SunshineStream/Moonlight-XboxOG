@@ -12,6 +12,7 @@ set_property(CACHE SUNSHINE_BUILD_KIND PROPERTY STRINGS HOST XBOX)
 option(SUNSHINE_BUILD_VIDEO_EXPERIMENTS "Build standalone GPU presentation and MPEG-2 sampling experiments" OFF)
 option(SUNSHINE_BUILD_AUDIO_EXPERIMENTS "Build the standalone Opus playback probe" OFF)
 option(SUNSHINE_INPUT_DIAGNOSTICS "Display digital controller state while diagnosing stream input" OFF)
+option(SUNSHINE_SCREENSHOT_DEMO "Use fictional hosts and apps for documentation screenshots" OFF)
 
 if(SUNSHINE_BUILD_KIND STREQUAL "XBOX")
     project(SunshineClient C CXX)

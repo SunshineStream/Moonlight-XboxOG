@@ -196,6 +196,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (providers.gradleProperty('sunshineScreenshotDemo').getOrElse('false').toBoolean()) {
+                applicationIdSuffix '.demo'
+                externalNativeBuild.cmake.arguments '-DSUNSHINE_SCREENSHOT_DEMO=ON'
+            }
+        }
         release {
             // CI and local sideloading can opt into test signing for the release variant.
             if (testSigning) {

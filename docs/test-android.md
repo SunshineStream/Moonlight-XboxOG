@@ -2,6 +2,7 @@
 
 The APK supports devices and emulator images that can run `arm64-v8a` apps on Android 8.0
 (API 26) or later. The same APK provides phone and Android TV launcher entries.
+See the [Android screenshots](screenshots.md#android-screen-layouts) for the portrait client layout.
 
 ## Build or download the APK
 
