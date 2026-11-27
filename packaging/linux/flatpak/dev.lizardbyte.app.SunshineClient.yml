@@ -1,0 +1,52 @@
+---
+app-id: dev.lizardbyte.app.SunshineClient
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: sunshine-client
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=all  # SDL HIDAPI requires access to hidraw for advanced controller features.
+modules:
+  - modules/numactl.json
+  - modules/ffmpeg.json
+  - name: sunshine-client
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DBUILD_NATIVE_CLIENT=ON
+      - -DBUILD_XBOX=OFF
+      - -DBUILD_DOCS=OFF
+      - -DBUILD_TESTS=ON
+      - -DSUNSHINE_TEST_COVERAGE=ON
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DFFMPEG_PREPARED_BINARIES=/app/ffmpeg
+      - -DFETCHCONTENT_SOURCE_DIR_OPENSSL=/run/build/sunshine-client/deps/openssl
+      - -DFETCHCONTENT_SOURCE_DIR_MOONLIGHT-COMMON-C=/run/build/sunshine-client/deps/moonlight-common-c
+      - -DFETCHCONTENT_SOURCE_DIR_TOMLPLUSPLUS=/run/build/sunshine-client/deps/tomlplusplus
+      - -DFETCHCONTENT_SOURCE_DIR_LUCIDE=/run/build/sunshine-client/deps/lucide
+      - -DFETCHCONTENT_SOURCE_DIR_SDL3=/run/build/sunshine-client/deps/sdl
+      - -DFETCHCONTENT_SOURCE_DIR_SDL3_IMAGE=/run/build/sunshine-client/deps/sdl-image
+      - -DFETCHCONTENT_SOURCE_DIR_SDL3_TTF=/run/build/sunshine-client/deps/sdl-ttf
+    run-tests: true
+    test-rule: ""
+    test-commands:
+      - bash "$FLATPAK_BUILDER_BUILDDIR/packaging/linux/flatpak/test.sh"
+    sources:
+      - type: git
+        url: "@GITHUB_CLONE_URL@"
+        commit: "@GITHUB_COMMIT@"
+      - modules/sunshine-client/openssl.json
+      - modules/sunshine-client/moonlight-common-c.json
+      - modules/sunshine-client/tomlplusplus.json
+      - modules/sunshine-client/lucide.json
+      - modules/sunshine-client/sdl.json
+      - modules/sunshine-client/sdl-image.json
+      - modules/sunshine-client/sdl-ttf.json
+cleanup:
+  - /ffmpeg/include
+  - /ffmpeg/lib

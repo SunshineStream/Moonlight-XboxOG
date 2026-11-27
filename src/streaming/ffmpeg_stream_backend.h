@@ -40,16 +40,16 @@ namespace streaming {
   /**
    * @brief Owns the FFmpeg decode and SDL presentation state for one stream.
    *
-   * The backend exposes Moonlight-compatible callback tables for video and audio,
+   * The backend exposes GameStream-compatible callback tables for video and audio,
    * presents the latest decoded video frame and delegates Opus decode and playback
    * to the audio player.
    */
   class FfmpegStreamBackend {
   public:
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     /**
      * @brief Query the portable FFmpeg decoders available to streaming.
-     * @return Supported 8-bit Moonlight video format flags.
+     * @return Supported 8-bit Sunshine video format flags.
      */
     static int available_video_formats();
 #endif
@@ -68,7 +68,7 @@ namespace streaming {
     FfmpegStreamBackend &operator=(const FfmpegStreamBackend &) = delete;
 
     /**
-     * @brief Populate Moonlight callback tables for this backend.
+     * @brief Populate Sunshine callback tables for this backend.
      *
      * @param videoCallbacks Output video callback table.
      * @param audioCallbacks Output audio callback table.
@@ -177,13 +177,13 @@ namespace streaming {
     std::string build_overlay_status_line() const;
 
     /**
-     * @brief Initialize the FFmpeg decoder for Moonlight video callbacks.
+     * @brief Initialize the FFmpeg decoder for Sunshine video callbacks.
      *
-     * @param videoFormat Negotiated Moonlight video format.
+     * @param videoFormat Negotiated Sunshine video format.
      * @param width Negotiated stream width.
      * @param height Negotiated stream height.
      * @param redrawRate Negotiated redraw rate.
-     * @param drFlags Moonlight decoder flags.
+     * @param drFlags Sunshine decoder flags.
      * @return Zero on success.
      */
     int setup_video_decoder(int videoFormat, int width, int height, int redrawRate, int drFlags);
@@ -219,7 +219,7 @@ namespace streaming {
     static int run_video_decode_thread_trampoline(SdlThreadContext *context);
 
     /**
-     * @brief Pull Moonlight decode units and feed them into FFmpeg.
+     * @brief Pull Sunshine decode units and feed them into FFmpeg.
      *
      * @return Zero when the worker exits normally.
      */
@@ -239,18 +239,18 @@ namespace streaming {
      *
      * @param frameHandle Current frame handle, replaced with the newest queued handle.
      * @param decodeUnit Current decode unit, replaced with the newest queued unit.
-     * @return Moonlight decoder status after stale-frame handling.
+     * @return Sunshine decoder status after stale-frame handling.
      */
     int prepare_video_decode_unit(VIDEO_FRAME_HANDLE *frameHandle, PDECODE_UNIT *decodeUnit);
 
     /**
-     * @brief Decode one Moonlight video decode unit on the video worker thread.
+     * @brief Decode one Sunshine video decode unit on the video worker thread.
      *
-     * @param decodeUnit Moonlight Annex B frame payload.
-     * @return Moonlight decoder status code.
+     * @param decodeUnit Sunshine Annex B frame payload.
+     * @return Sunshine decoder status code.
      */
     int decode_video_decode_unit(PDECODE_UNIT decodeUnit);
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     /**
      * @brief Reopen the negotiated codec in software after a hardware failure.
      */
@@ -298,7 +298,7 @@ namespace streaming {
      */
     struct VideoState {  // NOSONAR(cpp:S1820) Owned video pipeline state intentionally groups FFmpeg, SDL, queue, and metric lifetimes.
       AVCodecContext *codecContext = nullptr;
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       int hardwareFormat = -1;  ///< FFmpeg pixel format returned by the hardware format callback.
       const AVCodec *softwareFallback = nullptr;  ///< Software implementation of the negotiated hardware codec.
 #endif

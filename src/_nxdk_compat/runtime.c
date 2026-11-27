@@ -1,8 +1,8 @@
 /**
  * @file src/_nxdk_compat/runtime.c
- * @brief Implement Moonlight's timing and reentrant string helpers on stock nxdk.
+ * @brief Implement Sunshine's timing and reentrant string helpers on stock nxdk.
  */
-#include "include/moonlight_posix.h"
+#include "include/sunshine_posix.h"
 
 #include <errno.h>
 #include <limits.h>

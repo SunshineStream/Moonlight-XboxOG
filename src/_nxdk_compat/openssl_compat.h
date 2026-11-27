@@ -20,7 +20,7 @@
  * @brief Identify the sole Xbox application for OpenSSL's fork detection.
  * @return Stable process identifier; Xbox applications cannot fork.
  */
-static inline int moonlight_openssl_getpid(void) {
+static inline int sunshine_openssl_getpid(void) {
   return 1;
 }
 
@@ -28,7 +28,7 @@ static inline int moonlight_openssl_getpid(void) {
  * @brief Identify the single privileged Xbox security identity.
  * @return Zero; distinct real and effective users or groups do not exist.
  */
-static inline unsigned int moonlight_openssl_identity(void) {
+static inline unsigned int sunshine_openssl_identity(void) {
   return 0;
 }
 
@@ -38,7 +38,7 @@ static inline unsigned int moonlight_openssl_identity(void) {
  * @param timer Source Unix timestamp.
  * @return Zero on success, or the PDCLib error code.
  */
-static inline int moonlight_openssl_gmtime_s(struct tm *result, const time_t *timer) {
+static inline int sunshine_openssl_gmtime_s(struct tm *result, const time_t *timer) {
   return gmtime_s(timer, result);
 }
 
@@ -48,7 +48,7 @@ static inline int moonlight_openssl_gmtime_s(struct tm *result, const time_t *ti
  * @param size Number of bytes requested by OpenSSL.
  * @return Zero on success, or -1 with errno set if nxdk cannot supply a word.
  */
-static inline int moonlight_openssl_getentropy(void *buffer, size_t size) {
+static inline int sunshine_openssl_getentropy(void *buffer, size_t size) {
   unsigned char *output = buffer;
   while (size != 0) {
     unsigned int word;
@@ -65,17 +65,17 @@ static inline int moonlight_openssl_getentropy(void *buffer, size_t size) {
 }
 
 /** @brief Describe the sole application to OpenSSL's fork detection. */
-#define getpid moonlight_openssl_getpid
+#define getpid sunshine_openssl_getpid
 /** @brief Describe the real user identity to OpenSSL. */
-#define getuid moonlight_openssl_identity
+#define getuid sunshine_openssl_identity
 /** @brief Describe the effective user identity to OpenSSL. */
-#define geteuid moonlight_openssl_identity
+#define geteuid sunshine_openssl_identity
 /** @brief Describe the real group identity to OpenSSL. */
-#define getgid moonlight_openssl_identity
+#define getgid sunshine_openssl_identity
 /** @brief Describe the effective group identity to OpenSSL. */
-#define getegid moonlight_openssl_identity
+#define getegid sunshine_openssl_identity
 /** @brief Use PDCLib's Annex K time conversion. */
-#define gmtime_s moonlight_openssl_gmtime_s
+#define gmtime_s sunshine_openssl_gmtime_s
 /** @brief Use PDCLib's timespec-based sleep in OpenSSL's POSIX timing code. */
 #define nanosleep thrd_sleep
 

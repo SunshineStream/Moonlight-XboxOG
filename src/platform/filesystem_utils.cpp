@@ -231,7 +231,7 @@ namespace platform {
       return false;
     }
     for (int attempt = 0; attempt < 32; ++attempt) {
-      const auto probe = join_path(path, "moonlight-write-" + std::to_string(attempt + 1) + ".tmp");
+      const auto probe = join_path(path, "sunshine-write-" + std::to_string(attempt + 1) + ".tmp");
 #if defined(_WIN32) || defined(NXDK)
       HANDLE file = CreateFileA(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
       if (file == INVALID_HANDLE_VALUE) {

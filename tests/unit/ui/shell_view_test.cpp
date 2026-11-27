@@ -189,9 +189,9 @@ namespace {
   }
 
   /**
-   * @brief Moon phases distinguish pairing and reachability without a green host symbol.
+   * @brief Host tiles expose the selected solar artwork alongside their existing status labels.
    */
-  TEST(ShellViewTest, UsesMoonPhasesForHostState) {
+  TEST(ShellViewTest, SelectsSolarArtworkForHostStatus) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
                                 {"Paired", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired, app::HostReachability::online},
@@ -200,9 +200,27 @@ namespace {
                               });
     const auto view = ui::build_shell_view_model(state, {});
     ASSERT_EQ(view.content.hostTiles.size(), 3U);
-    EXPECT_EQ(view.content.hostTiles[0].iconAssetPath, "hosts\\moon-full.svg");
-    EXPECT_EQ(view.content.hostTiles[1].iconAssetPath, "hosts\\moon-half.svg");
-    EXPECT_EQ(view.content.hostTiles[2].iconAssetPath, "hosts\\moon-crescent.svg");
+    EXPECT_EQ(view.content.hostTiles[0].sunState, ui::HostSunState::online);
+    EXPECT_EQ(view.content.hostTiles[0].statusLabel, "Online");
+    EXPECT_EQ(view.content.hostTiles[1].sunState, ui::HostSunState::needs_pairing);
+    EXPECT_EQ(view.content.hostTiles[1].statusLabel, "Needs Pairing");
+    EXPECT_EQ(view.content.hostTiles[2].sunState, ui::HostSunState::offline);
+    EXPECT_EQ(view.content.hostTiles[2].statusLabel, "Offline");
+  }
+
+  /**
+   * @brief Preserve separate transition identities for hosts that share an IP address.
+   */
+  TEST(ShellViewTest, IdentifiesHostsByEffectiveEndpoint) {
+    auto state = app::create_initial_state();
+    const std::string address = test_support::kTestIpv4Addresses[test_support::kIpOffice];
+    const auto otherPort = test_support::kTestPorts[test_support::kPortResolvedHttp];
+    app::replace_hosts(state, {{"Default", address}, {"Other", address, otherPort}});
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.hostTiles.size(), 2U);
+    EXPECT_EQ(view.content.hostTiles[0].id, address + ":" + std::to_string(app::DEFAULT_HOST_PORT));
+    EXPECT_EQ(view.content.hostTiles[1].id, address + ":" + std::to_string(otherPort));
+    EXPECT_EQ(view.content.hostTiles[0].statusLabel, "Checking...");
   }
 
   /**
@@ -242,9 +260,9 @@ namespace {
    */
   TEST(ShellViewTest, GivesEveryTaskAContextualSubtitle) {
     app::ClientState state = app::create_initial_state();
-    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Your games. Your PC. On your Xbox.");
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Connect to a PC running Sunshine.");
     state.shell.activeScreen = app::ScreenId::home;
-    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Your games. Your PC. On your Xbox.");
+    EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Connect to a PC running Sunshine.");
     state.shell.activeScreen = app::ScreenId::settings;
     EXPECT_EQ(ui::build_shell_view_model(state, {}).frame.subtitle, "Make yourself at home.");
     state.shell.activeScreen = app::ScreenId::add_host;
@@ -261,7 +279,7 @@ namespace {
 
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
-    EXPECT_EQ(viewModel.frame.title, "Moonlight");
+    EXPECT_EQ(viewModel.frame.title, "Sunshine");
     EXPECT_EQ(viewModel.frame.pageTitle, "Your PCs");
     ASSERT_EQ(viewModel.content.toolbarButtons.size(), 3U);
     EXPECT_EQ(viewModel.content.toolbarButtons[0].iconAssetPath, "icons\\settings.svg");
@@ -269,10 +287,9 @@ namespace {
     EXPECT_TRUE(viewModel.content.toolbarButtons[2].selected);
     EXPECT_EQ(viewModel.content.toolbarButtons[2].label, "Add Host");
     EXPECT_EQ(viewModel.content.toolbarButtons[2].iconAssetPath, "icons\\circle-plus.svg");
-    ASSERT_FALSE(viewModel.content.bodyLines.empty());
+    ASSERT_EQ(viewModel.content.bodyLines.size(), 2U);
     EXPECT_EQ(viewModel.content.bodyLines.front(), "No PCs have been added yet.");
-    ASSERT_GE(viewModel.content.bodyLines.size(), 3U);
-    EXPECT_EQ(viewModel.content.bodyLines[1], "Moonlight-compatible PCs discovered over the local network will appear here automatically.");
+    EXPECT_EQ(viewModel.content.bodyLines[1], "Use Add Host to enter the address of your Sunshine PC.");
     ASSERT_EQ(viewModel.frame.footerActions.size(), 2U);
     EXPECT_EQ(viewModel.frame.footerActions[0].label, "Select");
     EXPECT_EQ(viewModel.frame.footerActions[0].iconAssetPath, "icons\\button-a.svg");
@@ -301,10 +318,10 @@ namespace {
     ASSERT_EQ(viewModel.content.hostTiles.size(), 2U);
     EXPECT_EQ(viewModel.content.hostTiles[0].displayName, "Living Room PC");
     EXPECT_EQ(viewModel.content.hostTiles[0].statusLabel, "Offline");
-    EXPECT_EQ(viewModel.content.hostTiles[0].iconAssetPath, "hosts\\moon-crescent.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[0].sunState, ui::HostSunState::offline);
     EXPECT_EQ(viewModel.content.hostTiles[1].displayName, "Office PC");
     EXPECT_EQ(viewModel.content.hostTiles[1].statusLabel, "Online");
-    EXPECT_EQ(viewModel.content.hostTiles[1].iconAssetPath, "hosts\\moon-full.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[1].sunState, ui::HostSunState::online);
     EXPECT_TRUE(viewModel.content.hostTiles[1].selected);
     EXPECT_EQ(viewModel.frame.subtitle, "Choose a PC to start playing.");
   }
@@ -393,7 +410,7 @@ namespace {
     const ui::ShellViewModel viewModel = ui::build_shell_view_model(state, {});
 
     EXPECT_EQ(viewModel.content.selectedMenuRowLabel, "Delete pairing\\a-very-long-file-name-that-needs-the-detail-pane.bin");
-    EXPECT_EQ(viewModel.content.selectedMenuRowDescription, "Delete only this saved file from disk while leaving the rest of the Moonlight data intact.");
+    EXPECT_EQ(viewModel.content.selectedMenuRowDescription, "Delete only this saved file from disk while leaving the rest of the Sunshine data intact.");
   }
 
   /**
@@ -867,7 +884,7 @@ namespace {
     state.confirmation.action = app::ConfirmationAction::factory_reset;
     state.confirmation.title = "Factory Reset";
     state.confirmation.lines = {
-      "Delete all Moonlight saved data?",
+      "Delete all Sunshine saved data?",
       "This removes hosts, logs, pairing identity, and cached cover art.",
     };
 

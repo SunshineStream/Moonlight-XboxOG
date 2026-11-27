@@ -56,7 +56,7 @@ jobs:
       - name: Configure client and tests
         env:
           GH_TOKEN: ${{ github.token }}
-        run: cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DMOONLIGHT_TEST_COVERAGE=ON
+        run: cmake --preset client -DSUNSHINE_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DSUNSHINE_TEST_COVERAGE=ON
 
       - name: Build client and tests
         run: cmake --build cmake-build-client --parallel
@@ -74,12 +74,12 @@ jobs:
           APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
         run: |
           codesign --force --options runtime --timestamp --sign "${APPLE_CODESIGN_IDENTITY}" \
-            cmake-build-client/Moonlight.app
-          codesign --verify --strict cmake-build-client/Moonlight.app
+            cmake-build-client/SunshineClient.app
+          codesign --verify --strict cmake-build-client/SunshineClient.app
 
       - name: Package DMG
         env:
-          PACKAGE_NAME: Moonlight-macOS-${{ matrix.arch }}
+          PACKAGE_NAME: Sunshine-client-macOS-${{ matrix.arch }}
         run: >-
           cpack -G DragNDrop --config cmake-build-client/CPackConfig.cmake
           -B artifacts -D "CPACK_PACKAGE_FILE_NAME=${PACKAGE_NAME}"
@@ -100,5 +100,5 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: Moonlight-macOS-${{ matrix.arch }}
+          name: Sunshine-client-macOS-${{ matrix.arch }}
           path: artifacts/*.dmg

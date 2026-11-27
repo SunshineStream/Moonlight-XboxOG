@@ -20,12 +20,13 @@
 #include "src/logging/logger.h"
 #include "src/streaming/ffmpeg_stream_backend.h"
 #include "src/ui/asset_path.h"
+#include "src/ui/brand_colors.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/sdl_render.h"
 #include "src/ui/shell_layout.h"
 #include "src/ui/svg_assets.h"
 
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
   #include "src/ui/desktop_window.h"
 #endif
 
@@ -107,7 +108,7 @@ namespace {
         return RS_CLK_FLAG;
       case SDL_GAMEPAD_BUTTON_GUIDE:
         return SPECIAL_FLAG;
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       case SDL_GAMEPAD_BUTTON_MISC1:
         return MISC_FLAG;
       case SDL_GAMEPAD_BUTTON_TOUCHPAD:
@@ -126,7 +127,7 @@ namespace {
     }
   }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   /**
    * @brief Translate SDL battery state and send it to the host.
    * @param slot Host controller slot.
@@ -393,7 +394,7 @@ namespace streaming {
 
   StreamControls::StreamControls():
       router_([this](const input::StreamPacket &packet) {
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
         if (packet.type == input::StreamPacketType::arrival) {
           if (SDL_Gamepad *pad = SDL_GetGamepadFromID(router_.slot_device(packet.slot)); pad != nullptr) {
             send_gamepad_arrival(packet, pad);
@@ -412,7 +413,7 @@ namespace streaming {
       }) {
   }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   int StreamControls::gamepad_slot(SDL_JoystickID device) const {
     for (int slot = 0; slot < static_cast<int>(devices_.size()); ++slot) {
       if (router_.slot_device(slot) == device) {
@@ -554,7 +555,7 @@ namespace streaming {
     panel_.icons.clear();
     for (auto &device : devices_) {
       if (device.handle != nullptr) {
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
         SDL_RumbleGamepad(device.handle, 0, 0, 0);
         SDL_RumbleGamepadTriggers(device.handle, 0, 0, 0);
         SDL_SetGamepadSensorEnabled(device.handle, SDL_SENSOR_ACCEL, false);
@@ -605,7 +606,7 @@ namespace streaming {
 
   SDL_Gamepad *StreamControls::take_controller_for_shell() {
     poll();
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     // The shell retains the SDL handle, so closing the stream cannot clear feedback for it.
     for (auto &device : devices_) {
       if (device.handle != nullptr) {
@@ -1075,7 +1076,7 @@ namespace streaming {
   bool StreamControls::EventHandler::keyboard_event(const SDL_KeyboardEvent &key, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
     bool stop = false;
     const bool down = key.type == SDL_EVENT_KEY_DOWN;
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
     if (matches_stream_shortcut(key, SDL_SCANCODE_X)) {
       ui::toggle_desktop_fullscreen(key.windowID);
       return false;
@@ -1162,7 +1163,7 @@ namespace streaming {
   }
 
   bool StreamControls::EventHandler::handle_event(const SDL_Event &event, FfmpegStreamBackend &backend, bool active, bool &statisticsEnabled) const {
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     if (active && controls_.focused_ && !controls_.visible()) {
       controls_.forward_gamepad_event(event);
     }
@@ -1227,7 +1228,7 @@ namespace streaming {
         controls_.focused_ = true;
         controls_.router_.set_captured(controls_.visible());
         break;
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       case SDL_EVENT_DID_ENTER_BACKGROUND:
 #endif
       case SDL_EVENT_QUIT:
@@ -1410,7 +1411,7 @@ namespace streaming {
       return;
     }
     auto *renderer = panel_.renderer.get();
-    SDL_SetRenderDrawColor(renderer, 22, 31, 46, 170);
+    SDL_SetRenderDrawColor(renderer, ui::brand::PANEL_ALT.r, ui::brand::PANEL_ALT.g, ui::brand::PANEL_ALT.b, 170);
     SDL_RenderClear(renderer);
     panel_.label(renderer, font, title, {12, 8, panelWidth - 24, line}, {false, false, true});
     if (!detail.empty()) {
@@ -1418,10 +1419,11 @@ namespace streaming {
       panel_.label(renderer, font, detail, {12, line + 12, panelWidth - 24, line}, {false, false, true});
     }
     SDL_Rect bar {12, panelHeight - 12, panelWidth - 24, 4};
-    SDL_SetRenderDrawColor(renderer, 50, 65, 86, 255);
+    SDL_SetRenderDrawColor(renderer, ui::brand::PANEL.r, ui::brand::PANEL.g, ui::brand::PANEL.b, ui::brand::PANEL.a);
     ui::fill_rect(renderer, bar);
     bar.w = bar.w * screenshotNotification_.percent / 100;
-    SDL_SetRenderDrawColor(renderer, screenshotNotification_.saving || screenshotNotification_.saved ? 130 : 255, screenshotNotification_.saving || screenshotNotification_.saved ? 180 : 110, screenshotNotification_.saving || screenshotNotification_.saved ? 255 : 110, 255);
+    const auto accent = screenshotNotification_.saving || screenshotNotification_.saved ? ui::brand::ACCENT : SDL_Color {255, 110, 110, 255};
+    SDL_SetRenderDrawColor(renderer, accent.r, accent.g, accent.b, accent.a);
     ui::fill_rect(renderer, bar);
     SDL_RenderPresent(renderer);
     backend.presentation().set_color_overlay_surface(panel_.surface, VideoOverlayPlacement::bottom_center);
@@ -1745,7 +1747,7 @@ namespace streaming {
     const int trackHeight = count * row;
     const int thumbHeight = std::max(8, trackHeight * count / std::max(count, static_cast<int>(panel_.logs.size())));
     SDL_Rect thumb {card.x + card.w - 12, card.y + line * 2 + (trackHeight - thumbHeight) * start / std::max(1, static_cast<int>(panel_.logs.size()) - count), 3, thumbHeight};
-    SDL_SetRenderDrawColor(renderer, 130, 180, 255, 255);
+    SDL_SetRenderDrawColor(renderer, ui::brand::ACCENT.r, ui::brand::ACCENT.g, ui::brand::ACCENT.b, ui::brand::ACCENT.a);
     ui::fill_rect(renderer, thumb);
     if (panel_.logs.empty()) {
       panel_.label(renderer, font, "No retained log entries.", {card.x + 16, card.y + line * 2, card.w - 32, line}, {false, false});

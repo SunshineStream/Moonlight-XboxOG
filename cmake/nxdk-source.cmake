@@ -2,7 +2,7 @@
 include_guard(GLOBAL)
 
 # Fingerprint the SDK revision, nested checkouts and local tracked edits.
-function(_moonlight_nxdk_source_state source out_signature out_files)
+function(_sunshine_nxdk_source_state source out_signature out_files)
     execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${source}" rev-parse HEAD
             OUTPUT_VARIABLE revision OUTPUT_STRIP_TRAILING_WHITESPACE
             COMMAND_ERROR_IS_FATAL ANY)
@@ -40,7 +40,7 @@ function(_moonlight_nxdk_source_state source out_signature out_files)
 endfunction()
 
 # Reuse an unchanged SDK copy or replace its owned build directory with tracked sources.
-function(moonlight_stage_nxdk source destination)
+function(sunshine_stage_nxdk source destination)
     find_package(Git REQUIRED)
     get_filename_component(source "${source}" REALPATH)
     cmake_path(ABSOLUTE_PATH destination NORMALIZE)
@@ -50,17 +50,18 @@ function(moonlight_stage_nxdk source destination)
     endif()
 
     # Toolchain files can be loaded more than once during a single configure.
-    get_property(staged GLOBAL PROPERTY MOONLIGHT_STAGED_NXDK)
+    get_property(staged GLOBAL PROPERTY SUNSHINE_STAGED_NXDK)
     if(staged STREQUAL "${source}|${destination}")
         return()
     endif()
-    _moonlight_nxdk_source_state("${source}" signature files)
+    _sunshine_nxdk_source_state("${source}" signature files)
+    # Keep the original ownership markers so existing build copies can be reused.
     set(marker "${destination}/.moonlight-nxdk-copy")
     set(stamp "${destination}/.moonlight-source.signature")
     if(EXISTS "${marker}" AND EXISTS "${stamp}")
         file(READ "${stamp}" previous)
         if(previous STREQUAL signature)
-            set_property(GLOBAL PROPERTY MOONLIGHT_STAGED_NXDK "${source}|${destination}")
+            set_property(GLOBAL PROPERTY SUNSHINE_STAGED_NXDK "${source}|${destination}")
             return()
         endif()
     endif()
@@ -69,7 +70,7 @@ function(moonlight_stage_nxdk source destination)
         # Only replace a directory created by this function. Resolve symlinks
         # before deletion so a build-path alias cannot target the SDK checkout.
         if(NOT EXISTS "${marker}")
-            message(FATAL_ERROR "Refusing to replace an existing directory not owned by Moonlight: ${destination}")
+            message(FATAL_ERROR "Refusing to replace an existing directory not owned by Sunshine: ${destination}")
         endif()
         file(READ "${marker}" owner)
         if(NOT owner STREQUAL "Moonlight nxdk build copy\n")
@@ -92,5 +93,5 @@ function(moonlight_stage_nxdk source destination)
         endif()
     endforeach()
     file(WRITE "${stamp}" "${signature}")
-    set_property(GLOBAL PROPERTY MOONLIGHT_STAGED_NXDK "${source}|${destination}")
+    set_property(GLOBAL PROPERTY SUNSHINE_STAGED_NXDK "${source}|${destination}")
 endfunction()

@@ -1,10 +1,16 @@
+import java.nio.channels.FileChannel
+import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
+
 import javax.inject.Inject
+
+import org.gradle.process.ExecOperations
 
 plugins {
     id 'com.android.application' version '9.5.3'
 }
 
-abstract class StageMoonlightAssets extends DefaultTask {
+abstract class StageSunshineAssets extends DefaultTask {
     @InputDirectory
     @PathSensitive(PathSensitivity.RELATIVE)
     abstract DirectoryProperty getStagedAssets()
@@ -24,8 +30,95 @@ abstract class StageMoonlightAssets extends DefaultTask {
     }
 }
 
+// Android Studio queries the native model during sync, before it runs Gradle build tasks.
+abstract class PrepareSunshineAndroidDependencies implements ValueSource<Boolean, PrepareSunshineAndroidDependencies.Parameters> {
+    interface Parameters extends ValueSourceParameters {
+        DirectoryProperty getRepository()
+        DirectoryProperty getPrefix()
+        DirectoryProperty getSdlSource()
+        DirectoryProperty getNdk()
+        Property<String> getRevision()
+        Property<Boolean> getPreparedPrefix()
+        Property<Boolean> getPreparedSdl()
+        Property<Boolean> getOffline()
+    }
+
+    @Inject
+    abstract ExecOperations getExecOperations()
+
+    @Override
+    Boolean obtain() {
+        def repository = parameters.repository.get().asFile
+        def prefix = parameters.prefix.get().asFile
+        def sdl = parameters.sdlSource.get().asFile
+        def required = [
+            new File(prefix, 'lib/pkgconfig/libavcodec.pc'),
+            new File(prefix, 'lib/pkgconfig/libavutil.pc'),
+            new File(prefix, 'lib/pkgconfig/libswscale.pc'),
+            new File(prefix, 'lib/libavcodec.a'),
+            new File(prefix, 'lib/libavutil.a'),
+            new File(prefix, 'lib/libswscale.a'),
+            new File(prefix, 'lib/libdav1d.a'),
+            new File(prefix, 'lib/libssl.a'),
+            new File(prefix, 'lib/libcrypto.a'),
+            new File(prefix, 'include/openssl/ssl.h'),
+            new File(sdl, 'CMakeLists.txt'),
+            new File(sdl, 'android-project/app/src/main/java/org/libsdl/app/SDLActivity.java')
+        ]
+        def stamp = new File(prefix, '.sunshine-android-deps')
+        if (parameters.preparedPrefix.get()) {
+            if (required.any { !it.isFile() } || (stamp.isFile() && stamp.text == 'incomplete')) {
+                throw new GradleException("The prepared Android dependencies at ${prefix} and SDL3 source at ${sdl} are incomplete.")
+            }
+            return true
+        }
+        if (parameters.preparedSdl.get() && required.takeRight(2).any { !it.isFile() }) {
+            throw new GradleException("sunshineSdlSource must point to prepared SDL3 sources. Checked ${sdl}.")
+        }
+        def revision = parameters.revision.get()
+        def ready = { stamp.isFile() && stamp.text == revision && required.every { it.isFile() } }
+        if (ready()) {
+            return true
+        }
+        if (parameters.offline.get()) {
+            throw new GradleException('Android native dependencies are missing or out of date. Disable Gradle offline mode to prepare them, or set sunshineAndroidDeps to a prepared prefix.')
+        }
+
+        if (!prefix.mkdirs() && !prefix.isDirectory()) {
+            throw new GradleException("Could not create the Android dependency directory ${prefix}.")
+        }
+        // Serialize preparation from concurrent syncs/builds and retry interrupted builds.
+        def lockPath = new File(prefix, '.sunshine-android-deps-lock').toPath()
+        FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE).withCloseable { channel ->
+            channel.lock().withCloseable {
+                if (!ready()) {
+                    def ndk = parameters.ndk.get().asFile
+                    stamp.text = 'incomplete'
+                    println "Preparing Sunshine Android dependencies in ${prefix}"
+                    execOperations.exec { spec ->
+                        spec.workingDir(repository)
+                        spec.environment('ANDROID_NDK_HOME', ndk.absolutePath)
+                        spec.environment('SUNSHINE_ANDROID_DEPS_BUILD_ID', revision.take(12))
+                        if (System.getProperty('os.name').startsWith('Windows')) {
+                            spec.environment('SUNSHINE_ANDROID_DEPS_PREFIX', prefix.absolutePath.replace('\\', '/'))
+                            spec.commandLine('cmd.exe', '/d', '/c', 'scripts\\build-android-deps.cmd')
+                        } else {
+                            spec.commandLine('bash', 'scripts/build-client-deps.sh', 'android', prefix.absolutePath)
+                        }
+                    }
+                    if (required.any { !it.isFile() }) {
+                        throw new GradleException("Android dependency preparation finished with missing files. Checked ${prefix} and ${sdl}.")
+                    }
+                    stamp.text = revision
+                }
+            }
+        }
+        return true
+    }
+}
+
 def sourceRoot = rootProject.file('../..')
-def testSigning = providers.gradleProperty('moonlightSignReleaseForTesting').getOrElse('false').toBoolean()
+def testSigning = providers.gradleProperty('sunshineSignReleaseForTesting').getOrElse('false').toBoolean()
 def releaseSigning = [
     keystore: providers.environmentVariable('ANDROID_KEYSTORE').getOrNull(),
     storePassword: providers.environmentVariable('ANDROID_KEYSTORE_PASSWORD').getOrNull(),
@@ -35,37 +128,47 @@ def releaseSigning = [
 if (releaseSigning.values().any { it } && !releaseSigning.values().every { it }) {
     throw new GradleException('Set all four Android release signing environment variables.')
 }
-def depsRoot = providers.gradleProperty('moonlightAndroidDeps').map { rootProject.file(it) }
+def preparedPrefix = providers.gradleProperty('sunshineAndroidDeps')
+def preparedSdl = providers.gradleProperty('sunshineSdlSource')
+def depsRoot = preparedPrefix.map { rootProject.file(it) }
     .getOrElse(new File(sourceRoot, 'cmake-build-android-deps'))
-def sdlSource = providers.gradleProperty('moonlightSdlSource').map { rootProject.file(it) }.getOrNull()
+def pinnedNdk = providers.gradleProperty('sunshineNdk').get()
+def dependencyPins = new File(sourceRoot, 'package-lock.cmake').getText('UTF-8')
+    .findAll(/(?m)^set\((OPENSSL_TAG|FFMPEG_VERSION|DAV1D_CLIENT_VERSION|SDL3_VERSION) [^)]+\)/)
+def dependencyRevision = ''
+if (!preparedPrefix.isPresent()) {
+    def digest = MessageDigest.getInstance('SHA-256')
+    [sourceRoot.absolutePath, pinnedNdk, *dependencyPins].each {
+        digest.update((it + '\n').getBytes('UTF-8'))
+    }
+    ['scripts/build-client-deps.sh', 'cmake/patches/sdl3-steam-controller-trigger-clicks-and-haptics.patch'].each {
+        digest.update(new File(sourceRoot, it).bytes)
+    }
+    dependencyRevision = digest.digest().encodeHex().toString()
+}
+def sdlSource = preparedSdl.map { rootProject.file(it) }.getOrNull()
 if (sdlSource == null) {
-    def sdlPin = new File(sourceRoot, 'package-lock.cmake').getText('UTF-8') =~ /(?m)^set\(SDL3_VERSION ([^)]+)\)/
-    if (!sdlPin.find()) {
+    def sdlPin = dependencyPins.find { it.startsWith('set(SDL3_VERSION ') }
+    if (sdlPin == null) {
         throw new GradleException('Could not read SDL3_VERSION from package-lock.cmake.')
     }
-    sdlSource = new File(depsRoot, "sources/sdl-release-${sdlPin.group(1)}")
+    def sdlVersion = sdlPin.substring('set(SDL3_VERSION '.length(), sdlPin.length() - 1)
+    def suffix = preparedPrefix.isPresent() ? '' : "-${dependencyRevision.take(12)}"
+    sdlSource = new File(depsRoot, "sources/sdl-release-${sdlVersion}${suffix}")
 }
-if (!new File(depsRoot, 'lib/pkgconfig/libavcodec.pc').isFile() ||
-    !new File(depsRoot, 'lib/libcrypto.a').isFile() ||
-    !new File(sdlSource, 'android-project/app/src/main/java/org/libsdl/app/SDLActivity.java').isFile()) {
-    throw new GradleException(
-        'Prepare Android dependencies with scripts/build-client-deps.sh android <prefix> ' +
-        'on Linux, macOS, or MSYS2 UCRT64. ' +
-        "Gradle checked ${depsRoot} for FFmpeg and OpenSSL and ${sdlSource} for SDL3. " +
-        'Set moonlightAndroidDeps and moonlightSdlSource in Gradle properties to override these paths.')
-}
+
 android {
-    namespace = 'dev.lizardbyte.app.moonlight'
-    compileSdk = providers.gradleProperty('moonlightCompileSdk').get().toInteger()
-    buildToolsVersion = providers.gradleProperty('moonlightBuildTools').get()
+    namespace = 'dev.lizardbyte.app.sunshineclient'
+    compileSdk = providers.gradleProperty('sunshineCompileSdk').get().toInteger()
+    buildToolsVersion = providers.gradleProperty('sunshineBuildTools').get()
     enableKotlin = false
-    ndkVersion = providers.gradleProperty('moonlightNdk').get()
+    ndkVersion = pinnedNdk
 
     defaultConfig {
-        applicationId = 'dev.lizardbyte.app.moonlight'
+        applicationId = 'dev.lizardbyte.app.sunshineclient'
         minSdk = 26
         targetSdk = 35
-        versionCode = providers.gradleProperty('moonlightVersionCode').getOrElse('1').toInteger()
+        versionCode = providers.gradleProperty('sunshineVersionCode').getOrElse('1').toInteger()
         versionName = '0.1.0'
 
         ndk {
@@ -77,7 +180,7 @@ android {
                       "-DOPENSSL_ROOT_DIR=${depsRoot}", "-DCMAKE_FIND_ROOT_PATH=${depsRoot}",
                       "-DFFMPEG_PREPARED_BINARIES=${depsRoot}",
                       "-DFETCHCONTENT_SOURCE_DIR_SDL3=${sdlSource}"
-            targets 'moonlight_client', 'SDL3-shared'
+            targets 'sunshine_client', 'SDL3-shared'
         }
     }
 
@@ -93,6 +196,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (providers.gradleProperty('sunshineScreenshotDemo').getOrElse('false').toBoolean()) {
+                applicationIdSuffix '.demo'
+                externalNativeBuild.cmake.arguments '-DSUNSHINE_SCREENSHOT_DEMO=ON'
+            }
+        }
         release {
             // CI and local sideloading can opt into test signing for the release variant.
             if (testSigning) {
@@ -107,7 +216,7 @@ android {
         path = new File(sourceRoot, 'CMakeLists.txt')
         // Keep CMake's nested compiler checks within Windows path limits.
         buildStagingDirectory = new File(sourceRoot, 'cmake-build-android')
-        version = providers.gradleProperty('moonlightCmake').get()
+        version = providers.gradleProperty('sunshineCmake').get()
     }
 
     sourceSets.main {
@@ -116,13 +225,26 @@ android {
 }
 
 androidComponents {
+    finalizeDsl {
+        providers.of(PrepareSunshineAndroidDependencies) {
+            parameters.repository.set(sourceRoot)
+            parameters.prefix.set(depsRoot)
+            parameters.sdlSource.set(sdlSource)
+            parameters.ndk.set(androidComponents.sdkComponents.ndkDirectory)
+            parameters.revision.set(dependencyRevision)
+            parameters.preparedPrefix.set(preparedPrefix.isPresent())
+            parameters.preparedSdl.set(preparedSdl.isPresent())
+            parameters.offline.set(gradle.startParameter.offline)
+        }.get()
+    }
+
     onVariants(selector().all()) { variant ->
         def variantName = variant.name.capitalize()
-        def stagedAssets = layout.buildDirectory.dir("moonlight-assets/${variant.name}")
+        def stagedAssets = layout.buildDirectory.dir("sunshine-assets/${variant.name}")
         variant.externalNativeBuild.arguments.add(
-            "-DMOONLIGHT_CLIENT_ASSET_ROOT=${stagedAssets.get().dir('assets').asFile}".toString()
+            "-DSUNSHINE_CLIENT_ASSET_ROOT=${stagedAssets.get().dir('assets').asFile}".toString()
         )
-        def packageAssets = tasks.register("stage${variantName}MoonlightAssets", StageMoonlightAssets) {
+        def packageAssets = tasks.register("stage${variantName}SunshineAssets", StageSunshineAssets) {
             dependsOn("externalNativeBuild${variantName}")
             it.stagedAssets.set(stagedAssets)
         }

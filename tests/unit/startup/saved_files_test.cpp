@@ -71,7 +71,7 @@ namespace {
     }
   };
 
-  TEST_F(SavedFilesTest, ListsMoonlightManagedFilesThatExistOnDisk) {
+  TEST_F(SavedFilesTest, ListsSunshineManagedFilesThatExistOnDisk) {
     write_file_bytes(hostStoragePath, {'h', 'o', 's', 't'});
     write_file_bytes(settingsFilePath, {'s', 'e', 't'});
     write_file_bytes(logFilePath, {'l', 'o', 'g'});

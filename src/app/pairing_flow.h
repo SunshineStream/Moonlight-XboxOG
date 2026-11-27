@@ -44,7 +44,7 @@ namespace app {
   PairingDraft create_pairing_draft(std::string_view targetAddress, uint16_t targetPort, std::string generatedPin);
 
   /**
-   * @brief Return whether a PIN string is a valid Moonlight-style four-digit PIN.
+   * @brief Return whether a PIN string is a valid GameStream four-digit PIN.
    *
    * @param pin Candidate PIN string.
    * @return true when the PIN contains exactly four digits.

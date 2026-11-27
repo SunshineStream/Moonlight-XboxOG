@@ -1,6 +1,6 @@
 /**
  * @file tests/unit/splash/splash_animation_test.cpp
- * @brief Verifies the startup logo's wedge animation.
+ * @brief Verifies the Sunshine logo reveal, glow and startup exit timing.
  */
 // test header include
 #include "src/splash/splash_animation.h"
@@ -15,135 +15,103 @@
 namespace {
 
   /**
-   * @brief Verify the save icon can start mid-wave and loop with no splash entrance or exit.
-   */
-  TEST(SplashAnimationTest, SamplesTheContinuousLogoWaveForTheSaveIndicator) {
-    const auto first = splash::logo_wave_brightness(0);
-    EXPECT_NE(first, splash::logo_wave_brightness(150));
-    EXPECT_EQ(first, splash::logo_wave_brightness(1200));
-    EXPECT_LT(*std::min_element(first.begin(), first.end()), 255);
-    EXPECT_EQ(*std::max_element(first.begin(), first.end()), 255);
-  }
-
-  /**
-   * @brief Check whether the first wedge is at rest and all eight wedges are fully lit.
-   *
-   * @param frame Splash artwork to examine.
-   * @return True when the complete logo is visible.
+   * @brief Check whether the logo has reached its full-color resting pose.
+   * @param frame Sampled artwork to examine.
+   * @return True when every arc is fully opaque.
    */
   bool is_complete_logo(const splash::SplashAnimationFrame &frame) {
-    return frame.firstWedgeScale == 1.0f && std::all_of(frame.brightness.begin(), frame.brightness.end(), [](auto brightness) {
-             return brightness == 255;
-           });
+    return std::all_of(frame.opacity.begin(), frame.opacity.end(), [](auto opacity) {
+      return opacity == 255;
+    });
   }
 
   /**
-   * @brief Verify that the first wedge grows, holds, and retracts before the wave continues.
+   * @brief Verify that the save animation pulses each arc, then repeats seamlessly.
    */
-  TEST(SplashAnimationTest, ExpandsAndRetractsTheFirstWedge) {
-    splash::SplashAnimation animation;
-    const auto opening = animation.advance(0, false);
-    EXPECT_GT(opening.firstWedgeScale, 1.0f);
-    const auto growing = animation.advance(120, false);
-    EXPECT_GT(growing.firstWedgeScale, opening.firstWedgeScale);
-    EXPECT_LT(growing.firstWedgeScale, splash::SPLASH_MAX_WEDGE_SCALE);
-    for (auto brightness : growing.brightness) {
-      EXPECT_EQ(brightness, 255);
+  TEST(SplashAnimationTest, LoopsThroughEachArcInDrawingOrder) {
+    constexpr std::uint64_t step = 240;
+    constexpr auto period = step * splash::LOGO_ARC_COUNT;
+    for (std::size_t arc = 0; arc < splash::LOGO_ARC_COUNT; ++arc) {
+      const auto peak = splash::logo_glow_opacity(arc * step);
+      EXPECT_EQ(peak[arc], 255);
+      EXPECT_EQ(std::count(peak.begin(), peak.end(), 255), 1);
+      EXPECT_EQ(peak, splash::logo_glow_opacity(period + arc * step));
     }
-    EXPECT_FLOAT_EQ(animation.advance(240, false).firstWedgeScale, splash::SPLASH_MAX_WEDGE_SCALE);
-    EXPECT_FLOAT_EQ(animation.advance(700, false).firstWedgeScale, splash::SPLASH_MAX_WEDGE_SCALE);
-    const auto retracting = animation.advance(800, false).firstWedgeScale;
-    EXPECT_GT(retracting, 1.0f);
-    EXPECT_LT(retracting, splash::SPLASH_MAX_WEDGE_SCALE);
-    EXPECT_FLOAT_EQ(animation.advance(900, false).firstWedgeScale, 1.0f);
-  }
 
-  /**
-   * @brief Verify that the dimming wave visits each successive wedge and wraps to the first.
-   */
-  TEST(SplashAnimationTest, DimsWedgesInClockwiseOrderAndWrapsToTheFirst) {
-    const auto sample = [](std::uint64_t elapsed) {
-      return splash::SplashAnimation {}.advance(elapsed, false);
-    };
-    const auto waveStart = sample(930);
-    EXPECT_EQ(waveStart.brightness[0], 156);
-    EXPECT_GT(waveStart.brightness[1], waveStart.brightness[0]);
-    EXPECT_LT(waveStart.brightness[1], 255);
-    for (std::size_t i = 2; i < splash::SPLASH_WEDGE_COUNT; ++i) {
-      const auto onset = 870 + (i - 1) * 150;
-      EXPECT_EQ(sample(onset).brightness[i], 255) << i;
-      EXPECT_EQ(sample(onset + 90).brightness[i], 156) << i;
-      EXPECT_GT(sample(onset + 510).brightness[i], 156) << i;
-      EXPECT_EQ(sample(onset + 600).brightness[i], 255) << i;
+    const auto last = splash::logo_glow_opacity(period - 1);
+    const auto first = splash::logo_glow_opacity(0);
+    for (std::size_t arc = 0; arc < first.size(); ++arc) {
+      EXPECT_NEAR(last[arc], first[arc], 1);
     }
-    EXPECT_EQ(sample(1350).brightness.front(), 255);
-    EXPECT_EQ(sample(2010).brightness.front(), 156);
-    EXPECT_EQ(sample(2010).brightness[1], 255);
-    EXPECT_EQ(sample(2160).brightness[1], 156);
-    EXPECT_EQ(sample(2220).brightness, sample(3420).brightness);
+    EXPECT_NE(first, splash::logo_glow_opacity(step / 2));
   }
 
   /**
-   * @brief Verify that slow startup keeps the artwork moving across multiple turns.
+   * @brief Verify the arcs appear in order and that adjacent samples share a render frame.
    */
-  TEST(SplashAnimationTest, ReservesTheCompleteLogoForTheFinalPose) {
+  TEST(SplashAnimationTest, RevealsTheLogoFromTheInnerArcOut) {
     splash::SplashAnimation animation;
-    for (std::uint64_t elapsed = 0; elapsed <= 12000; elapsed += 30) {
+    EXPECT_EQ(animation.advance(0, false).opacity, splash::LogoOpacity {});
+    for (std::size_t arc = 0; arc < splash::LOGO_ARC_COUNT; ++arc) {
+      const auto time = 32 + ((arc * 120 + 31) / 32) * 32;
+      const auto frame = animation.advance(time, false);
+      for (std::size_t i = 0; i < frame.opacity.size(); ++i) {
+        EXPECT_EQ(frame.opacity[i] > 0, i <= arc) << time << ' ' << i;
+      }
+      EXPECT_EQ(frame.opacity, animation.advance(time + 31, false).opacity);
+    }
+    EXPECT_EQ(animation.advance(640, false).opacity, splash::logo_glow_opacity(640));
+  }
+
+  /**
+   * @brief Verify that a slow startup continues to glow across many loops.
+   */
+  TEST(SplashAnimationTest, KeepsGlowingWhileStartupIsIncomplete) {
+    splash::SplashAnimation animation;
+    for (std::uint64_t elapsed = 0; elapsed <= 12000; elapsed += 32) {
       const auto frame = animation.advance(elapsed, false);
       EXPECT_FALSE(is_complete_logo(frame)) << elapsed;
       EXPECT_FALSE(frame.finished) << elapsed;
     }
-    EXPECT_FALSE(is_complete_logo(animation.advance(std::numeric_limits<std::uint64_t>::max(), false)));
+    const auto time = std::numeric_limits<std::uint64_t>::max();
+    EXPECT_EQ(animation.advance(time, false).opacity, splash::logo_glow_opacity(time - time % 32));
   }
 
   /**
-   * @brief Verify that fast startup shows a full turn of the wave and the brief final hold.
+   * @brief Verify the splash completes the first glow and holds the full logo before exiting.
    */
-  TEST(SplashAnimationTest, KeepsTheWaveMovingUntilTheEarliestFade) {
+  TEST(SplashAnimationTest, WaitsForTheFirstGlowBeforeSettling) {
     splash::SplashAnimation animation;
     splash::SplashAnimation looping;
-    EXPECT_EQ(animation.advance(2219, true).brightness, looping.advance(2219, false).brightness);
-    EXPECT_EQ(animation.advance(2220, true).brightness, looping.advance(2220, false).brightness);
-    const auto fading = animation.advance(2310, true);
-    EXPECT_GT(fading.brightness[2], looping.advance(2310, false).brightness[2]);
-    EXPECT_FALSE(is_complete_logo(fading));
-    EXPECT_TRUE(is_complete_logo(animation.advance(2400, true)));
-    EXPECT_FALSE(animation.advance(2579, true).finished);
-    EXPECT_TRUE(animation.advance(2580, true).finished);
+    EXPECT_EQ(animation.advance(1599, true).opacity, looping.advance(1599, false).opacity);
+    EXPECT_EQ(animation.advance(1600, true).opacity, looping.advance(1600, false).opacity);
+    const auto settling = animation.advance(1696, true);
+    EXPECT_GT(settling.opacity[0], looping.advance(1696, false).opacity[0]);
+    EXPECT_FALSE(is_complete_logo(settling));
+    EXPECT_TRUE(is_complete_logo(animation.advance(1780, true)));
+    EXPECT_FALSE(animation.advance(1959, true).finished);
+    EXPECT_TRUE(animation.advance(1960, true).finished);
   }
 
   /**
-   * @brief Verify that the fade and hold follow readiness even after many rotations.
+   * @brief Verify the final hold starts after the full logo is sampled during a slow startup.
    */
-  TEST(SplashAnimationTest, StartsTheFinalHoldWhenSlowStartupCompletes) {
+  TEST(SplashAnimationTest, HoldsTheFullLogoAfterADelayedFrame) {
     splash::SplashAnimation animation;
-    const auto waiting = animation.advance(8999, false);
-    EXPECT_FALSE(is_complete_logo(waiting));
-    EXPECT_FALSE(waiting.finished);
+    EXPECT_FALSE(animation.advance(8999, false).finished);
     EXPECT_FALSE(is_complete_logo(animation.advance(9000, true)));
     EXPECT_FALSE(is_complete_logo(animation.advance(9179, true)));
-    EXPECT_TRUE(is_complete_logo(animation.advance(9180, true)));
-    EXPECT_FALSE(animation.advance(9359, true).finished);
-    EXPECT_TRUE(animation.advance(9360, true).finished);
-  }
-
-  /**
-   * @brief Verify that the logo remains visible for the final hold after a delayed frame.
-   */
-  TEST(SplashAnimationTest, HoldsTheCompleteLogoAfterDelayedPresentation) {
-    splash::SplashAnimation animation;
-    EXPECT_FALSE(animation.advance(5000, true).finished);
-    const auto delayedFrame = animation.advance(5600, true);
+    const auto delayedFrame = animation.advance(9500, true);
     EXPECT_TRUE(is_complete_logo(delayedFrame));
     EXPECT_FALSE(delayedFrame.finished);
-    EXPECT_FALSE(animation.advance(5779, true).finished);
-    EXPECT_TRUE(animation.advance(5780, true).finished);
+    EXPECT_FALSE(animation.advance(9679, true).finished);
+    EXPECT_TRUE(animation.advance(9680, true).finished);
   }
 
   /**
-   * @brief Verify that a fixed-duration splash fits its final pose into the available time.
+   * @brief Verify that short or zero fixed budgets still end with the resting pose.
    */
-  TEST(SplashAnimationTest, FitsTheFadeAndHoldIntoAFixedDuration) {
+  TEST(SplashAnimationTest, FitsTheFinalPoseIntoAFixedDuration) {
     splash::SplashAnimation animation {1500};
     EXPECT_FALSE(is_complete_logo(animation.advance(1139, true)));
     EXPECT_FALSE(is_complete_logo(animation.advance(1319, false)));

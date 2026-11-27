@@ -15,9 +15,9 @@ jobs:
     permissions:
       contents: read
     env:
-      FLATPAK_APP_ID: dev.lizardbyte.app.Moonlight
+      FLATPAK_APP_ID: dev.lizardbyte.app.SunshineClient
       FLATPAK_ARCH: ${{ matrix.arch }}
-      FLATPAK_MODULE_DIR: cmake-build-flatpak/.flatpak-builder/build/moonlight
+      FLATPAK_MODULE_DIR: cmake-build-flatpak/.flatpak-builder/build/sunshine-client
     strategy:
       fail-fast: false
       matrix:
@@ -60,15 +60,15 @@ jobs:
         run: |
           sudo su "$(whoami)" -c "flatpak run org.flatpak.Builder \
             --arch=${FLATPAK_ARCH} --force-clean --keep-build-dirs --repo=repo --sandbox \
-            build-moonlight ${FLATPAK_APP_ID}.yml"
+            build-sunshine-client ${FLATPAK_APP_ID}.yml"
           sudo su "$(whoami)" -c "flatpak build-bundle --arch=${FLATPAK_ARCH} \
-            repo ../Moonlight-${FLATPAK_ARCH}.flatpak ${FLATPAK_APP_ID}"
+            repo ../Sunshine-client-${FLATPAK_ARCH}.flatpak ${FLATPAK_APP_ID}"
 
       - name: Upload Flatpak
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: Moonlight-Flatpak-${{ matrix.arch }}
-          path: Moonlight-*.flatpak
+          name: Sunshine-client-Flatpak-${{ matrix.arch }}
+          path: Sunshine-client-*.flatpak
 
       - name: Publish Flatpak test reports
         if: >-

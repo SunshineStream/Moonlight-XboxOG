@@ -7,14 +7,15 @@ cmake_minimum_required(VERSION 3.18)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile commands for IDE tooling" FORCE)
 
-set(MOONLIGHT_BUILD_KIND "HOST" CACHE STRING "Internal Moonlight build mode")
-set_property(CACHE MOONLIGHT_BUILD_KIND PROPERTY STRINGS HOST XBOX)
-option(MOONLIGHT_BUILD_VIDEO_EXPERIMENTS "Build standalone GPU presentation and MPEG-2 sampling experiments" OFF)
-option(MOONLIGHT_BUILD_AUDIO_EXPERIMENTS "Build the standalone Opus playback probe" OFF)
-option(MOONLIGHT_INPUT_DIAGNOSTICS "Display digital controller state while diagnosing stream input" OFF)
+set(SUNSHINE_BUILD_KIND "HOST" CACHE STRING "Internal Sunshine build mode")
+set_property(CACHE SUNSHINE_BUILD_KIND PROPERTY STRINGS HOST XBOX)
+option(SUNSHINE_BUILD_VIDEO_EXPERIMENTS "Build standalone GPU presentation and MPEG-2 sampling experiments" OFF)
+option(SUNSHINE_BUILD_AUDIO_EXPERIMENTS "Build the standalone Opus playback probe" OFF)
+option(SUNSHINE_INPUT_DIAGNOSTICS "Display digital controller state while diagnosing stream input" OFF)
+option(SUNSHINE_SCREENSHOT_DEMO "Use fictional hosts and apps for documentation screenshots" OFF)
 
-if(MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
-    project(Moonlight C CXX)
+if(SUNSHINE_BUILD_KIND STREQUAL "XBOX")
+    project(SunshineClient C CXX)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/packages.cmake")
 
     # add custom modules
@@ -32,7 +33,7 @@ if(MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
     return()
 endif()
 
-project(Moonlight C CXX)
+project(SunshineClient C CXX)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/packages.cmake")
 
 set(CMAKE_MODULE_PATH
@@ -63,10 +64,10 @@ if(DEFINED BUILD_CLIENT)
     set(_native_client_default "${BUILD_CLIENT}")
 endif()
 option(BUILD_NATIVE_CLIENT "Build the desktop or mobile client for the selected target" ${_native_client_default})
-option(MOONLIGHT_FORCE_NXDK_DISTCLEAN "Force a fresh nxdk distclean during configure" OFF)
+option(SUNSHINE_FORCE_NXDK_DISTCLEAN "Force a fresh nxdk distclean during configure" OFF)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sources.cmake")
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/moonlight-dependencies.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sunshine-dependencies.cmake")
 
 if(BUILD_DOCS)
     include(third-party/dockle/cmake/Dockle.cmake)
@@ -78,7 +79,7 @@ if(BUILD_NATIVE_CLIENT AND CMAKE_CROSSCOMPILING)
 endif()
 
 if(BUILD_TESTS OR BUILD_NATIVE_CLIENT)
-    moonlight_prepare_common_dependencies()
+    sunshine_prepare_common_dependencies()
 endif()
 
 if(BUILD_TESTS)
@@ -93,11 +94,11 @@ endif()
 if(BUILD_XBOX)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/nxdk.cmake")
 
-    moonlight_resolve_nxdk_dir(source_nxdk_dir)
-    set(_nxdk_build_dir "${MOONLIGHT_NXDK_BUILD_DIR}")
-    moonlight_stage_nxdk("${source_nxdk_dir}" "${_nxdk_build_dir}")
-    moonlight_prepare_nxdk("${_nxdk_build_dir}" "${_nxdk_build_dir}/.moonlight-bootstrap")
-    moonlight_add_xbox_build(
+    sunshine_resolve_nxdk_dir(source_nxdk_dir)
+    set(_nxdk_build_dir "${SUNSHINE_NXDK_BUILD_DIR}")
+    sunshine_stage_nxdk("${source_nxdk_dir}" "${_nxdk_build_dir}")
+    sunshine_prepare_nxdk("${_nxdk_build_dir}" "${_nxdk_build_dir}/.moonlight-bootstrap")
+    sunshine_add_xbox_build(
             NXDK_DIR "${_nxdk_build_dir}"
             SOURCE_NXDK_DIR "${source_nxdk_dir}"
             BINARY_DIR "${CMAKE_BINARY_DIR}/xbox"

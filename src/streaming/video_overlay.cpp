@@ -649,7 +649,7 @@ namespace streaming {
         // can release its GPU buffers and draw the same panel in software.
         yuy2_.bytes.reset();
         yuy2_.capacity = 0;
-        yuy2_.bytes.reset(static_cast<std::uint8_t *>(moonlight_ffmpeg_aligned_malloc(required, alignof(void *))));
+        yuy2_.bytes.reset(static_cast<std::uint8_t *>(sunshine_ffmpeg_aligned_malloc(required, alignof(void *))));
         if (!yuy2_.bytes) {
           yuy2_.frameWidth = 0;
           return false;

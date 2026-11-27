@@ -116,7 +116,7 @@ namespace {
    */
   const BIO_METHOD *socket_bio_method() {
     static const std::unique_ptr<BIO_METHOD, decltype(&BIO_meth_free)> method([] {
-      BIO_METHOD *result = BIO_meth_new(BIO_TYPE_SOURCE_SINK | BIO_get_new_index(), "Moonlight socket");
+      BIO_METHOD *result = BIO_meth_new(BIO_TYPE_SOURCE_SINK | BIO_get_new_index(), "Sunshine socket");
       if (result != nullptr && (!BIO_meth_set_create(result, create_socket_bio) || !BIO_meth_set_destroy(result, destroy_socket_bio) || !BIO_meth_set_read(result, read_socket_bio) || !BIO_meth_set_write(result, write_socket_bio) || !BIO_meth_set_ctrl(result, control_socket_bio))) {
         BIO_meth_free(result);
         return static_cast<BIO_METHOD *>(nullptr);

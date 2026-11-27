@@ -24,7 +24,7 @@ namespace splash {
   void show_splash_screen(SDL_Window *window, const VIDEO_MODE &videoMode, unsigned int durationMilliseconds = 1500U);
 
   /**
-   * @brief Play the clockwise wave until startup completes, then briefly show the complete logo.
+   * @brief Reveal the logo, loop its glow until startup completes and then briefly show it in full color.
    *
    * @param window SDL window used for splash rendering.
    * @param videoMode Active video mode used to size the splash layout.

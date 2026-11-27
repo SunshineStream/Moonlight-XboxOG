@@ -80,7 +80,7 @@ cmake_configure_args=(
 )
 
 if [[ "${ENABLE_TEST_COVERAGE}" -eq 1 ]]; then
-  cmake_configure_args+=(-DMOONLIGHT_TEST_COVERAGE=ON)
+  cmake_configure_args+=(-DSUNSHINE_TEST_COVERAGE=ON)
 fi
 
 case "${HOST_SYSTEM}" in

@@ -28,7 +28,7 @@ namespace input {
   };
 
   /**
-   * @brief Controller buttons used by the Moonlight client UI.
+   * @brief Controller buttons used by the Sunshine client UI.
    */
   enum class GamepadButton {
     dpad_up,  ///< D-pad up button.

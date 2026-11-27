@@ -12,7 +12,7 @@
 # See https://github.com/LizardByte/.github/blob/master/renovate/README.md#cpm-package-lock for annotation instructions.
 
 # Use a fresh checkout when the upstream revision or a local patch changes.
-function(_moonlight_patched_source_dir out_var name revision patch)
+function(_sunshine_patched_source_dir out_var name revision patch)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${patch}")
     file(SHA256 "${patch}" patch_hash)
     string(SUBSTRING "${revision}" 0 12 revision_id)
@@ -22,15 +22,15 @@ endfunction()
 
 # Desktop FFmpeg SDK packages.
 # renovate: datasource=github-releases depName=LizardByte/build-deps versioning=semver
-set(MOONLIGHT_BUILD_DEPS_TAG v2026.1017.131201)
+set(SUNSHINE_BUILD_DEPS_TAG v2026.1017.131201)
 
 # FFmpeg, cross-compiled with its upstream configure script.
 # renovate: datasource=github-tags depName=FFmpeg/FFmpeg versioning=semver-coerced
 # extractVersion=^n(?<version>\d+\.\d+(?:\.\d+)?)$
 set(FFMPEG_VERSION 9.1)
 set(FFMPEG_NXDK_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/ffmpeg/ffmpeg-nxdk.patch")
-_moonlight_patched_source_dir(FFMPEG_XBOX_SOURCE_DIR ffmpeg "${FFMPEG_VERSION}" "${FFMPEG_NXDK_PATCH}")
-moonlight_declare_source_package(ffmpeg
+_sunshine_patched_source_dir(FFMPEG_XBOX_SOURCE_DIR ffmpeg "${FFMPEG_VERSION}" "${FFMPEG_NXDK_PATCH}")
+sunshine_declare_source_package(ffmpeg
         NAME ffmpeg
         VERSION ${FFMPEG_VERSION}
         GIT_REPOSITORY https://github.com/FFmpeg/FFmpeg.git
@@ -51,7 +51,7 @@ set(DAV1D_CLIENT_VERSION 1.5.5)
 # Lucide SVG icons
 # renovate: datasource=github-tags depName=lucide-icons/lucide
 set(LUCIDE_VERSION 1.78.0)
-moonlight_declare_source_package(lucide
+sunshine_declare_source_package(lucide
         NAME lucide
         VERSION ${LUCIDE_VERSION}
         GIT_REPOSITORY https://github.com/lucide-icons/lucide.git
@@ -63,8 +63,8 @@ moonlight_declare_source_package(lucide
 # ref=master
 set(NXDK_SDL3_COMMIT 62455b72ac80d318961c05c1230ffcb471e9f2d4)
 set(NXDK_SDL3_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/nxdk-sdl3.patch")
-_moonlight_patched_source_dir(NXDK_SDL3_SOURCE_DIR nxdk_sdl3 "${NXDK_SDL3_COMMIT}" "${NXDK_SDL3_PATCH}")
-moonlight_declare_source_package(nxdk_sdl3
+_sunshine_patched_source_dir(NXDK_SDL3_SOURCE_DIR nxdk_sdl3 "${NXDK_SDL3_COMMIT}" "${NXDK_SDL3_PATCH}")
+sunshine_declare_source_package(nxdk_sdl3
         NAME nxdk_sdl3
         GIT_REPOSITORY https://github.com/Ryzee119/nxdk-sdl3.git
         GIT_TAG ${NXDK_SDL3_COMMIT}
@@ -81,15 +81,15 @@ moonlight_declare_source_package(nxdk_sdl3
 set(OPENSSL_TAG openssl-4.1.0)
 string(REGEX REPLACE "^openssl-" "" OPENSSL_VERSION "${OPENSSL_TAG}")
 set(OPENSSL_XBOX_SOURCE_OPTIONS)
-if(MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
+if(SUNSHINE_BUILD_KIND STREQUAL "XBOX")
     set(OPENSSL_NXDK_PATCH "${CMAKE_CURRENT_LIST_DIR}/src/_nxdk_compat/openssl-nxdk.patch")
-    _moonlight_patched_source_dir(OPENSSL_XBOX_SOURCE_DIR openssl "${OPENSSL_VERSION}" "${OPENSSL_NXDK_PATCH}")
+    _sunshine_patched_source_dir(OPENSSL_XBOX_SOURCE_DIR openssl "${OPENSSL_VERSION}" "${OPENSSL_NXDK_PATCH}")
     set(OPENSSL_XBOX_SOURCE_OPTIONS
             SOURCE_DIR "${OPENSSL_XBOX_SOURCE_DIR}"
             PATCHES "${OPENSSL_NXDK_PATCH}"
             NO_CACHE YES)
 endif()
-moonlight_declare_source_package(openssl
+sunshine_declare_source_package(openssl
         NAME openssl
         TLS_VERIFY TRUE
         # The source snapshot omits the upstream test submodules.
@@ -101,7 +101,7 @@ moonlight_declare_source_package(openssl
 # renovate: datasource=github-tags depName=libsdl-org/SDL_image versioning=semver
 # extractVersion=^release-(?<version>\d+\.\d+\.\d+)$
 set(SDL3_IMAGE_VERSION 3.4.8)
-moonlight_declare_source_package(sdl3_image
+sunshine_declare_source_package(sdl3_image
         NAME sdl3_image
         VERSION ${SDL3_IMAGE_VERSION}
         GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
@@ -115,8 +115,8 @@ moonlight_declare_source_package(sdl3_image
 set(SDL3_VERSION 3.4.18)
 set(SDL3_STEAM_CONTROLLER_PATCH
         "${CMAKE_CURRENT_LIST_DIR}/cmake/patches/sdl3-steam-controller-trigger-clicks-and-haptics.patch")
-_moonlight_patched_source_dir(SDL3_PATCHED_SOURCE_DIR sdl3 "${SDL3_VERSION}" "${SDL3_STEAM_CONTROLLER_PATCH}")
-moonlight_declare_source_package(SDL3
+_sunshine_patched_source_dir(SDL3_PATCHED_SOURCE_DIR sdl3 "${SDL3_VERSION}" "${SDL3_STEAM_CONTROLLER_PATCH}")
+sunshine_declare_source_package(SDL3
         NAME SDL3
         VERSION ${SDL3_VERSION}
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
@@ -133,7 +133,7 @@ moonlight_declare_source_package(SDL3
 # renovate: datasource=github-tags depName=libsdl-org/SDL_ttf versioning=semver
 # extractVersion=^release-(?<version>\d+\.\d+\.\d+)$
 set(SDL3_TTF_VERSION 3.2.2)
-moonlight_declare_source_package(sdl3_ttf
+sunshine_declare_source_package(sdl3_ttf
         NAME sdl3_ttf
         VERSION ${SDL3_TTF_VERSION}
         GIT_REPOSITORY https://github.com/libsdl-org/SDL_ttf.git
@@ -145,7 +145,7 @@ moonlight_declare_source_package(sdl3_ttf
 # renovate: datasource=github-tags depName=marzer/tomlplusplus versioning=semver
 # extractVersion=^v(?<version>\d+\.\d+\.\d+)$
 set(TOMLPLUSPLUS_VERSION 3.5.1)
-moonlight_declare_source_package(tomlplusplus
+sunshine_declare_source_package(tomlplusplus
         NAME tomlplusplus
         VERSION ${TOMLPLUSPLUS_VERSION}
         GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git

@@ -3,8 +3,8 @@ include_guard(GLOBAL)
 include(ExternalProject)
 include("${CMAKE_CURRENT_LIST_DIR}/../msys2.cmake")
 
-set(MOONLIGHT_OPENSSL_MODE "BUNDLED" CACHE STRING "How to provide OpenSSL for Moonlight: BUNDLED" FORCE)
-set_property(CACHE MOONLIGHT_OPENSSL_MODE PROPERTY STRINGS BUNDLED)
+set(SUNSHINE_OPENSSL_MODE "BUNDLED" CACHE STRING "How to provide OpenSSL for Sunshine: BUNDLED" FORCE)
+set_property(CACHE SUNSHINE_OPENSSL_MODE PROPERTY STRINGS BUNDLED)
 
 CPMGetPackage(openssl)
 set(OPENSSL_SOURCE_DIR "${openssl_SOURCE_DIR}")
@@ -12,20 +12,20 @@ set(OPENSSL_BUILD_ROOT "${CMAKE_BINARY_DIR}/third-party/openssl/${OPENSSL_VERSIO
 set(OPENSSL_BUILD_DIR "${OPENSSL_BUILD_ROOT}/build")
 set(OPENSSL_INSTALL_DIR "${OPENSSL_BUILD_ROOT}/install")
 
-set(MOONLIGHT_OPENSSL_MODE "BUNDLED")
+set(SUNSHINE_OPENSSL_MODE "BUNDLED")
 
-if(MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
-    set(MOONLIGHT_OPENSSL_PLATFORM "XBOX")
+if(SUNSHINE_BUILD_KIND STREQUAL "XBOX")
+    set(SUNSHINE_OPENSSL_PLATFORM "XBOX")
 else()
-    set(MOONLIGHT_OPENSSL_PLATFORM "HOST")
+    set(SUNSHINE_OPENSSL_PLATFORM "HOST")
 endif()
-string(TOLOWER "${MOONLIGHT_OPENSSL_PLATFORM}" MOONLIGHT_OPENSSL_PLATFORM_LOWER)
-set(MOONLIGHT_OPENSSL_EXTERNAL_TARGET "openssl_external_${MOONLIGHT_OPENSSL_PLATFORM_LOWER}")
+string(TOLOWER "${SUNSHINE_OPENSSL_PLATFORM}" SUNSHINE_OPENSSL_PLATFORM_LOWER)
+set(SUNSHINE_OPENSSL_EXTERNAL_TARGET "openssl_external_${SUNSHINE_OPENSSL_PLATFORM_LOWER}")
 
-set(MOONLIGHT_OPENSSL_PROVIDER "BUNDLED")
+set(SUNSHINE_OPENSSL_PROVIDER "BUNDLED")
 
 # Convert a Windows path to an MSYS2-style path (e.g. C:/path -> /c/path) for use in MSYS2 shell commands.
-function(_moonlight_to_msys_path out_var path)
+function(_sunshine_to_msys_path out_var path)
     file(TO_CMAKE_PATH "${path}" normalized_path)
 
     if(normalized_path MATCHES "^([A-Za-z]):/(.*)$")
@@ -37,16 +37,16 @@ function(_moonlight_to_msys_path out_var path)
 endfunction()
 
 # Quote a string for safe inclusion in a shell command
-function(_moonlight_shell_quote out_var value)
+function(_sunshine_shell_quote out_var value)
     string(REPLACE "'" "'\"'\"'" _escaped_value "${value}")
     set(${out_var} "'${_escaped_value}'" PARENT_SCOPE)
 endfunction()
 
 # Join a list of arguments into a single shell command string, quoting each argument as needed
-function(_moonlight_join_shell_command out_var)
+function(_sunshine_join_shell_command out_var)
     set(quoted_args)
     foreach(arg IN LISTS ARGN)
-        _moonlight_shell_quote(_quoted_arg "${arg}")
+        _sunshine_shell_quote(_quoted_arg "${arg}")
         list(APPEND quoted_args "${_quoted_arg}")
     endforeach()
 
@@ -85,29 +85,29 @@ set(OPENSSL_ENV
         "MFLAGS="
         "GNUMAKEFLAGS="
         "MAKELEVEL=")
-set(MOONLIGHT_OPENSSL_WINDOWS_HOST FALSE)
+set(SUNSHINE_OPENSSL_WINDOWS_HOST FALSE)
 if(CMAKE_HOST_WIN32)
-    set(MOONLIGHT_OPENSSL_WINDOWS_HOST TRUE)
+    set(SUNSHINE_OPENSSL_WINDOWS_HOST TRUE)
 endif()
-set(MOONLIGHT_OPENSSL_IN_ACTIVE_MSYS FALSE)
-if(MOONLIGHT_OPENSSL_WINDOWS_HOST
+set(SUNSHINE_OPENSSL_IN_ACTIVE_MSYS FALSE)
+if(SUNSHINE_OPENSSL_WINDOWS_HOST
         AND DEFINED ENV{MSYSTEM_PREFIX}
         AND NOT "$ENV{MSYSTEM_PREFIX}" STREQUAL "")
-    set(MOONLIGHT_OPENSSL_IN_ACTIVE_MSYS TRUE)
+    set(SUNSHINE_OPENSSL_IN_ACTIVE_MSYS TRUE)
 endif()
 set(OPENSSL_MAKE_ARGS)
-if(MOONLIGHT_OPENSSL_WINDOWS_HOST)
+if(SUNSHINE_OPENSSL_WINDOWS_HOST)
     # The MSYS2 make runs separately from MinGW Makefiles and cannot use its jobserver.
     list(APPEND OPENSSL_MAKE_ARGS -j4)
 endif()
 
-if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
+if(SUNSHINE_OPENSSL_PLATFORM STREQUAL "XBOX")
     find_program(OPENSSL_MAKE_EXECUTABLE NAMES make REQUIRED)
 
-    if(MOONLIGHT_OPENSSL_WINDOWS_HOST AND MOONLIGHT_NXDK_NATIVE_COMPILER)
+    if(SUNSHINE_OPENSSL_WINDOWS_HOST AND SUNSHINE_NXDK_NATIVE_COMPILER)
         # CLion launches the build separately from configure. Give each OpenSSL step its tools.
-        moonlight_get_windows_msys2_usr_bin(_openssl_msys_bin)
-        moonlight_get_windows_msys2_msystem_bin(_openssl_ucrt_bin)
+        sunshine_get_windows_msys2_usr_bin(_openssl_msys_bin)
+        sunshine_get_windows_msys2_msystem_bin(_openssl_ucrt_bin)
         list(APPEND OPENSSL_ENV
                 --modify "PATH=path_list_prepend:${_openssl_msys_bin}"
                 --modify "PATH=path_list_prepend:${_openssl_ucrt_bin}")
@@ -170,7 +170,7 @@ if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
             "LIBS=libcrypto.a libssl.a"
             install_dev)
 else()
-    if(MOONLIGHT_OPENSSL_WINDOWS_HOST)
+    if(SUNSHINE_OPENSSL_WINDOWS_HOST)
         set(_openssl_msystem -ucrt64)
         string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _openssl_processor)
         if(_openssl_processor MATCHES "^(arm64|aarch64)$")
@@ -183,12 +183,12 @@ else()
             set(OPENSSL_CONFIGURE_TARGET mingw)
         endif()
 
-        moonlight_get_windows_msys2_shell(OPENSSL_MSYS2_SHELL)
+        sunshine_get_windows_msys2_shell(OPENSSL_MSYS2_SHELL)
 
-        _moonlight_to_msys_path(_openssl_source_dir_msys "${OPENSSL_SOURCE_DIR}")
-        _moonlight_to_msys_path(_openssl_build_dir_msys "${OPENSSL_BUILD_DIR}")
-        _moonlight_to_msys_path(_openssl_install_dir_msys "${OPENSSL_INSTALL_DIR}")
-        _moonlight_to_msys_path(_perl_executable_msys "${PERL_EXECUTABLE}")
+        _sunshine_to_msys_path(_openssl_source_dir_msys "${OPENSSL_SOURCE_DIR}")
+        _sunshine_to_msys_path(_openssl_build_dir_msys "${OPENSSL_BUILD_DIR}")
+        _sunshine_to_msys_path(_openssl_install_dir_msys "${OPENSSL_INSTALL_DIR}")
+        _sunshine_to_msys_path(_perl_executable_msys "${PERL_EXECUTABLE}")
         get_filename_component(_openssl_c_compiler_name "${CMAKE_C_COMPILER}" NAME)
         get_filename_component(_openssl_cxx_compiler_name "${CMAKE_CXX_COMPILER}" NAME)
         set(_openssl_tool_assignments
@@ -209,14 +209,14 @@ else()
             list(APPEND _openssl_tool_assignments "RANLIB=${_openssl_ranlib_name}")
         endif()
         list(JOIN _openssl_tool_assignments " " _openssl_tool_prefix)
-        _moonlight_join_shell_command(_openssl_configure_command
+        _sunshine_join_shell_command(_openssl_configure_command
                 "${_perl_executable_msys}"
                 "${_openssl_source_dir_msys}/Configure"
                 "${OPENSSL_CONFIGURE_TARGET}"
                 ${OPENSSL_CONFIGURE_OPTIONS}
                 "--prefix=${_openssl_install_dir_msys}"
                 "--openssldir=${_openssl_install_dir_msys}/ssl")
-        _moonlight_shell_quote(_openssl_build_dir_msys_quoted "${_openssl_build_dir_msys}")
+        _sunshine_shell_quote(_openssl_build_dir_msys_quoted "${_openssl_build_dir_msys}")
         string(CONCAT _openssl_configure_script
                 "cd ${_openssl_build_dir_msys_quoted} && "
                 "${_openssl_tool_prefix} exec ${_openssl_configure_command}")
@@ -245,7 +245,7 @@ else()
         else()
             message(FATAL_ERROR
                     "Unsupported macOS processor '${CMAKE_SYSTEM_PROCESSOR}' for bundled OpenSSL. "
-                    "Use MOONLIGHT_OPENSSL_MODE=SYSTEM or add a Configure target mapping.")
+                    "Use SUNSHINE_OPENSSL_MODE=SYSTEM or add a Configure target mapping.")
         endif()
     elseif(UNIX)
         find_program(OPENSSL_MAKE_EXECUTABLE NAMES gmake make REQUIRED)
@@ -258,10 +258,10 @@ else()
     else()
         message(FATAL_ERROR
                 "Unsupported host platform for bundled OpenSSL. "
-                "Use MOONLIGHT_OPENSSL_MODE=SYSTEM or add a Configure target mapping.")
+                "Use SUNSHINE_OPENSSL_MODE=SYSTEM or add a Configure target mapping.")
     endif()
 
-    if(NOT MOONLIGHT_OPENSSL_WINDOWS_HOST)
+    if(NOT SUNSHINE_OPENSSL_WINDOWS_HOST)
         list(APPEND OPENSSL_ENV
                 "CC=${CMAKE_C_COMPILER}"
                 "CXX=${CMAKE_CXX_COMPILER}")
@@ -296,7 +296,7 @@ if(NOT DEFINED OPENSSL_CONFIGURE_COMMAND)
             "--openssldir=${OPENSSL_INSTALL_DIR}/ssl")
 endif()
 
-ExternalProject_Add(${MOONLIGHT_OPENSSL_EXTERNAL_TARGET}
+ExternalProject_Add(${SUNSHINE_OPENSSL_EXTERNAL_TARGET}
         PREFIX "${OPENSSL_BUILD_ROOT}"
         SOURCE_DIR "${OPENSSL_SOURCE_DIR}"
         BINARY_DIR "${OPENSSL_BUILD_DIR}"
@@ -319,10 +319,10 @@ ExternalProject_Add(${MOONLIGHT_OPENSSL_EXTERNAL_TARGET}
         PATCH_COMMAND ""
 )
 
-if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "XBOX")
+if(SUNSHINE_OPENSSL_PLATFORM STREQUAL "XBOX")
     # The cross build disables OpenSSL's dependency generation. Reconfiguration
     # or adapter changes must invalidate old objects compiled against other APIs.
-    ExternalProject_Add_Step(${MOONLIGHT_OPENSSL_EXTERNAL_TARGET} refresh_compatibility
+    ExternalProject_Add_Step(${SUNSHINE_OPENSSL_EXTERNAL_TARGET} refresh_compatibility
             COMMAND ${OPENSSL_ENV} ${OPENSSL_MAKE_EXECUTABLE} clean
             WORKING_DIRECTORY "${OPENSSL_BUILD_DIR}"
             DEPENDEES configure
@@ -353,7 +353,7 @@ if(NOT TARGET OpenSSL::Crypto)
     set_target_properties(OpenSSL::Crypto PROPERTIES
             IMPORTED_LOCATION "${OPENSSL_CRYPTO_LIBRARY}"
             INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INCLUDE_DIR}")
-    if(MOONLIGHT_OPENSSL_PLATFORM STREQUAL "HOST")
+    if(SUNSHINE_OPENSSL_PLATFORM STREQUAL "HOST")
         if(WIN32)
             # OpenSSL's MinGW static libraries leave the platform imports to the consumer.
             target_link_libraries(OpenSSL::Crypto INTERFACE ws2_32 gdi32 crypt32 bcrypt)
@@ -362,7 +362,7 @@ if(NOT TARGET OpenSSL::Crypto)
             target_link_libraries(OpenSSL::Crypto INTERFACE Threads::Threads)
         endif()
     endif()
-    add_dependencies(OpenSSL::Crypto ${MOONLIGHT_OPENSSL_EXTERNAL_TARGET})
+    add_dependencies(OpenSSL::Crypto ${SUNSHINE_OPENSSL_EXTERNAL_TARGET})
 endif()
 
 if(NOT TARGET OpenSSL::SSL)
@@ -371,12 +371,12 @@ if(NOT TARGET OpenSSL::SSL)
             IMPORTED_LOCATION "${OPENSSL_SSL_LIBRARY}"
             INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INCLUDE_DIR}")
     target_link_libraries(OpenSSL::SSL INTERFACE OpenSSL::Crypto)
-    add_dependencies(OpenSSL::SSL ${MOONLIGHT_OPENSSL_EXTERNAL_TARGET})
+    add_dependencies(OpenSSL::SSL ${SUNSHINE_OPENSSL_EXTERNAL_TARGET})
 endif()
 
 message(STATUS "OpenSSL version: ${OPENSSL_VERSION}")
-message(STATUS "OpenSSL platform: ${MOONLIGHT_OPENSSL_PLATFORM}")
-message(STATUS "OpenSSL external target: ${MOONLIGHT_OPENSSL_EXTERNAL_TARGET}")
-message(STATUS "OpenSSL provider: ${MOONLIGHT_OPENSSL_PROVIDER}")
+message(STATUS "OpenSSL platform: ${SUNSHINE_OPENSSL_PLATFORM}")
+message(STATUS "OpenSSL external target: ${SUNSHINE_OPENSSL_EXTERNAL_TARGET}")
+message(STATUS "OpenSSL provider: ${SUNSHINE_OPENSSL_PROVIDER}")
 message(STATUS "OpenSSL source dir: ${OPENSSL_SOURCE_DIR}")
 message(STATUS "OpenSSL include dir: ${OPENSSL_INCLUDE_DIR}")

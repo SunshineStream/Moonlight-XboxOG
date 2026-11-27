@@ -39,9 +39,9 @@ foreach(icon IN ITEMS
     file(READ "${_icon_source}" _icon_svg)
     # NanoSVG does not resolve CSS currentColor. Bake the shell's foreground
     # colors into the build copy so standalone SVGs work without CSS support.
-    set(_icon_color "#F2F5F8")
+    set(_icon_color "#FFF5EA")
     if(icon STREQUAL "loader-circle" OR icon STREQUAL "info")
-        set(_icon_color "#86B7FF")
+        set(_icon_color "#FFC15C")
     elseif(icon STREQUAL "circle-check")
         set(_icon_color "#7DD3A8")
     elseif(icon STREQUAL "circle-x")
@@ -61,6 +61,9 @@ foreach(icon IN ITEMS
 endforeach()
 
 configure_file("${LUCIDE_SOURCE_DIR}/LICENSE" "${LUCIDE_ASSET_DIR}/licenses/lucide.txt" COPYONLY)
+
+set(ASSET_DIR "${LUCIDE_ASSET_DIR}")
+include("${CMAKE_CURRENT_LIST_DIR}/remove-legacy-brand-assets.cmake")
 
 # Remove obsolete first-party icons from existing build directories, too.
 foreach(legacy_icon IN ITEMS

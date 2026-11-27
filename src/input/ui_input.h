@@ -228,7 +228,7 @@ namespace input {
     std::uint32_t leftTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
     std::uint32_t rightTriggerRepeatTick = 0;  ///< Press or repeat tick for this input.
     ControllerNavigationHolds controllerNavigation;  ///< Directional repeat state.
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     ShellTouchGesture touch;  ///< Active gesture used for shell navigation.
 #endif
 

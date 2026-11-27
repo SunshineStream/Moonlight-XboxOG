@@ -22,12 +22,12 @@ namespace startup {
   std::string title_scoped_storage_root();
 
   /**
-   * @brief Return the default storage path for a file or directory under Moonlight-managed storage.
+   * @brief Return the default storage path for a file or directory under Sunshine-managed storage.
    *
    * On nxdk builds this prefixes the supplied entry with the title-scoped save root.
    * Portable clients use SDL's per-user data directory. Host-side unit tests use relative paths.
    *
-   * @param entryName File or directory name stored under the Moonlight data root.
+   * @param entryName File or directory name stored under the Sunshine data root.
    * @return Fully qualified storage path, or the original entry name on host-native builds.
    */
   std::string default_storage_path(std::string_view entryName);

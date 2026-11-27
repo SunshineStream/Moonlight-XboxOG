@@ -118,7 +118,7 @@
  static ssize_t syscall_random(void *buf, size_t buflen)
  {
 +#ifdef NXDK
-+    return moonlight_openssl_getentropy(buf, buflen) == 0 ? (ssize_t)buflen : -1;
++    return sunshine_openssl_getentropy(buf, buflen) == 0 ? (ssize_t)buflen : -1;
 +#else
      /*
       * Note: 'buflen' equals the size of the buffer which is used by the
@@ -130,3 +130,11 @@
 +#endif /* NXDK */
  }
  #endif /* defined(OPENSSL_RAND_SEED_GETRANDOM) */
+--- a/util/mkerr.pl
++++ b/util/mkerr.pl
+@@ -198,3 +198,4 @@
+     $statefile = $config;
+-    $statefile =~ s/.ec/.txt/;
++    # Only replace the extension, even when a staging directory contains "ec".
++    $statefile =~ s/\.ec\z/.txt/;
+ }

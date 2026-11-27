@@ -66,7 +66,7 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
 +    return pb_init_with_scanout(false, false);
 +}
 +
-+int moonlight_pb_init_pvideo_scanout(bool static_scanout)
++int sunshine_pb_init_pvideo_scanout(bool static_scanout)
 +{
 +    return pb_init_with_scanout(static_scanout, true);
 +}
@@ -76,7 +76,7 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
 + *
 + * Keep ownership in pb_DepthStencilAddr until the queued commands have completed.
 + */
-+void moonlight_pb_detach_depth_stencil(void)
++void sunshine_pb_detach_depth_stencil(void)
 +{
 +    pb_DSAddr=0;
 +    pb_target_back_buffer();
@@ -90,7 +90,7 @@ diff --git a/lib/pbkit/pbkit.c b/lib/pbkit/pbkit.c
 +/**
 + * @brief Free the detached depth allocation after the caller has waited for GPU idle.
 + */
-+void moonlight_pb_release_detached_depth_stencil(void)
++void sunshine_pb_release_detached_depth_stencil(void)
 +{
 +    if (pb_DSAddr != 0 || pb_DepthStencilAddr == 0)
 +        return;

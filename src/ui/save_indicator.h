@@ -1,6 +1,6 @@
 /**
  * @file src/ui/save_indicator.h
- * @brief Shared Moonlight save indicator artwork for the shell and streaming overlays.
+ * @brief Shared Sunshine save indicator artwork for the shell and streaming overlays.
  */
 #pragma once
 
@@ -12,6 +12,9 @@
 // lib includes
 #include <SDL3/SDL.h>
 
+// local includes
+#include "src/ui/sunshine_logo.h"
+
 namespace ui {
   /**
    * @brief Sample the indicator on the shared shell and stream render thread.
@@ -21,7 +24,7 @@ namespace ui {
   std::optional<std::uint64_t> save_indicator_frame(std::uint64_t nowMilliseconds);
 
   /**
-   * @brief Cache a small raster of the splash logo's dimming wave.
+   * @brief Cache a small raster of the Sunshine logo's looping glow.
    */
   class SaveIndicator {
   public:
@@ -43,7 +46,7 @@ namespace ui {
     void draw(SDL_Renderer *renderer, const SDL_Rect &bounds, std::uint64_t frameMilliseconds);
 
   private:
-    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> wedges_ {nullptr, SDL_DestroySurface};  ///< Small clockwise wedge atlas.
+    SunshineLogo logo_;  ///< Cached arcs at the indicator's raster size.
     std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image_ {nullptr, SDL_DestroySurface};  ///< Composited indicator frame.
     bool loadAttempted_ = false;  ///< Avoid reading the asset repeatedly after a failure.
   };

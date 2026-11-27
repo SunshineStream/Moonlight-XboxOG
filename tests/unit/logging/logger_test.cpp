@@ -25,8 +25,8 @@ namespace {
   }
 
   TEST(LoggerTest, FormatsSourceLocationsWithCppExtensions) {
-    EXPECT_EQ(logging::format_source_location({"C:\\repo\\Moonlight-XboxOG\\src\\main.cpp", 241}), "src/main.cpp:241");
-    EXPECT_EQ(logging::format_source_location({"C:\\repo\\Moonlight-XboxOG\\tests\\unit\\logging\\logger_test.cpp", 19}), "tests/unit/logging/logger_test.cpp:19");
+    EXPECT_EQ(logging::format_source_location({"C:\\repo\\Sunshine-client\\src\\main.cpp", 241}), "src/main.cpp:241");
+    EXPECT_EQ(logging::format_source_location({"C:\\repo\\Sunshine-client\\tests\\unit\\logging\\logger_test.cpp", 19}), "tests/unit/logging/logger_test.cpp:19");
   }
 
   TEST(LoggerTest, FormatsSourceLocationsAndEntriesWhenOnlyBasenamesAreAvailable) {

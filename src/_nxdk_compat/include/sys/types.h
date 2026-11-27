@@ -1,6 +1,6 @@
 /**
  * @file src/_nxdk_compat/include/sys/types.h
- * @brief Types required by Moonlight's private dependency adapters.
+ * @brief Types required by Sunshine's private dependency adapters.
  */
 #pragma once
 #include <stddef.h>

@@ -18,7 +18,7 @@ extern "C" {
    *
    * @return Aligned allocation, or NULL with errno set on failure.
    */
-  void *moonlight_ffmpeg_aligned_malloc(size_t size, size_t alignment);
+  void *sunshine_ffmpeg_aligned_malloc(size_t size, size_t alignment);
 
   /**
    * @brief Resize an aligned allocation while preserving its contents on success.
@@ -29,14 +29,14 @@ extern "C" {
    *
    * @return Replacement allocation, or NULL; failure preserves the old allocation.
    */
-  void *moonlight_ffmpeg_aligned_realloc(void *pointer, size_t size, size_t alignment);
+  void *sunshine_ffmpeg_aligned_realloc(void *pointer, size_t size, size_t alignment);
 
   /**
    * @brief Release memory allocated by the private aligned allocation family.
    *
    * @param pointer Allocation to release, or NULL.
    */
-  void moonlight_ffmpeg_aligned_free(void *pointer);
+  void sunshine_ffmpeg_aligned_free(void *pointer);
 
 #ifdef __cplusplus
 }

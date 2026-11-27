@@ -7,9 +7,9 @@ If that file is unavailable, report that the shared global instructions could no
 
 ## Repository boundaries
 
-This repository is the original Xbox Moonlight client, using nxdk, SDL and FFmpeg. The adjacent Sunshine
-checkout is a separate project; use it as a reference when relevant, and keep changes in this checkout
-unless the task explicitly includes another repository.
+This repository is the Sunshine client for desktop, mobile and original Xbox. The Xbox build uses nxdk,
+and all client builds use SDL and FFmpeg. Use the adjacent Sunshine host checkout as a reference when
+relevant. Keep changes in this checkout unless the task explicitly includes another repository.
 
 Preserve unrelated working-tree changes. Treat `third-party/` as vendored dependencies. Apply Xbox
 compatibility adaptations through the project's adapters and build-copy mechanisms rather than editing
@@ -28,10 +28,10 @@ platform.
 The normal top-level configure uses the host toolchain and delegates Xbox compilation to an nxdk child
 build. Use `CMakePresets.json` and the README's build instructions; keep the Xbox toolchain separate from
 host-native tests. The Windows release build uses `cmake-build-release-ucrt64`. Linux and macOS use
-`cmake-build-release`. The build writes the release ISO to `xbox/Moonlight.iso` and the packaged
+`cmake-build-release`. The build writes the release ISO to `xbox/Sunshine.iso` and the packaged
 executable to `xbox/xbe/default.xbe` within that directory.
 
-Video experiment builds are opt-in through `MOONLIGHT_BUILD_VIDEO_EXPERIMENTS`. Keep their instructions
+Video experiment builds are opt-in through `SUNSHINE_BUILD_VIDEO_EXPERIMENTS`. Keep their instructions
 with the probes in `experiments/README.md`.
 
 ## Tests and validation
@@ -51,7 +51,7 @@ changed testable source code. Keep platform-neutral logic accessible to native t
 validation limits that require an emulator or console.
 
 Run tests with `ctest --test-dir <build-directory> --output-on-failure` so every registered test executable
-is included. Native test executables, including `test_moonlight` and `test_pvideo_presenter`, are under the
+is included. Native test executables, including `test_sunshine` and `test_pvideo_presenter`, are under the
 build directory's `tests/` folder. For a tests-only configuration, set `BUILD_NATIVE_CLIENT=OFF` and `BUILD_XBOX=OFF`.
 
 Build-system changes require appropriate configuration, build and lint checks rather than dedicated

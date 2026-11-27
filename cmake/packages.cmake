@@ -4,7 +4,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/cpm/CPM.cmake")
 
 # Register prepared archives or checkouts before CPM's direct download-only Populate call.
 # CMake 3.30.3 and newer otherwise ignore FETCHCONTENT_SOURCE_DIR overrides in that path.
-function(_moonlight_register_prepared_source package)
+function(_sunshine_register_prepared_source package)
     string(TOUPPER "${package}" key)
     set(prepared_source "${FETCHCONTENT_SOURCE_DIR_${key}}")
     if(CMAKE_VERSION VERSION_LESS "3.30.3" OR NOT prepared_source)
@@ -19,8 +19,8 @@ function(_moonlight_register_prepared_source package)
 endfunction()
 
 # Declare a dependency whose caller configures or builds its sources separately.
-macro(MOONLIGHT_DECLARE_SOURCE_PACKAGE package)
-    _moonlight_register_prepared_source("${package}")
+macro(SUNSHINE_DECLARE_SOURCE_PACKAGE package)
+    _sunshine_register_prepared_source("${package}")
     CPMDeclarePackage("${package}" ${ARGN} DOWNLOAD_ONLY YES)
 endmacro()
 

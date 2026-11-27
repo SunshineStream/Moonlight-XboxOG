@@ -1689,7 +1689,7 @@ namespace {
            "Host: " +
            address + ":" + std::to_string(port) +
            "\r\n"
-           "User-Agent: Moonlight-XboxOG\r\n"
+           "User-Agent: Sunshine-client\r\n"
            "Connection: close\r\n\r\n";
   }
 
@@ -2137,7 +2137,7 @@ namespace {
 
     session->httpPort = session->request.httpPort == 0 ? DEFAULT_SERVERINFO_HTTP_PORT : session->request.httpPort;
     session->uniqueId = session->request.identity.uniqueId;
-    session->deviceName = session->request.deviceName.empty() ? "MoonlightXboxOG" : session->request.deviceName;
+    session->deviceName = session->request.deviceName.empty() ? "Sunshine" : session->request.deviceName;
     return true;
   }
 

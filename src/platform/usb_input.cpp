@@ -219,7 +219,7 @@ namespace {
 /**
  * @brief Register boot HID before nxdk's SDL joystick driver begins USB enumeration.
  */
-extern "C" void moonlight_usb_input_initialize() {
+extern "C" void sunshine_usb_input_initialize() {
   usbh_hid_init();
   usbh_install_hid_conn_callback(connected, disconnected);
 }
@@ -227,7 +227,7 @@ extern "C" void moonlight_usb_input_initialize() {
 /**
  * @brief Drain USB input from SDL's platform event pump without calling SDL at DPC level.
  */
-extern "C" void moonlight_usb_input_pump() {
+extern "C" void sunshine_usb_input_pump() {
   static input::BootHidInput input(dispatch);
   for (;;) {
     UsbReport report;

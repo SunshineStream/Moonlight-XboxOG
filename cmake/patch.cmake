@@ -3,7 +3,7 @@ include_guard(GLOBAL)
 
 # source_dir and output_dir are roots; patch_file applies to the source-relative paths in ARGN.
 # Reset disposable inputs on each call and publish only changed outputs to preserve timestamps.
-function(moonlight_patch_sources source_dir output_dir patch_file)
+function(sunshine_patch_sources source_dir output_dir patch_file)
     find_package(Git REQUIRED)
     set(work "${output_dir}/patch-work")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${patch_file}")
@@ -12,7 +12,7 @@ function(moonlight_patch_sources source_dir output_dir patch_file)
     endforeach()
 
     # An explicit work tree confines git apply to these copies, including when
-    # the build directory is inside the Moonlight checkout. Normalize CRLF on
+    # the build directory is inside the Sunshine checkout. Normalize CRLF on
     # input and write LF so patching is independent of the user's Git settings.
     execute_process(
             COMMAND "${GIT_EXECUTABLE}" -c core.autocrlf=input "--work-tree=${work}"

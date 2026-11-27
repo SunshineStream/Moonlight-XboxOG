@@ -131,8 +131,8 @@
      if (!core_has_init) {
          usbh_core_init();
          usbh_xid_init();
-+        extern void moonlight_usb_input_initialize(void);
-+        moonlight_usb_input_initialize();
++        extern void sunshine_usb_input_initialize(void);
++        sunshine_usb_input_initialize();
          core_has_init = true;
      }
      usbh_install_xid_conn_callback(connection_callback, disconnect_callback);
@@ -264,7 +264,7 @@
 -        }
 -    }
 -
-+    // Moonlight selects the encoder mode, including SD widescreen and 1080i.
++    // Sunshine selects the encoder mode, including SD widescreen and 1080i.
      VIDEO_MODE vm = XVideoGetMode();
      window->x = 0;
      window->y = 0;
@@ -272,7 +272,7 @@
      return true;
  }
  
-+/* Synchronize SDL after Moonlight has switched the encoder mode. */
++/* Synchronize SDL after Sunshine has switched the encoder mode. */
 +static void XBOX_SetWindowSize(SDL_VideoDevice *device, SDL_Window *window)
 +{
 +    (void)device;
@@ -289,8 +289,8 @@
  {
      (void)device;
 -    // Do nothing
-+    extern void moonlight_usb_input_pump(void);
-+    moonlight_usb_input_pump();
++    extern void sunshine_usb_input_pump(void);
++    sunshine_usb_input_pump();
  }
  
  static inline SDL_PixelFormat pixelFormatSelector(int bpp)

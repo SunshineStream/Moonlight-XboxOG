@@ -33,7 +33,7 @@ jobs:
         run: |
           brew install pkgconf meson ninja
           cmake -S cmake/mobile-deps -B "cmake-build-${APPLE_TARGET}-deps" -G Ninja \
-            "-DMOONLIGHT_MOBILE_TARGET=${APPLE_TARGET}-simulator"
+            "-DSUNSHINE_MOBILE_TARGET=${APPLE_TARGET}-simulator"
           cmake --build "cmake-build-${APPLE_TARGET}-deps"
 
       - name: Configure simulator application
@@ -53,4 +53,4 @@ jobs:
       - name: Build simulator application
         env:
           APPLE_TARGET: ${{ matrix.target }}
-        run: cmake --build "cmake-build-${APPLE_TARGET}" --config Release --target moonlight_client --parallel
+        run: cmake --build "cmake-build-${APPLE_TARGET}" --config Release --target sunshine_client --parallel

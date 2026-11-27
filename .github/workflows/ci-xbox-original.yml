@@ -52,10 +52,10 @@ jobs:
             "llvm"
             "nasm"
           )
-          moonlight_dependencies=(
+          sunshine_dependencies=(
             "patch"
           )
-          dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
+          dependencies=("${nxdk_dependencies[@]}" "${sunshine_dependencies[@]}")
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y "${dependencies[@]}"
 
@@ -69,9 +69,9 @@ jobs:
             "llvm"
             "nasm"
           )
-          moonlight_dependencies=(
+          sunshine_dependencies=(
           )
-          dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
+          dependencies=("${nxdk_dependencies[@]}" "${sunshine_dependencies[@]}")
           brew install "${dependencies[@]}"
 
       - name: Setup Dependencies Windows
@@ -108,13 +108,13 @@ jobs:
 
           # move artifacts
           mkdir -p artifacts
-          tar -czf artifacts/Moonlight-XboxOG-XBE.tar.gz "./${CMAKE_BUILD}/xbox/xbe"
-          cp "${CMAKE_BUILD}/xbox/Moonlight.iso" artifacts/Moonlight-XboxOG.iso
+          tar -czf artifacts/Sunshine-client-XboxOG-XBE.tar.gz "./${CMAKE_BUILD}/xbox/xbe"
+          cp "${CMAKE_BUILD}/xbox/Sunshine.iso" artifacts/Sunshine-client-XboxOG.iso
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: Moonlight-XboxOG-${{ runner.os }}
+          name: Sunshine-client-XboxOG-${{ runner.os }}
           path: artifacts/
 
       - name: Test and report coverage

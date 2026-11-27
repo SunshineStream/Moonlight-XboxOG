@@ -24,7 +24,7 @@ if [ "$link" -eq 1 ]; then
     "${NXDK_DIR}/lib/xboxkrnl/libxboxkrnl.lib"
 fi
 
-# Use Moonlight's private adapters with stock nxdk; this target has no MSVCRT.
+# Use Sunshine's private adapters with stock nxdk; this target has no MSVCRT.
 exec clang \
   -target i386-pc-win32 \
   -march=pentium3 \

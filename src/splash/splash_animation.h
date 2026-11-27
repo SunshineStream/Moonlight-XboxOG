@@ -1,6 +1,6 @@
 /**
  * @file src/splash/splash_animation.h
- * @brief Describes the startup animation of the Moonlight logo.
+ * @brief Describes the startup animation of the Sunshine logo.
  */
 #pragma once
 
@@ -12,27 +12,26 @@
 
 namespace splash {
 
-  constexpr std::size_t SPLASH_WEDGE_COUNT = 8;  ///< Number of wedges in the logo.
-  constexpr float SPLASH_MAX_WEDGE_SCALE = 1.28f;  ///< Maximum enlargement of the upper-left wedge.
+  constexpr std::size_t LOGO_ARC_COUNT = 4;  ///< Number of colored arcs in the Sunshine logo.
+  using LogoOpacity = std::array<std::uint8_t, LOGO_ARC_COUNT>;  ///< Opacities in the source SVG's drawing order.
 
   /**
-   * @brief Sample the continuous dimming wave without the splash entrance or exit.
-   * @param elapsedMilliseconds Wave time in milliseconds.
-   * @return Brightness multipliers in clockwise wedge order.
+   * @brief Sample the continuous glow without the splash entrance or exit.
+   * @param elapsedMilliseconds Time in milliseconds.
+   * @return Opacities for the four arcs from yellow through orange.
    */
-  std::array<std::uint8_t, SPLASH_WEDGE_COUNT> logo_wave_brightness(std::uint64_t elapsedMilliseconds);
+  LogoOpacity logo_glow_opacity(std::uint64_t elapsedMilliseconds);
 
   /**
    * @brief Appearance of the logo at one point in the startup animation.
    */
   struct SplashAnimationFrame {
-    float firstWedgeScale = 1.0f;  ///< Scale around the center of the logo for the first wedge.
-    std::array<std::uint8_t, SPLASH_WEDGE_COUNT> brightness {};  ///< RGB multipliers clockwise from the leftmost upper wedge, with 255 at full brightness.
+    LogoOpacity opacity {};  ///< Opacity of each arc, with 255 at full color.
     bool finished = false;  ///< True once the complete logo has been held for the final beat.
   };
 
   /**
-   * @brief Loops the dimming wave until the splash is ready to exit.
+   * @brief Reveals the logo from the inner arc out and loops its glow until startup is ready.
    */
   class SplashAnimation {
   public:
@@ -59,8 +58,8 @@ namespace splash {
 
   private:
     std::uint64_t holdDuration_;  ///< Time to display the complete logo.
-    std::uint64_t fadeDuration_;  ///< Time over which the moving wave returns to full brightness.
-    std::optional<std::uint64_t> fadeStart_;  ///< Time at which the wave begins fading out, once scheduled.
+    std::uint64_t fadeDuration_;  ///< Time over which the glow settles into full color.
+    std::optional<std::uint64_t> fadeStart_;  ///< Time at which the glow starts to settle, once scheduled.
     std::optional<std::uint64_t> holdStart_;  ///< Time at which the complete logo is first visible.
   };
 

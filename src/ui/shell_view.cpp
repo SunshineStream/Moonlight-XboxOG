@@ -65,7 +65,7 @@ namespace {
     switch (state.shell.activeScreen) {
       case app::ScreenId::home:
       case app::ScreenId::hosts:
-        return state.hosts.items.empty() ? "Your games. Your PC. On your Xbox." : "Choose a PC to start playing.";
+        return state.hosts.items.empty() ? "Connect to a PC running Sunshine." : "Choose a PC to start playing.";
       case app::ScreenId::apps:
         {
           const app::HostRecord *host = app::apps_host(state);
@@ -104,22 +104,6 @@ namespace {
   }
 
   /**
-   * @brief Select a grayscale moon phase for a PC's connection state.
-   *
-   * @param host Host whose reachability and pairing are displayed.
-   * @return Packaged first-party moon SVG path.
-   */
-  std::string host_tile_icon(const app::HostRecord &host) {
-    if (host.reachability == app::HostReachability::online && host.pairingState == app::PairingState::paired) {
-      return "hosts\\moon-full.svg";
-    }
-    if (host.reachability == app::HostReachability::online) {
-      return "hosts\\moon-half.svg";
-    }
-    return "hosts\\moon-crescent.svg";
-  }
-
-  /**
    * @brief Build compact navigation actions with packaged Lucide icons.
    *
    * @param state Current toolbar focus state.
@@ -133,18 +117,21 @@ namespace {
     };
   }
 
+  /**
+   * @brief Build tiles with stable endpoints so artwork transitions follow their hosts through grid changes.
+   * @param state Current host records and shell focus.
+   * @return Render-ready host tiles.
+   */
   std::vector<ui::ShellHostTile> host_tiles(const app::ClientState &state) {
     std::vector<ui::ShellHostTile> tiles;
     tiles.reserve(state.hosts.items.size());
     for (std::size_t index = 0; index < state.hosts.items.size(); ++index) {
       const app::HostRecord &host = state.hosts.items[index];
       tiles.emplace_back(ui::ShellHostTile {
-        host.address,
+        host.address + ":" + std::to_string(app::effective_host_port(host.port)),
         host.displayName,
         host_tile_status(host),
-        host_tile_icon(host),
-        host.pairingState,
-        host.reachability,
+        ui::host_sun_state(host.reachability, host.pairingState),
         state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::grid && index == state.hosts.selectedHostIndex,
       });
     }
@@ -276,8 +263,7 @@ namespace {
     if (state.hosts.items.empty()) {
       return {
         "No PCs have been added yet.",
-        "Moonlight-compatible PCs discovered over the local network will appear here automatically.",
-        "Use Add Host to save a host manually when auto discovery is unavailable.",
+        "Use Add Host to enter the address of your Sunshine PC.",
       };
     }
 
@@ -516,7 +502,7 @@ namespace {
   void fill_support_modal_view(ui::ShellViewModel *viewModel) {
     viewModel->modal.title = "Support";
     viewModel->modal.lines = {
-      "Moonlight for the original Xbox",
+      "Sunshine game streaming client",
       "Run Sunshine on your PC, then select it here to pair and browse your games.",
       "Press Y on a PC or app for more options.",
     };
@@ -1074,7 +1060,7 @@ namespace ui {
   ) {
     ShellViewModel viewModel {};
     viewModel.frame.screen = state.shell.activeScreen;
-    viewModel.frame.title = "Moonlight";
+    viewModel.frame.title = "Sunshine";
     viewModel.frame.pageTitle = page_title(state);
     viewModel.frame.subtitle = page_subtitle(state);
     viewModel.frame.statusMessage = state.shell.statusMessage;

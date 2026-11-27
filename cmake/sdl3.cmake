@@ -1,8 +1,8 @@
 # Build SDL3 and the shared image and font libraries for each toolchain.
 include_guard(GLOBAL)
 
-# Configure the pinned port with Moonlight's Xbox driver adapters.
-function(moonlight_prepare_sdl3)
+# Configure the pinned port with Sunshine's Xbox driver adapters.
+function(sunshine_prepare_sdl3)
     CPMGetPackage(nxdk_sdl3)
     add_subdirectory("${nxdk_sdl3_SOURCE_DIR}" "${nxdk_sdl3_BINARY_DIR}" EXCLUDE_FROM_ALL)
 
@@ -28,7 +28,7 @@ function(moonlight_prepare_sdl3)
 endfunction()
 
 # Build the pinned SDL libraries with the portable client's platform backends.
-function(moonlight_prepare_native_sdl3)
+function(sunshine_prepare_native_sdl3)
     # CMake and SDL define these option names.
     # cmake-lint: disable=C0103
     # Android's Java glue loads SDL3 by name. Native desktop and Apple targets link it statically.

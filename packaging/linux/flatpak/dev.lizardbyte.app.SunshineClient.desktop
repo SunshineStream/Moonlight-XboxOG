@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Sunshine
+Comment=Stream games from Sunshine
+Exec=sunshine-client
+Icon=dev.lizardbyte.app.SunshineClient
+Terminal=false
+Type=Application
+Categories=Game;

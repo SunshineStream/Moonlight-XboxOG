@@ -1,6 +1,6 @@
 /**
  * @file src/splash/splash_animation.cpp
- * @brief Implements timing for the Moonlight logo startup animation.
+ * @brief Implements the Sunshine logo's staggered reveal, looping glow and final hold.
  */
 // class header include
 #include "src/splash/splash_animation.h"
@@ -10,71 +10,41 @@
 
 namespace {
 
-  constexpr std::uint64_t FRAME_INTERVAL_MS = 30;  ///< Interval between artwork samples.
-  constexpr std::uint64_t MINIMUM_WAVE_END_MS = 2220;  ///< Earliest fade-out time, allowing the wave to complete a turn.
-  constexpr std::uint64_t FADE_DURATION_MS = 180;  ///< Time to let the wave settle into the complete logo.
+  constexpr std::uint64_t FRAME_INTERVAL_MS = 32;  ///< Interval between artwork samples.
+  constexpr std::uint64_t REVEAL_STEP_MS = 120;  ///< Delay between adjacent arcs at startup.
+  constexpr std::uint64_t REVEAL_DURATION_MS = 280;  ///< Time for each arc to fade in.
+  constexpr std::uint64_t GLOW_STEP_MS = 240;  ///< Delay between peaks on adjacent arcs.
+  constexpr std::uint64_t GLOW_PERIOD_MS = GLOW_STEP_MS * splash::LOGO_ARC_COUNT;  ///< Time for one full loop.
+  constexpr std::uint64_t GLOW_RADIUS_MS = 320;  ///< Time from an arc's dimmest point to its peak.
+  constexpr std::uint64_t MINIMUM_GLOW_END_MS = 1600;  ///< Time for the reveal and one complete glow.
+  constexpr std::uint64_t FADE_DURATION_MS = 180;  ///< Time to bring every arc to full color.
   constexpr std::uint64_t HOLD_DURATION_MS = 180;  ///< Time to show the complete logo before opening the menu.
-  constexpr float INITIAL_WEDGE_SCALE = 1.08f;  ///< Slight extension of the first wedge on the opening frame.
-  constexpr std::uint64_t POP_GROWTH_MS = 240;  ///< Time to reach full wedge size.
-  constexpr std::uint64_t POP_RETURN_START_MS = 730;  ///< Time when the enlarged wedge starts to retract.
-  constexpr std::uint64_t POP_END_MS = 880;  ///< Time when the first wedge is back at its resting size.
-  constexpr std::uint64_t WAVE_LEAD_IN_MS = 840;  ///< First dimming pulse as the expanded wedge retracts.
-  constexpr std::uint64_t WAVE_START_MS = 870;  ///< First dimming pulse on the second wedge.
-  constexpr std::uint64_t WAVE_STEP_MS = 150;  ///< Delay from one wedge to the next.
-  constexpr std::uint64_t WAVE_PERIOD_MS = WAVE_STEP_MS * splash::SPLASH_WEDGE_COUNT;  ///< Time for one turn around the logo.
-  constexpr std::uint64_t DIM_IN_MS = 90;  ///< Time to dim a wedge.
-  constexpr std::uint64_t DIM_OUT_MS = 180;  ///< Time to return a dimmed wedge to full brightness.
-  constexpr std::uint64_t DIM_RELEASE_MS = 420;  ///< Time from dimming onset to the start of release.
-  constexpr std::uint8_t FULL_BRIGHTNESS = 255;  ///< Unmodified RGB multiplier.
-  constexpr std::uint8_t DIM_BRIGHTNESS = 156;  ///< RGB multiplier at the darkest point of the wave.
+  constexpr std::uint8_t DIM_OPACITY = 132;  ///< Minimum opacity during the looping glow.
+  constexpr std::uint8_t FULL_OPACITY = 255;  ///< Unmodified Sunshine colors.
 
   /**
-   * @brief Evaluate the brightness of a wedge during one pass of the wave.
-   *
-   * @param age Time since the dimming pulse reached this wedge.
-   * @param releaseMilliseconds Time from dimming onset to the start of release.
-   * @return RGB multiplier for the wedge.
+   * @brief Ease a fraction in and out over the interval from zero to one.
+   * @param progress Linear fraction between zero and one.
+   * @return Smoothed fraction with the same endpoints.
    */
-  std::uint8_t wave_brightness(std::uint64_t age, std::uint64_t releaseMilliseconds) {
-    if (age >= releaseMilliseconds + DIM_OUT_MS) {
-      return FULL_BRIGHTNESS;
-    }
-
-    constexpr std::uint64_t dimming = FULL_BRIGHTNESS - DIM_BRIGHTNESS;
-    const auto amount = std::min({dimming, dimming * age / DIM_IN_MS, dimming * (releaseMilliseconds + DIM_OUT_MS - age) / DIM_OUT_MS});
-    return static_cast<std::uint8_t>(FULL_BRIGHTNESS - amount);
-  }
-
-  /**
-   * @brief Sample the pulse for one wedge on the clockwise loop.
-   *
-   * @param elapsedMilliseconds Time since the first animation frame.
-   * @param wedgeIndex Wedge index in clockwise order.
-   * @return RGB multiplier before the final fade.
-   */
-  std::uint8_t looping_brightness(std::uint64_t elapsedMilliseconds, std::size_t wedgeIndex) {
-    // The expanded wedge has a short lead-in pulse and then takes its place after the last wedge.
-    constexpr auto firstWedgeLoopStart = WAVE_START_MS + WAVE_PERIOD_MS - WAVE_STEP_MS;
-    if (wedgeIndex == 0 && elapsedMilliseconds < firstWedgeLoopStart) {
-      return elapsedMilliseconds >= WAVE_LEAD_IN_MS ? wave_brightness(elapsedMilliseconds - WAVE_LEAD_IN_MS, 330) : FULL_BRIGHTNESS;
-    }
-
-    const auto start = wedgeIndex == 0 ? firstWedgeLoopStart : WAVE_START_MS + (wedgeIndex - 1) * WAVE_STEP_MS;
-    return elapsedMilliseconds >= start ? wave_brightness((elapsedMilliseconds - start) % WAVE_PERIOD_MS, DIM_RELEASE_MS) : FULL_BRIGHTNESS;
+  float smooth_progress(float progress) {
+    return progress * progress * (3.0f - 2.0f * progress);
   }
 
 }  // namespace
 
 namespace splash {
 
-  std::array<std::uint8_t, SPLASH_WEDGE_COUNT> logo_wave_brightness(std::uint64_t elapsedMilliseconds) {
-    // Sample the already-running part of the same wave used by the boot splash.
-    const auto sample = WAVE_START_MS + WAVE_PERIOD_MS + elapsedMilliseconds % WAVE_PERIOD_MS;
-    std::array<std::uint8_t, SPLASH_WEDGE_COUNT> brightness {};
-    for (std::size_t i = 0; i < brightness.size(); ++i) {
-      brightness[i] = looping_brightness(sample, i);
+  LogoOpacity logo_glow_opacity(std::uint64_t elapsedMilliseconds) {
+    LogoOpacity opacity {};
+    const auto elapsed = elapsedMilliseconds % GLOW_PERIOD_MS;
+    for (std::size_t arc = 0; arc < opacity.size(); ++arc) {
+      const auto phase = (elapsed + GLOW_PERIOD_MS - arc * GLOW_STEP_MS) % GLOW_PERIOD_MS;
+      const auto distance = std::min({phase, GLOW_PERIOD_MS - phase, GLOW_RADIUS_MS});
+      const float glow = smooth_progress(1.0f - static_cast<float>(distance) / GLOW_RADIUS_MS);
+      opacity[arc] = DIM_OPACITY + static_cast<std::uint8_t>((FULL_OPACITY - DIM_OPACITY) * glow);
     }
-    return brightness;
+    return opacity;
   }
 
   SplashAnimation::SplashAnimation():
@@ -88,37 +58,34 @@ namespace splash {
       holdStart_(durationMilliseconds - holdDuration_) {}
 
   SplashAnimationFrame SplashAnimation::advance(std::uint64_t elapsedMilliseconds, bool startupComplete) {
-    if (!fadeStart_.has_value() && startupComplete && elapsedMilliseconds >= MINIMUM_WAVE_END_MS) {
+    if (!fadeStart_.has_value() && startupComplete && elapsedMilliseconds >= MINIMUM_GLOW_END_MS) {
       fadeStart_ = elapsedMilliseconds;
     }
 
     SplashAnimationFrame frame;
-    float motionStrength = 1.0f;
+    float settle = 0.0f;
     if (fadeStart_.has_value() && elapsedMilliseconds >= *fadeStart_) {
       const auto fadeAge = elapsedMilliseconds - *fadeStart_;
       if (fadeAge >= fadeDuration_) {
         if (!holdStart_.has_value()) {
           holdStart_ = elapsedMilliseconds;
         }
-        frame.brightness.fill(FULL_BRIGHTNESS);
+        frame.opacity.fill(FULL_OPACITY);
         frame.finished = elapsedMilliseconds - *holdStart_ >= holdDuration_;
         return frame;
       }
       const auto fadeSample = fadeAge - fadeAge % FRAME_INTERVAL_MS;
-      motionStrength = static_cast<float>(fadeDuration_ - fadeSample) / fadeDuration_;
+      settle = smooth_progress(static_cast<float>(fadeSample) / fadeDuration_);
     }
 
     const auto sampleTime = elapsedMilliseconds - elapsedMilliseconds % FRAME_INTERVAL_MS;
-    if (sampleTime < POP_END_MS) {
-      const float growth = static_cast<float>(sampleTime) / POP_GROWTH_MS;
-      const float growingScale = INITIAL_WEDGE_SCALE + (SPLASH_MAX_WEDGE_SCALE - INITIAL_WEDGE_SCALE) * std::min(1.0f, growth);
-      const float returnProgress = static_cast<float>(POP_END_MS - sampleTime) / (POP_END_MS - POP_RETURN_START_MS);
-      const float returningScale = 1.0f + (SPLASH_MAX_WEDGE_SCALE - 1.0f) * std::min(1.0f, returnProgress);
-      frame.firstWedgeScale += (std::min(growingScale, returningScale) - 1.0f) * motionStrength;
-    }
-    for (std::size_t i = 0; i < frame.brightness.size(); ++i) {
-      const auto dimming = FULL_BRIGHTNESS - looping_brightness(sampleTime, i);
-      frame.brightness[i] = FULL_BRIGHTNESS - static_cast<std::uint8_t>(dimming * motionStrength);
+    frame.opacity = logo_glow_opacity(sampleTime);
+    for (std::size_t arc = 0; arc < frame.opacity.size(); ++arc) {
+      const auto revealStart = arc * REVEAL_STEP_MS;
+      const auto revealAge = sampleTime - std::min(sampleTime, revealStart);
+      const float reveal = smooth_progress(static_cast<float>(std::min(revealAge, REVEAL_DURATION_MS)) / REVEAL_DURATION_MS);
+      const float opacity = frame.opacity[arc] * reveal;
+      frame.opacity[arc] = static_cast<std::uint8_t>(opacity + (FULL_OPACITY - opacity) * settle);
     }
     return frame;
   }

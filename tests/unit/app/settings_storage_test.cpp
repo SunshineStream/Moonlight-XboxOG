@@ -391,7 +391,7 @@ namespace {
  */
 TEST_F(SettingsStorageTest, PreservesScreenshotDirectoryAndKeyboardDocking) {
   app::AppSettings settings;
-  settings.screenshotDirectory = R"(F:\Screenshots\Moonlight "test")";
+  settings.screenshotDirectory = R"(F:\Screenshots\Sunshine "test")";
   settings.keyboardDockTop = true;
   ASSERT_TRUE(app::save_app_settings(settings, settingsPath).success);
   const auto loaded = app::load_app_settings(settingsPath);

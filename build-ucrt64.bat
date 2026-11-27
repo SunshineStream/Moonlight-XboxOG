@@ -8,7 +8,7 @@ if errorlevel 1 (
 )
 
 pushd "%SCRIPT_DIR%" >nul
-call "%MOONLIGHT_MSYS2_SHELL%" -defterm -here -no-start -ucrt64 -c "./build.sh %*"
+call "%SUNSHINE_MSYS2_SHELL%" -defterm -here -no-start -ucrt64 -c "./build.sh %*"
 set "EXIT_CODE=%ERRORLEVEL%"
 popd >nul
 

@@ -1,12 +1,12 @@
 # Build the host-native googletest target that exercises platform-neutral
-# Moonlight code without pulling the Xbox-only entrypoints into the test binary.
+# Sunshine code without pulling the Xbox-only entrypoints into the test binary.
 
 cmake_minimum_required(VERSION 3.13)
 # https://github.com/google/oss-policies-info/blob/main/foundational-cxx-support-matrix.md#foundational-c-support
 
-project(test_moonlight LANGUAGES CXX)
+project(test_sunshine LANGUAGES CXX)
 
-if(NOT DEFINED MOONLIGHT_HOST_TESTABLE_SOURCES)
+if(NOT DEFINED SUNSHINE_HOST_TESTABLE_SOURCES)
     message(FATAL_ERROR "tests/CMakeLists.txt must be configured from the top-level CMake project")
 endif()
 
@@ -21,11 +21,11 @@ if(NOT TARGET lizardbyte::common)
                      "${CMAKE_CURRENT_BINARY_DIR}/lizardbyte-common"
                      EXCLUDE_FROM_ALL)
 elseif(NOT TARGET lizardbyte::test_support)
-    message(FATAL_ERROR "Moonlight tests require lizardbyte::test_support")
+    message(FATAL_ERROR "Sunshine tests require lizardbyte::test_support")
 endif()
-if(NOT TARGET moonlight-common-c OR NOT TARGET Moonlight::OpenSSL)
+if(NOT TARGET moonlight-common-c OR NOT TARGET SunshineClient::OpenSSL)
     message(FATAL_ERROR
-            "tests/CMakeLists.txt requires the shared Moonlight dependency targets from the top-level configure")
+            "tests/CMakeLists.txt requires the shared Sunshine dependency targets from the top-level configure")
 endif()
 
 set(TEST_COVERAGE_COMPILE_OPTIONS)
@@ -35,12 +35,12 @@ if(WIN32)
 else()
     set(_coverage_default ON)
 endif()
-option(MOONLIGHT_TEST_COVERAGE "Instrument host tests for code coverage" ${_coverage_default})
-if(MOONLIGHT_TEST_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND WIN32)
+option(SUNSHINE_TEST_COVERAGE "Instrument host tests for code coverage" ${_coverage_default})
+if(SUNSHINE_TEST_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND WIN32)
     list(APPEND TEST_COVERAGE_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping -O0)
     # LLD keeps the COFF coverage metadata and its associated counters together.
     list(APPEND TEST_COVERAGE_LINK_OPTIONS -fprofile-instr-generate -fuse-ld=lld)
-elseif(MOONLIGHT_TEST_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+elseif(SUNSHINE_TEST_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     list(APPEND TEST_COVERAGE_COMPILE_OPTIONS -fprofile-arcs -ftest-coverage -ggdb -O0)
     list(APPEND TEST_COVERAGE_LINK_OPTIONS -fprofile-arcs -ftest-coverage)
 endif()
@@ -59,7 +59,7 @@ list(FILTER TEST_SOURCES EXCLUDE REGEX "/tests/xbox/")
 add_executable(${PROJECT_NAME}
         ${TEST_SOURCES}
         "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg_memory.c"
-        ${MOONLIGHT_HOST_TESTABLE_SOURCES})
+        ${SUNSHINE_HOST_TESTABLE_SOURCES})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 
@@ -73,10 +73,10 @@ target_include_directories(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
         PRIVATE
         gtest_main
-        Moonlight::OpenSSL
+        SunshineClient::OpenSSL
         lizardbyte::test_support
         moonlight-common-c)
-moonlight_prioritize_bundled_openssl_headers(${PROJECT_NAME})
+sunshine_prioritize_bundled_openssl_headers(${PROJECT_NAME})
 target_compile_definitions(${PROJECT_NAME}
         PRIVATE
         TOML_EXCEPTIONS=0
@@ -96,7 +96,7 @@ add_dependencies(${PROJECT_NAME} gtest gtest_main gmock gmock_main)
 include(GoogleTest)
 set(TEST_RUNTIME_PROPERTIES)
 if(WIN32 OR MINGW OR CMAKE_HOST_WIN32)
-    set(_test_runtime_path "${MOONLIGHT_HOST_TOOL_DIR}")
+    set(_test_runtime_path "${SUNSHINE_HOST_TOOL_DIR}")
     if(_test_runtime_path STREQUAL "")
         get_filename_component(_test_runtime_path "${CMAKE_CXX_COMPILER}" DIRECTORY)
     endif()

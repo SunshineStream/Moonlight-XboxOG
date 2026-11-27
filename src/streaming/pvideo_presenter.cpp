@@ -23,13 +23,13 @@
  * @param static_scanout Allocate a single color page to fit the 1080i memory budget.
  * @return Zero on success or a pbkit initialization error.
  */
-extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout);
+extern "C" int sunshine_pb_init_pvideo_scanout(bool static_scanout);
 
 /** @brief Queue depth and stencil detachment from the 1080i background target. */
-extern "C" void moonlight_pb_detach_depth_stencil();
+extern "C" void sunshine_pb_detach_depth_stencil();
 
 /** @brief Release the detached depth surface after the GPU has completed the detachment. */
-extern "C" void moonlight_pb_release_detached_depth_stencil();
+extern "C" void sunshine_pb_release_detached_depth_stencil();
 
 namespace {
   constexpr std::uint32_t CRTC_START = 0x600800;  ///< Physical address of the scanout background.
@@ -174,7 +174,7 @@ namespace streaming {
     savedCrtcConfig_ = VIDEOREG(0x600804);
     scanoutStateSaved_ = true;
     pb_set_color_format(mode.bpp == 16 ? NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5 : NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8, false);
-    if (const int status = moonlight_pb_init_pvideo_scanout(mode.height >= 1080); status != 0) {
+    if (const int status = sunshine_pb_init_pvideo_scanout(mode.height >= 1080); status != 0) {
       *error = "GPU scanout initialization failed (pbkit " + std::to_string(status) + ")";
       return false;
     }
@@ -286,12 +286,12 @@ namespace streaming {
     if (outputHeight == 1080) {
       // Keep depth allocated through the spare allocation. Allocating the
       // spare after freeing depth slowed playback in xemu.
-      moonlight_pb_detach_depth_stencil();
+      sunshine_pb_detach_depth_stencil();
       if (!wait_for_gpu_idle()) {
         failure = "Timed out detaching the GPU depth surface";
         return;
       }
-      moonlight_pb_release_detached_depth_stencil();
+      sunshine_pb_release_detached_depth_stencil();
     }
     bufferSize_ = required;
     pitch_ = pitch;

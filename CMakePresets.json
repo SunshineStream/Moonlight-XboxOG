@@ -31,7 +31,7 @@
       },
       "cacheVariables": {
         "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-        "MOONLIGHT_USE_PREBUILT_FFMPEG": "ON"
+        "SUNSHINE_USE_PREBUILT_FFMPEG": "ON"
       }
     },
     {
@@ -82,9 +82,9 @@
         "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
-        "MOONLIGHT_BUILD_KIND": "XBOX",
-        "MOONLIGHT_NXDK_NATIVE_COMPILER": "ON",
-        "MOONLIGHT_NXDK_DIR": "${sourceDir}/third-party/nxdk"
+        "SUNSHINE_BUILD_KIND": "XBOX",
+        "SUNSHINE_NXDK_NATIVE_COMPILER": "ON",
+        "SUNSHINE_NXDK_DIR": "${sourceDir}/third-party/nxdk"
       }
     },
     {
@@ -102,12 +102,12 @@
     {
       "name": "client",
       "configurePreset": "client",
-      "targets": ["moonlight_client"]
+      "targets": ["sunshine_client"]
     },
     {
       "name": "client-ucrt64",
       "configurePreset": "client-ucrt64",
-      "targets": ["moonlight_client"]
+      "targets": ["sunshine_client"]
     },
     {
       "name": "nxdk-release (ucrt64)",
@@ -120,12 +120,12 @@
     {
       "name": "xbox-release (ucrt64)",
       "configurePreset": "xbox-release (ucrt64)",
-      "targets": ["moonlight_xbox"]
+      "targets": ["sunshine_xbox"]
     },
     {
       "name": "xbox-debug (ucrt64)",
       "configurePreset": "xbox-debug (ucrt64)",
-      "targets": ["moonlight_xbox"]
+      "targets": ["sunshine_xbox"]
     }
   ]
 }

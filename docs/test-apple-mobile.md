@@ -34,7 +34,7 @@ signing_arg=-DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=YOUR_TEAM_ID
 
 prefix="$PWD/cmake-build-$target-deps"
 build_dir="cmake-build-$target"
-cmake -S cmake/mobile-deps -B "$prefix" -G Ninja "-DMOONLIGHT_MOBILE_TARGET=$target"
+cmake -S cmake/mobile-deps -B "$prefix" -G Ninja "-DSUNSHINE_MOBILE_TARGET=$target"
 cmake --build "$prefix"
 cmake -S . -B "$build_dir" -G Xcode \
   -DBUILD_NATIVE_CLIENT=ON -DBUILD_XBOX=OFF -DBUILD_TESTS=OFF -DBUILD_DOCS=OFF \
@@ -43,12 +43,12 @@ cmake -S . -B "$build_dir" -G Xcode \
   -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
   "-DCMAKE_FIND_ROOT_PATH=$prefix" "-DOPENSSL_ROOT_DIR=$prefix" \
   "-DFFMPEG_PREPARED_BINARIES=$prefix" "$signing_arg"
-open "$build_dir/Moonlight.xcodeproj"
+open "$build_dir/SunshineClient.xcodeproj"
 ```
 
 The target-specific build directories keep device SDKs and simulator SDKs in separate CMake caches.
 To build from the terminal with the configured signing settings, run
-`cmake --build "$build_dir" --config Release --target moonlight_client`.
+`cmake --build "$build_dir" --config Release --target sunshine_client`.
 
 ## Run on a physical device
 
@@ -59,20 +59,20 @@ To build from the terminal with the configured signing settings, run
    **Settings → Remotes and Devices → Remote App and Devices**. In Xcode, open **Manage Devices**,
    pair the Apple TV as a nearby device, and enter the PIN shown on the TV.
    [Apple’s device pairing guide](https://developer.apple.com/documentation/xcode/managing-your-simulated-and-physical-devices-in-device-hub)
-3. **Sign and install.** Sign in to your Apple Account in Xcode. In the `moonlight_client` target's
+3. **Sign and install.** Sign in to your Apple Account in Xcode. In the `sunshine_client` target's
    **Signing & Capabilities** pane, enable **Automatically manage signing** and choose your team.
    Select the physical device as the run destination and click **Run**. Xcode registers the device
    and prepares a development provisioning profile for it.
    [Apple’s device signing guide](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices)
 
-If your team cannot register `dev.lizardbyte.app.Moonlight`, set a unique test bundle ID in
+If your team cannot register `dev.lizardbyte.app.SunshineClient`, set a unique test bundle ID in
 `MACOSX_BUNDLE_GUI_IDENTIFIER` in your local `cmake/client-build.cmake`, regenerate the project,
 and match that ID in Xcode's signing settings.
 
 ## Run in a simulator
 
 Generate the project for **iPhone simulator** or **Apple TV simulator** with the simulator signing
-argument. In Xcode, select the `moonlight_client` scheme, choose the matching simulator as the run
+argument. In Xcode, select the `sunshine_client` scheme, choose the matching simulator as the run
 destination, and click **Run**. Use **Manage Devices** to add a simulator if you need a different
 model or OS version.
 [Apple’s simulator guide](https://developer.apple.com/documentation/xcode/managing-your-simulated-and-physical-devices-in-device-hub)
@@ -82,6 +82,6 @@ model or OS version.
 1. Allow local network access if prompted. In **Add Host**, enter the LAN IPv4 address of the
    computer running Sunshine. The Sunshine host can be a Windows PC.
 2. Pair with Sunshine and launch **Desktop**. Check video and audio, then stop the stream and
-   confirm Moonlight returns to its app list.
+   confirm Sunshine returns to its app list.
 3. On hardware, check touch navigation on iPhone, remote navigation on Apple TV, and gamepad
    input during a stream. Use hardware to validate decoding performance and display behavior.

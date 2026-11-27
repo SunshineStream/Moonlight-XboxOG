@@ -12,7 +12,7 @@
 namespace startup {
 
   /**
-   * @brief Describes one Moonlight-managed file that exists on disk.
+   * @brief Describes one Sunshine-managed file that exists on disk.
    */
   struct SavedFileEntry {
     std::string path;  ///< Absolute or managed-relative path to the file on disk.
@@ -21,7 +21,7 @@ namespace startup {
   };
 
   /**
-   * @brief Optional path overrides used to inspect Moonlight-managed files.
+   * @brief Optional path overrides used to inspect Sunshine-managed files.
    */
   struct SavedFileCatalogConfig {
     std::string hostStoragePath;  ///< Path to the saved-host storage file.
@@ -32,7 +32,7 @@ namespace startup {
   };
 
   /**
-   * @brief Result of enumerating Moonlight-managed files on disk.
+   * @brief Result of enumerating Sunshine-managed files on disk.
    */
   struct ListSavedFilesResult {
     std::vector<SavedFileEntry> files;  ///< Managed files currently found on disk.
@@ -40,7 +40,7 @@ namespace startup {
   };
 
   /**
-   * @brief Enumerate Moonlight-managed files that currently exist on disk.
+   * @brief Enumerate Sunshine-managed files that currently exist on disk.
    *
    * @param config Optional path overrides for tests or custom storage roots.
    * @return Existing files plus any non-fatal enumeration warnings.
@@ -48,7 +48,7 @@ namespace startup {
   ListSavedFilesResult list_saved_files(const SavedFileCatalogConfig &config = {});
 
   /**
-   * @brief Delete one Moonlight-managed file.
+   * @brief Delete one Sunshine-managed file.
    *
    * @param path Absolute or relative path returned by list_saved_files().
    * @param errorMessage Optional output for deletion failures.
@@ -62,7 +62,7 @@ namespace startup {
   );
 
   /**
-   * @brief Delete every Moonlight-managed saved file currently present on disk.
+   * @brief Delete every Sunshine-managed saved file currently present on disk.
    *
    * @param errorMessage Optional output for factory-reset failures.
    * @param config Optional path overrides for tests or custom storage roots.

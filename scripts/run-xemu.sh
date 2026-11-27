@@ -10,13 +10,13 @@ usage() {
 Usage: run-xemu.sh [--check] [--build-dir dir] [--iso path] [--network mode] [--tap-ifname name] [path]
 
 Environment overrides:
-  MOONLIGHT_XEMU_BUILD_DIR
-  MOONLIGHT_XEMU_ISO_PATH
-  MOONLIGHT_XEMU_TARGET_PATH
-  MOONLIGHT_XEMU_NETWORK
-  MOONLIGHT_XEMU_TAP_IFNAME
-  MOONLIGHT_XEMU_ENABLE_SERIAL_STDIO
-  MOONLIGHT_XEMU_DISABLE_SERIAL_STDIO
+  SUNSHINE_XEMU_BUILD_DIR
+  SUNSHINE_XEMU_ISO_PATH
+  SUNSHINE_XEMU_TARGET_PATH
+  SUNSHINE_XEMU_NETWORK
+  SUNSHINE_XEMU_TAP_IFNAME
+  SUNSHINE_XEMU_ENABLE_SERIAL_STDIO
+  SUNSHINE_XEMU_DISABLE_SERIAL_STDIO
 EOF
     return 0
 }
@@ -130,7 +130,7 @@ build_network_args() {
             ;;
         tap)
             if [[ -z "$tap_ifname" ]]; then
-                echo 'The tap network mode requires --tap-ifname or MOONLIGHT_XEMU_TAP_IFNAME.' >&2
+                echo 'The tap network mode requires --tap-ifname or SUNSHINE_XEMU_TAP_IFNAME.' >&2
                 exit 2
             fi
             xemu_network_args=(-nic "tap,ifname=$tap_ifname")
@@ -180,23 +180,23 @@ default_iso_path() {
     local build_dir="${2:-}"
 
     if [[ -n "$build_dir" ]]; then
-        local build_dir_iso="$build_dir/xbox/Moonlight.iso"
-        if [[ -f "$build_dir/Moonlight.iso" ]]; then
-            printf '%s\n' "$build_dir/Moonlight.iso"
+        local build_dir_iso="$build_dir/xbox/Sunshine.iso"
+        if [[ -f "$build_dir/Sunshine.iso" ]]; then
+            printf '%s\n' "$build_dir/Sunshine.iso"
         else
             printf '%s\n' "$build_dir_iso"
         fi
         return 0
     fi
 
-    local preferred_path="$project_root/cmake-build-release/xbox/Moonlight.iso"
+    local preferred_path="$project_root/cmake-build-release/xbox/Sunshine.iso"
     local candidate
     local newest_candidate=""
 
     shopt -s nullglob
     for candidate in \
-        "$project_root"/cmake-build-*/xbox/Moonlight.iso \
-        "$project_root"/cmake-build-*/Moonlight.iso; do
+        "$project_root"/cmake-build-*/xbox/Sunshine.iso \
+        "$project_root"/cmake-build-*/Sunshine.iso; do
         if [[ -z "$newest_candidate" || "$candidate" -nt "$newest_candidate" ]]; then
             newest_candidate="$candidate"
         fi
@@ -271,26 +271,26 @@ build_dir=""
 iso_path="$(default_iso_path "$project_root")"
 check_only=0
 target_path=""
-network_mode="${MOONLIGHT_XEMU_NETWORK:-user}"
-tap_ifname="${MOONLIGHT_XEMU_TAP_IFNAME:-}"
+network_mode="${SUNSHINE_XEMU_NETWORK:-user}"
+tap_ifname="${SUNSHINE_XEMU_TAP_IFNAME:-}"
 xemu_network_args=()
 serial_args=(-device lpc47m157 -serial stdio)
 
-if [[ "${MOONLIGHT_XEMU_ENABLE_SERIAL_STDIO:-1}" == "0" || -n "${MOONLIGHT_XEMU_DISABLE_SERIAL_STDIO:-}" ]]; then
+if [[ "${SUNSHINE_XEMU_ENABLE_SERIAL_STDIO:-1}" == "0" || -n "${SUNSHINE_XEMU_DISABLE_SERIAL_STDIO:-}" ]]; then
     serial_args=()
 fi
 
-if [[ -n "${MOONLIGHT_XEMU_BUILD_DIR:-}" ]]; then
-    build_dir="$(resolve_build_dir "$MOONLIGHT_XEMU_BUILD_DIR")"
+if [[ -n "${SUNSHINE_XEMU_BUILD_DIR:-}" ]]; then
+    build_dir="$(resolve_build_dir "$SUNSHINE_XEMU_BUILD_DIR")"
     iso_path="$(default_iso_path "$project_root" "$build_dir")"
 fi
 
-if [[ -n "${MOONLIGHT_XEMU_ISO_PATH:-}" ]]; then
-    iso_path="$(resolve_input_path "$MOONLIGHT_XEMU_ISO_PATH")"
+if [[ -n "${SUNSHINE_XEMU_ISO_PATH:-}" ]]; then
+    iso_path="$(resolve_input_path "$SUNSHINE_XEMU_ISO_PATH")"
 fi
 
-if [[ -n "${MOONLIGHT_XEMU_TARGET_PATH:-}" ]]; then
-    target_path="$MOONLIGHT_XEMU_TARGET_PATH"
+if [[ -n "${SUNSHINE_XEMU_TARGET_PATH:-}" ]]; then
+    target_path="$SUNSHINE_XEMU_TARGET_PATH"
 fi
 
 while [[ $# -gt 0 ]]; do

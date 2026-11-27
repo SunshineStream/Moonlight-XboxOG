@@ -34,7 +34,7 @@ namespace streaming {
       }
       const auto required = size + PADDING;
       if (!storage_ || required > capacity_) {
-        auto *allocation = static_cast<std::uint8_t *>(moonlight_ffmpeg_aligned_malloc(required, ALIGNMENT));
+        auto *allocation = static_cast<std::uint8_t *>(sunshine_ffmpeg_aligned_malloc(required, ALIGNMENT));
         if (allocation == nullptr) {
           std::abort();
         }
@@ -78,7 +78,7 @@ namespace streaming {
 
   private:
     static constexpr std::size_t ALIGNMENT = 64;  ///< Alignment required by FFmpeg SIMD routines.
-    std::unique_ptr<std::uint8_t, decltype(&moonlight_ffmpeg_aligned_free)> storage_ {nullptr, &moonlight_ffmpeg_aligned_free};  ///< Owned aligned storage.
+    std::unique_ptr<std::uint8_t, decltype(&sunshine_ffmpeg_aligned_free)> storage_ {nullptr, &sunshine_ffmpeg_aligned_free};  ///< Owned aligned storage.
     std::size_t capacity_ = 0;  ///< Allocated bytes, meaningful while storage is owned.
     std::size_t used_ = 0;  ///< Payload and padding bytes, or zero when cleared.
   };
