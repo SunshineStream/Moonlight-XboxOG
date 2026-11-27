@@ -111,8 +111,8 @@ for host or app actions. Button hints follow the keyboard or controller you are 
 On the hosts page, **Alt + F4** exits the client. **PgUp / PgDn** scroll the log viewer;
 hold **Shift** for faster scrolling. **Backspace** dismisses a notification or changes the log pane.
 
-A filled sun marks paired online PCs. An outlined sun with rays marks PCs awaiting pairing, and a
-dim ring marks offline PCs. A separate amber ring shows controller focus.
+An orange sun marks paired online PCs. A blue sun marks PCs awaiting pairing, and a still ash-gray
+sun marks offline PCs. Icons dissolve when a PC changes status. The amber ring shows controller focus.
 
 Settings categories have icons and the detail panel extends beside the page heading, with a fixed help
 area above its options so changing values keeps the list in place. Dialogs contain their controller

@@ -189,9 +189,9 @@ namespace {
   }
 
   /**
-   * @brief The sun icon distinguishes pairing and reachability.
+   * @brief Host tiles expose the selected solar artwork alongside their existing status labels.
    */
-  TEST(ShellViewTest, UsesSunIconsForHostState) {
+  TEST(ShellViewTest, SelectsSolarArtworkForHostStatus) {
     app::ClientState state = app::create_initial_state();
     app::replace_hosts(state, {
                                 {"Paired", test_support::kTestIpv4Addresses[test_support::kIpOffice], 0, app::PairingState::paired, app::HostReachability::online},
@@ -200,9 +200,27 @@ namespace {
                               });
     const auto view = ui::build_shell_view_model(state, {});
     ASSERT_EQ(view.content.hostTiles.size(), 3U);
-    EXPECT_EQ(view.content.hostTiles[0].iconAssetPath, "hosts\\sun-paired.svg");
-    EXPECT_EQ(view.content.hostTiles[1].iconAssetPath, "hosts\\sun-unpaired.svg");
-    EXPECT_EQ(view.content.hostTiles[2].iconAssetPath, "hosts\\sun-offline.svg");
+    EXPECT_EQ(view.content.hostTiles[0].sunState, ui::HostSunState::online);
+    EXPECT_EQ(view.content.hostTiles[0].statusLabel, "Online");
+    EXPECT_EQ(view.content.hostTiles[1].sunState, ui::HostSunState::needs_pairing);
+    EXPECT_EQ(view.content.hostTiles[1].statusLabel, "Needs Pairing");
+    EXPECT_EQ(view.content.hostTiles[2].sunState, ui::HostSunState::offline);
+    EXPECT_EQ(view.content.hostTiles[2].statusLabel, "Offline");
+  }
+
+  /**
+   * @brief Preserve separate transition identities for hosts that share an IP address.
+   */
+  TEST(ShellViewTest, IdentifiesHostsByEffectiveEndpoint) {
+    auto state = app::create_initial_state();
+    const std::string address = test_support::kTestIpv4Addresses[test_support::kIpOffice];
+    const auto otherPort = test_support::kTestPorts[test_support::kPortResolvedHttp];
+    app::replace_hosts(state, {{"Default", address}, {"Other", address, otherPort}});
+    const auto view = ui::build_shell_view_model(state, {});
+    ASSERT_EQ(view.content.hostTiles.size(), 2U);
+    EXPECT_EQ(view.content.hostTiles[0].id, address + ":" + std::to_string(app::DEFAULT_HOST_PORT));
+    EXPECT_EQ(view.content.hostTiles[1].id, address + ":" + std::to_string(otherPort));
+    EXPECT_EQ(view.content.hostTiles[0].statusLabel, "Checking...");
   }
 
   /**
@@ -300,10 +318,10 @@ namespace {
     ASSERT_EQ(viewModel.content.hostTiles.size(), 2U);
     EXPECT_EQ(viewModel.content.hostTiles[0].displayName, "Living Room PC");
     EXPECT_EQ(viewModel.content.hostTiles[0].statusLabel, "Offline");
-    EXPECT_EQ(viewModel.content.hostTiles[0].iconAssetPath, "hosts\\sun-offline.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[0].sunState, ui::HostSunState::offline);
     EXPECT_EQ(viewModel.content.hostTiles[1].displayName, "Office PC");
     EXPECT_EQ(viewModel.content.hostTiles[1].statusLabel, "Online");
-    EXPECT_EQ(viewModel.content.hostTiles[1].iconAssetPath, "hosts\\sun-paired.svg");
+    EXPECT_EQ(viewModel.content.hostTiles[1].sunState, ui::HostSunState::online);
     EXPECT_TRUE(viewModel.content.hostTiles[1].selected);
     EXPECT_EQ(viewModel.frame.subtitle, "Choose a PC to start playing.");
   }

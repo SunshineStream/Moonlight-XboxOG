@@ -37,7 +37,6 @@
 #include "src/network/host_discovery.h"
 #include "src/network/host_pairing.h"
 #include "src/network/runtime_network.h"
-#include "src/os.h"
 #include "src/platform/error_utils.h"
 #include "src/platform/filesystem_utils.h"
 #include "src/splash/splash_layout.h"
@@ -51,6 +50,7 @@
 #include "src/ui/brand_colors.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/host_probe_result_queue.h"
+#include "src/ui/host_sun_animation.h"
 #include "src/ui/mobile_orientation.h"
 #include "src/ui/save_indicator.h"
 #include "src/ui/screenshot_image.h"
@@ -4090,7 +4090,53 @@ namespace {
   }
 
   /**
-   * @brief Render grayscale moon avatars with an independent focus orbit and status labels.
+   * @brief Keep the solar artwork and redraw times for the visible host grid.
+   */
+  struct HostSunGridAnimation {
+    std::unordered_map<std::string, ui::HostSunTransition> tiles;  ///< Transition state keyed by each visible host's endpoint.
+    std::optional<int> coronaFrame;  ///< Last animated corona frame drawn, if visible.
+    std::optional<Uint64> nextTransitionRedraw;  ///< Next redraw scheduled by a visible status change.
+  };
+
+  /**
+   * @brief Draw one layer of the host's centered artwork, using the bundled vector if loading fails.
+   * @param renderer Active renderer, including the software fallback.
+   * @param assets Cache shared by all visible host tiles.
+   * @param state Host artwork to render.
+   * @param layer Sampled opacity and scale.
+   * @param bounds Icon bounds, including transparent padding around the corona.
+   * @param frame Sampled frame index in the atlas.
+   * @return True when a moving corona frame was drawn.
+   */
+  bool render_host_sun(SDL_Renderer *renderer, AssetTextureCache *assets, ui::HostSunState state, const ui::HostSunLayer &layer, const SDL_Rect &bounds, int frame) {
+    const auto alpha = static_cast<Uint8>(std::lround(layer.opacity * 255.0f));
+    if (alpha == 0) {
+      return false;
+    }
+
+    constexpr std::array paths {"hosts\\sun-corona.png", "hosts\\sun-corona-blue.png", "hosts\\sun-ash.png"};
+    const int size = std::max(1, static_cast<int>(std::lround(bounds.w * layer.scale)));
+    const SDL_Rect destination {bounds.x + (bounds.w - size) / 2, bounds.y + (bounds.h - size) / 2, size, size};
+    SDL_Texture *texture = load_cached_asset_texture(renderer, assets, paths[static_cast<std::size_t>(state)]);
+    const bool animated = state != ui::HostSunState::offline;
+    const auto source = sdl_rect(ui::host_sun_frame_bounds(frame));
+    const auto draw = [&](SDL_Texture *art, const SDL_Rect *region) {
+      if (art == nullptr || !SDL_SetTextureAlphaMod(art, alpha)) {
+        return false;
+      }
+      const bool drawn = ui::render_texture(renderer, art, region, &destination);
+      SDL_SetTextureAlphaMod(art, 255);
+      return drawn;
+    };
+    if (draw(texture, animated ? &source : nullptr)) {
+      return animated;
+    }
+    draw(load_cached_asset_texture(renderer, assets, ui::host_sun_fallback(state), bounds.w, bounds.h), nullptr);
+    return false;
+  }
+
+  /**
+   * @brief Render host avatars with an independent focus ring and status labels.
    *
    * @param renderer Active shell renderer.
    * @param bodyFont Font for host names.
@@ -4098,9 +4144,10 @@ namespace {
    * @param assetCache Cached bundled icons.
    * @param viewModel Current host collection.
    * @param gridRect Available content bounds.
+   * @param animation Tracks the visible hosts' artwork transitions and requested redraws.
    * @return True when all visible cards rendered successfully.
    */
-  bool render_host_tiles_grid(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &gridRect) {
+  bool render_host_tiles_grid(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, AssetTextureCache *assetCache, const ui::ShellViewModel &viewModel, const SDL_Rect &gridRect, HostSunGridAnimation &animation) {
     const int gap = std::max(14, gridRect.w / 45);
     const auto columns = static_cast<int>(viewModel.content.hostColumnCount);
     const int preferredHeight = std::min(gridRect.h, gridRect.w / columns);
@@ -4108,6 +4155,22 @@ namespace {
     const auto grid = ui::calculate_shell_grid(bounds, viewModel.content.hostTiles.size(), viewModel.content.hostColumnCount, selected_host_tile_index(viewModel.content.hostTiles), preferredHeight, gap);
     const auto first = static_cast<std::size_t>(grid.startRow * grid.columns);
     const std::size_t end = std::min(viewModel.content.hostTiles.size(), static_cast<std::size_t>((grid.startRow + grid.visibleRows) * grid.columns));
+    const auto visibleStart = viewModel.content.hostTiles.begin() + first;
+    const auto visibleEnd = viewModel.content.hostTiles.begin() + end;
+    for (auto entry = animation.tiles.begin(); entry != animation.tiles.end();) {
+      const bool visible = std::any_of(visibleStart, visibleEnd, [&entry](const auto &tile) {
+        return tile.id == entry->first;
+      });
+      if (visible) {
+        ++entry;
+      } else {
+        entry = animation.tiles.erase(entry);
+      }
+    }
+
+    const Uint64 now = SDL_GetTicks();
+    const bool animate = !viewModel.modal.visible && !viewModel.overlay.visible;
+    const int sunFrame = animate ? ui::host_sun_frame(now) : 0;
     for (std::size_t index = first; index < end; ++index) {
       const SDL_Rect card = sdl_rect(ui::shell_grid_cell(bounds, grid, index));
       const auto &tile = viewModel.content.hostTiles[index];
@@ -4116,7 +4179,22 @@ namespace {
       const int nameY = card.y + card.h - nameHeight - statusHeight - 24;
       const int iconSize = std::max(24, std::min(card.w - 24, nameY - card.y - 8));
       const SDL_Rect icon {card.x + (card.w - iconSize) / 2, card.y + std::max(12, (nameY - card.y - iconSize) / 2), iconSize, iconSize};
-      render_asset_icon(renderer, assetCache, tile.iconAssetPath, icon);
+      const auto state = tile.sunState;
+      auto &transition = animation.tiles.try_emplace(tile.id, state).first->second;
+      if (animate) {
+        transition.retarget(state, now);
+        if (transition.active(now)) {
+          animation.nextTransitionRedraw = now + 16;
+        }
+      } else {
+        transition = ui::HostSunTransition(state);
+      }
+      const auto layers = transition.layers(now);
+      for (std::size_t i = 0; i < layers.size(); ++i) {
+        if (render_host_sun(renderer, assetCache, ui::HOST_SUN_STATES[i], layers[i], icon, sunFrame) && animate) {
+          animation.coronaFrame = sunFrame;
+        }
+      }
       if (tile.selected) {
         render_asset_icon(renderer, assetCache, "hosts\\orbit.svg", icon);
       }
@@ -4560,10 +4638,11 @@ namespace {
    * @param fonts Shell fonts and control hint styling.
    * @param viewModel Render-ready page and modal state.
    * @param textureCache Cached host artwork.
-   * @param assetCache Cached SVG icons.
+   * @param assetCache Cached icons and bundled textures.
    * @param keypadModalLayoutCache Reusable keypad layout and text textures.
    * @param saveIndicator Cached save artwork.
    * @param saveFrame Sampled save animation time, or no active save.
+   * @param hostSunAnimation Retains visible status artwork and schedules host-grid redraws.
    * @return True when the complete frame was presented successfully.
    */
   bool draw_shell(  // NOSONAR(cpp:S107) one-frame shell rendering keeps layout dependencies explicit
@@ -4575,8 +4654,15 @@ namespace {
     AssetTextureCache *assetCache,
     KeypadModalLayoutCache *keypadModalLayoutCache,
     ui::SaveIndicator &saveIndicator,
-    const std::optional<Uint64> &saveFrame
+    const std::optional<Uint64> &saveFrame,
+    HostSunGridAnimation &hostSunAnimation
   ) {
+    hostSunAnimation.coronaFrame.reset();
+    hostSunAnimation.nextTransitionRedraw.reset();
+    // Retain the last visible host artwork across navigation so a successful pairing can dissolve on return.
+    if (viewModel.content.hostTiles.empty()) {
+      hostSunAnimation.tiles.clear();
+    }
     const auto &[titleFont, bodyFont, smallFont, hints] = fonts;
     const auto &[framebufferWidth, framebufferHeight, screenWidth, screenHeight, origin] = size;
     if (screenWidth <= 0 || screenHeight <= 0) {
@@ -4685,7 +4771,7 @@ namespace {
 
     if (viewModel.frame.screen == app::ScreenId::hosts) {
       if (!viewModel.content.hostTiles.empty()) {
-        if (!render_host_tiles_grid(renderer, bodyFont, smallFont, assetCache, viewModel, contentRect)) {
+        if (!render_host_tiles_grid(renderer, bodyFont, smallFont, assetCache, viewModel, contentRect, hostSunAnimation)) {
           return false;
         }
       } else {
@@ -5384,6 +5470,7 @@ namespace {
     Uint32 nextHostProbeTick = 0;  ///< Next scheduled host probe time.
     Uint32 notificationTick = 0;  ///< Last clock sample used to advance visible notification lifetimes.
     std::optional<Uint64> lastSaveFrame;  ///< Indicator actually drawn by the last shell frame.
+    HostSunGridAnimation hostSunAnimation;  ///< Artwork and redraw state for the visible host grid.
     ShellSaveFeedback saveFeedback;  ///< Repaints the shell while a file save is pending.
     PairingTaskState pairingTask {};  ///< Background pairing workflow state.
     ConnectionTestTaskState connectionTestTask {};  ///< Background manual connection test.
@@ -5590,6 +5677,7 @@ namespace {
 
 #ifdef SUNSHINE_DESKTOP
     if ((SDL_GetWindowFlags(SDL_GetRenderWindow(resources->renderer)) & SDL_WINDOW_MINIMIZED) != 0) {
+      runtime->hostSunAnimation = {};
       return true;
     }
 #endif
@@ -5599,7 +5687,7 @@ namespace {
     const auto viewModel = ui::build_shell_view_model(state, retainedEntries);
     const auto saveFrame = ui::save_indicator_frame(SDL_GetTicks());
     const DialogFonts fonts {resources->titleFont, resources->bodyFont, resources->smallFont, {resources->hintGlyphSize}};
-    const bool drawn = draw_shell(resources->renderer, size, fonts, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache, resources->saveIndicator, saveFrame);
+    const bool drawn = draw_shell(resources->renderer, size, fonts, viewModel, &resources->coverArtTextureCache, &resources->assetTextureCache, &resources->keypadModalLayoutCache, resources->saveIndicator, saveFrame, runtime->hostSunAnimation);
     if (size.origin.x != 0 || size.origin.y != 0) {
       SDL_SetRenderViewport(resources->renderer, nullptr);
     }
@@ -5930,8 +6018,12 @@ namespace {
     finish_shell_background_tasks(state, resources, runtime);
     start_shell_background_tasks_if_needed(state, runtime, SDL_GetTicks());
 
-    const bool saveFrameChanged = runtime->lastSaveFrame != ui::save_indicator_frame(SDL_GetTicks());
-    if ((runtime->keypadRedrawRequested || saveFrameChanged || ui::shell_requires_animation(state)) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
+    const auto now = SDL_GetTicks();
+    const bool saveFrameChanged = runtime->lastSaveFrame != ui::save_indicator_frame(now);
+    const auto &sun = runtime->hostSunAnimation;
+    const bool hostSunFrameChanged = sun.coronaFrame && *sun.coronaFrame != ui::host_sun_frame(now);
+    const bool hostSunTransitionDue = sun.nextTransitionRedraw && now >= *sun.nextTransitionRedraw;
+    if ((runtime->keypadRedrawRequested || saveFrameChanged || hostSunFrameChanged || hostSunTransitionDue || ui::shell_requires_animation(state)) && !draw_current_shell_frame(videoMode != nullptr ? *videoMode : VIDEO_MODE {}, state, resources, runtime)) {
       return false;
     }
 

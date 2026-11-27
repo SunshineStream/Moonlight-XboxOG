@@ -13,6 +13,7 @@
 // local includes
 #include "src/app/client_state.h"
 #include "src/logging/logger.h"
+#include "src/ui/host_sun_animation.h"
 
 namespace ui {
 
@@ -31,12 +32,10 @@ namespace ui {
    * @brief Render-ready host tile for the Sunshine-style hosts page.
    */
   struct ShellHostTile {
-    std::string id;  ///< Stable host tile identifier.
+    std::string id;  ///< Stable host endpoint, including the effective HTTP port.
     std::string displayName;  ///< Primary host label.
     std::string statusLabel;  ///< Secondary host status text.
-    std::string iconAssetPath;  ///< Asset path for the tile icon.
-    app::PairingState pairingState = app::PairingState::not_paired;  ///< Pairing state displayed on the tile.
-    app::HostReachability reachability = app::HostReachability::unknown;  ///< Reachability state displayed on the tile.
+    HostSunState sunState = HostSunState::offline;  ///< Solar artwork selected from reachability and pairing state.
     bool selected = false;  ///< True when the tile currently has focus.
   };
 

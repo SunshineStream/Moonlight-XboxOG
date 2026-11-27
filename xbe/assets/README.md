@@ -10,8 +10,12 @@ It also expands compact question-mark SVG arc flags for the older NanoSVG parser
 Downloaded sources remain in the build directory. The complete Lucide license, including Feather
 attribution, is included at `assets/licenses/lucide.txt` on the ISO.
 
-The first-party host icons show a filled sun for paired online PCs, an outlined sun for unpaired online PCs,
-and a dim ring for offline PCs. The amber focus ring is rendered separately from the status icon.
+Online host tiles use `hosts/sun-corona.png` for paired hosts and `hosts/sun-corona-blue.png` for hosts
+awaiting pairing. Both atlases contain sixteen 128 × 128 frames in four columns. The blue artwork
+recolors the original frames with the same timing and transparency. `hosts/sun-ash.png` is a static
+grayscale crop of the first frame with the corona removed. The client blends these assets when
+reachability or pairing changes. Bundled static icons provide fallbacks, and the amber focus ring
+is rendered separately.
 
 The [Sunshine logo](../../sunshine-logo.svg) uses the official paths and colors from the host project.
 Run `uv run --locked python scripts/generate_sunshine_logo.py` from the repository root after changing it.

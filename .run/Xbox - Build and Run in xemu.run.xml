@@ -1,7 +1,0 @@
-<component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Xbox - Build and Run in xemu" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--build-dir &quot;$CMakeCurrentBuildDir$&quot;" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" WORKING_DIR="file://$CMakeCurrentBuildDir$" PASS_PARENT_ENVS_2="true" PROJECT_NAME="SunshineClient" TARGET_NAME="moonlight_xbox" CONFIG_NAME="xbox-release (ucrt64)" RUN_PATH="$PROJECT_DIR$/scripts/run-xemu.cmd">
-    <method v="2">
-      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-    </method>
-  </configuration>
-</component>

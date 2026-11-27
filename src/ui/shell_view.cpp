@@ -104,22 +104,6 @@ namespace {
   }
 
   /**
-   * @brief Select a sun icon for a PC's connection state.
-   *
-   * @param host Host whose reachability and pairing are displayed.
-   * @return Packaged first-party sun SVG path.
-   */
-  std::string host_tile_icon(const app::HostRecord &host) {
-    if (host.reachability == app::HostReachability::online && host.pairingState == app::PairingState::paired) {
-      return "hosts\\sun-paired.svg";
-    }
-    if (host.reachability == app::HostReachability::online) {
-      return "hosts\\sun-unpaired.svg";
-    }
-    return "hosts\\sun-offline.svg";
-  }
-
-  /**
    * @brief Build compact navigation actions with packaged Lucide icons.
    *
    * @param state Current toolbar focus state.
@@ -133,18 +117,21 @@ namespace {
     };
   }
 
+  /**
+   * @brief Build tiles with stable endpoints so artwork transitions follow their hosts through grid changes.
+   * @param state Current host records and shell focus.
+   * @return Render-ready host tiles.
+   */
   std::vector<ui::ShellHostTile> host_tiles(const app::ClientState &state) {
     std::vector<ui::ShellHostTile> tiles;
     tiles.reserve(state.hosts.items.size());
     for (std::size_t index = 0; index < state.hosts.items.size(); ++index) {
       const app::HostRecord &host = state.hosts.items[index];
       tiles.emplace_back(ui::ShellHostTile {
-        host.address,
+        host.address + ":" + std::to_string(app::effective_host_port(host.port)),
         host.displayName,
         host_tile_status(host),
-        host_tile_icon(host),
-        host.pairingState,
-        host.reachability,
+        ui::host_sun_state(host.reachability, host.pairingState),
         state.shell.activeScreen == app::ScreenId::hosts && state.hosts.focusArea == app::HostsFocusArea::grid && index == state.hosts.selectedHostIndex,
       });
     }
