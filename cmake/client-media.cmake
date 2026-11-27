@@ -64,6 +64,11 @@ function(sunshine_prepare_client_media)
         sunshine_fetch_client_ffmpeg(ffmpeg_prefix)
     endif()
 
+    if(ANDROID AND ffmpeg_prefix AND EXISTS "${ffmpeg_prefix}/.sunshine-android-deps")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                "${ffmpeg_prefix}/.sunshine-android-deps")
+    endif()
+
     if(ffmpeg_prefix)
         if(NOT EXISTS "${ffmpeg_prefix}/lib/pkgconfig/libavcodec.pc")
             message(FATAL_ERROR "FFMPEG_PREPARED_BINARIES must point to the installed target FFmpeg prefix.")

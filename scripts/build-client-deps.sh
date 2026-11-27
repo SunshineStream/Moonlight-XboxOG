@@ -14,6 +14,19 @@ prefix="$(cd -- "$2" && pwd)"
 work_dir="${prefix}/sources"
 mkdir -p -- "${work_dir}"
 
+build_dir="${work_dir}"
+android_suffix=''
+if [[ "${target}" == android && -n "${SUNSHINE_ANDROID_DEPS_BUILD_ID:-}" ]]; then
+  if [[ ! "${SUNSHINE_ANDROID_DEPS_BUILD_ID}" =~ ^[0-9a-f]{12}$ ]]; then
+    echo 'SUNSHINE_ANDROID_DEPS_BUILD_ID must be a 12-character hexadecimal build ID.' >&2
+    exit 2
+  fi
+  # Reuse downloaded sources, while giving each recipe fresh build trees and a clean SDL patch target.
+  android_suffix="-${SUNSHINE_ANDROID_DEPS_BUILD_ID}"
+  build_dir="${work_dir}/build${android_suffix}"
+  mkdir -p -- "${build_dir}"
+fi
+
 lock_value() {
   local variable="$1"
   sed -nE "s/^set\(${variable} ([^)]*)\).*$/\1/p" "${source_root}/package-lock.cmake"
@@ -86,7 +99,7 @@ case "${target}" in
     ffmpeg_options+=(--target-os=android --enable-jni --enable-mediacodec
       '--enable-decoder=h264_mediacodec,hevc_mediacodec,av1_mediacodec')
     sdl_tag="release-$(lock_value SDL3_VERSION)"
-    sdl_src="${work_dir}/sdl-${sdl_tag}"
+    sdl_src="${work_dir}/sdl-${sdl_tag}${android_suffix}"
     if [[ ! -d "${sdl_src}" ]]; then
       checkout https://github.com/libsdl-org/SDL.git "${sdl_tag}" "${sdl_src}"
     fi
@@ -131,7 +144,7 @@ jobs="${SUNSHINE_BUILD_JOBS:-4}"
 if [[ -z "${meson_cc}" ]]; then
   meson_cc="'${cc}'"
 fi
-cat > "${work_dir}/dav1d-cross.ini" <<EOF
+cat > "${build_dir}/dav1d-cross.ini" <<EOF
 [binaries]
 c = ${meson_cc}
 ar = '${ar}'
@@ -148,27 +161,27 @@ c_args = ${target_flags}
 c_link_args = ${target_flags}
 EOF
 
-"${meson_setup[@]}" --cross-file "${work_dir}/dav1d-cross.ini" "--prefix=${meson_prefix}" --libdir lib \
+"${meson_setup[@]}" --cross-file "${build_dir}/dav1d-cross.ini" "--prefix=${meson_prefix}" --libdir lib \
   --default-library static --buildtype release -Denable_tools=false -Denable_tests=false \
-  "${work_dir}/dav1d-build" "${dav1d_src}"
-meson compile -C "${work_dir}/dav1d-build" -j "${jobs}"
-"${meson_install[@]}" -C "${work_dir}/dav1d-build"
+  "${build_dir}/dav1d-build" "${dav1d_src}"
+meson compile -C "${build_dir}/dav1d-build" -j "${jobs}"
+"${meson_install[@]}" -C "${build_dir}/dav1d-build"
 if [[ "${meson_prefix}" == / ]]; then
   # Override the target prefix in dav1d.pc before FFmpeg looks it up on the build host.
   sed -i "s|^prefix=/\$|prefix=\${pcfiledir}/../..|" "${prefix}/lib/pkgconfig/dav1d.pc"
 fi
 
 # OpenSSL 4.1 generates this configuration header even with no-apps.
-mkdir -p -- "${work_dir}/openssl-build/apps/include" "${work_dir}/ffmpeg-build"
+mkdir -p -- "${build_dir}/openssl-build/apps/include" "${build_dir}/ffmpeg-build"
 (
-  cd -- "${work_dir}/openssl-build"
+  cd -- "${build_dir}/openssl-build"
   env CC="${cc}" "${openssl_env[@]}" perl "${openssl_src}/Configure" "${openssl_target}" \
     --prefix="${prefix}" --libdir=lib "${openssl_options[@]}"
   make -j "${jobs}" build_libs
   make install_dev
 )
 (
-  cd -- "${work_dir}/ffmpeg-build"
+  cd -- "${build_dir}/ffmpeg-build"
   PKG_CONFIG_LIBDIR="${prefix}/lib/pkgconfig" PKG_CONFIG_PATH='' \
     "${ffmpeg_src}/configure" --cc="${cc}" --ar="${ar}" --strip="${strip}" --pkg-config=pkg-config \
     --pkg-config-flags=--static --prefix="${prefix}" "${ffmpeg_options[@]}"

@@ -54,7 +54,6 @@ jobs:
           : "${platform:?Missing sunshineCompileSdk}" "${ndk:?Missing sunshineNdk}" \
             "${build_tools:?Missing sunshineBuildTools}" "${cmake:?Missing sunshineCmake}"
           {
-            echo "ndk=${ndk}"
             echo "build_tools=${build_tools}"
             packages="platform-tools platforms;android-${platform} build-tools;${build_tools}"
             echo "packages=${packages} ndk;${ndk} cmake;${cmake}"
@@ -70,16 +69,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y meson ninja-build pkg-config
 
-      - name: Configure native dependency build
-        run: |
-          cmake -S cmake/mobile-deps -B cmake-build-android-deps -G Ninja -DSUNSHINE_MOBILE_TARGET=android
-
-      - name: Build native dependencies
-        env:
-          NDK_VERSION: ${{ steps.sdk.outputs.ndk }}
-        run: |
-          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${NDK_VERSION}"
-          cmake --build cmake-build-android-deps
 
       - name: Configure Android client
         run: bash packaging/android/gradlew -p packaging/android ':app:configureCMakeRelWithDebInfo[arm64-v8a]'

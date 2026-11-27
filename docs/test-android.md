@@ -19,11 +19,6 @@ then run these commands from the repository root.
 
 ```bash
 git submodule update --init --recursive
-ndk_version="$(sed -nE 's/^sunshineNdk=([0-9.]+).*/\1/p' packaging/android/gradle.properties)"
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ndk_version"
-prefix="$PWD/cmake-build-android-deps"
-cmake -S cmake/mobile-deps -B "$prefix" -G Ninja -DSUNSHINE_MOBILE_TARGET=android
-cmake --build "$prefix"
 bash packaging/android/gradlew -p packaging/android :app:assembleRelease \
   -PsunshineSignReleaseForTesting=true
 ```
@@ -31,25 +26,19 @@ bash packaging/android/gradlew -p packaging/android :app:assembleRelease \
 The signed test APK is in `packaging/android/app/build/outputs/apk/release/app-release.apk`.
 For debugger builds, use `:app:assembleDebug` and omit `-PsunshineSignReleaseForTesting=true`.
 
-### Prepare dependencies on Windows
+### Install native build tools on Windows
 
-Install the pinned SDK packages from the same Gradle properties file. Open an **MSYS2 UCRT64**
-shell at the repository root and run:
+Install the pinned SDK packages from the same Gradle properties file. In an **MSYS2 UCRT64**
+shell, install the host tools and initialize the submodules from the repository root.
 
 ```bash
 pacman -S --needed git make perl mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-meson \
   mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf
 git submodule update --init --recursive
-ndk_version="$(sed -nE 's/^sunshineNdk=([0-9.]+).*/\1/p' packaging/android/gradle.properties)"
-export ANDROID_NDK_HOME="$(cygpath -u "$LOCALAPPDATA")/Android/Sdk/ndk/$ndk_version"
-cmake -S cmake/mobile-deps -B cmake-build-android-deps -G Ninja -DSUNSHINE_MOBILE_TARGET=android
-cmake --build cmake-build-android-deps
 ```
 
-If your Android SDK is in a different directory, set `ANDROID_NDK_HOME` to its pinned NDK
-installation. Rebuild these dependencies after the Android dependency versions
-or SDL3 patch change. For day-to-day changes, use Android Studio's normal **Run** and **Debug**
-actions.
+Gradle starts UCRT64 automatically from Android Studio. Set `MSYS2_ROOT` in the environment if
+your MSYS2 installation is outside the default locations and its tools are absent from `PATH`.
 
 ## Sign a distribution build
 
@@ -133,10 +122,15 @@ Use a compatible emulator image or a physical ARM64 device if the list lacks `ar
 Open `packaging/android` as its own project in Android Studio. Its project settings live in
 `packaging/android/.idea`, while CLion uses `.idea` at the repository root. Both IDEs can stay open.
 
-Gradle looks for the prepared libraries in `cmake-build-android-deps` at the repository root,
-and for the project's pinned SDL3 source under that directory's `sources/`. If you use other
-locations, set these Gradle properties to their absolute paths in your user Gradle properties
-file, usually `~/.gradle/gradle.properties`.
+On the first sync or build, Gradle fetches the pinned SDL3 source and builds FFmpeg, dav1d, and
+OpenSSL in `cmake-build-android-deps` using the NDK selected by the Android Gradle plugin.
+It reuses the files on subsequent runs and rebuilds when files are missing or the native
+dependency pins, SDL3 patch, build script, or NDK version change. Allow network access for
+the first preparation and when updating the dependencies.
+
+To use a separately prepared prefix and SDL3 checkout, set their absolute paths in your user
+Gradle properties file, usually `~/.gradle/gradle.properties`. Gradle checks these files as
+supplied. The owner of the prepared prefix handles updates.
 
 ```properties
 sunshineAndroidDeps=/path/to/checkout/cmake-build-android-deps
