@@ -5156,31 +5156,6 @@ namespace {
     }
   }
 
-  /**
-   * @brief Interpret the active finger's release as a swipe, hold or tap.
-   * @param gesture Saved origin and timing, cleared when the finger matches.
-   * @param event SDL finger release.
-   * @return A shell command, or none for a different finger.
-   */
-  input::UiCommand handle_shell_touch_release(input::ShellTouchGesture &gesture, const SDL_TouchFingerEvent &event) {
-    if (gesture.finger != event.fingerID) {
-      return input::UiCommand::none;
-    }
-    const float dx = event.x - gesture.x;
-    const float dy = event.y - gesture.y;
-    const Uint64 held = SDL_GetTicks() - gesture.startedAt;
-    gesture.finger = 0;
-    if (std::max(std::fabs(dx), std::fabs(dy)) >= 0.05f) {
-      if (std::fabs(dx) > std::fabs(dy)) {
-        return input::direction_command(dx > 0.0f ? 1 : -1, 0);
-      }
-      return input::direction_command(0, dy > 0.0f ? 1 : -1);
-    }
-    if (held > 1000) {
-      return input::UiCommand::back;
-    }
-    return held > 450 ? input::UiCommand::open_context_menu : input::UiCommand::activate;
-  }
 #endif
 
   /**
@@ -5233,7 +5208,12 @@ namespace {
         }
         return input::UiCommand::none;
       case SDL_EVENT_FINGER_UP:
-        return inputState != nullptr ? handle_shell_touch_release(inputState->touch, event.tfinger) : input::UiCommand::none;
+        return inputState != nullptr ? inputState->touch.release(event.tfinger.fingerID, event.tfinger.x, event.tfinger.y, SDL_GetTicks()) : input::UiCommand::none;
+      case SDL_EVENT_FINGER_CANCELED:
+        if (inputState != nullptr) {
+          inputState->touch.cancel(event.tfinger.fingerID);
+        }
+        return input::UiCommand::none;
 #endif
       case SDL_EVENT_KEY_DOWN:
         return handle_shell_key_down(state, event.key, inputState);

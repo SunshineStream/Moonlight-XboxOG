@@ -16,6 +16,43 @@
 #include <lizardbyte/common/testing.h>
 
 /**
+ * @brief Canceling a different finger leaves the active tap intact.
+ */
+TEST(ShellTouchGestureTest, IgnoresCancellationAndReleaseFromAnotherFinger) {
+  input::ShellTouchGesture gesture {5, 100, 0.5f, 0.5f};
+  gesture.cancel(6);
+  EXPECT_EQ(gesture.release(6, 0.5f, 0.5f, 120), input::UiCommand::none);
+  EXPECT_EQ(gesture.release(5, 0.5f, 0.5f, 130), input::UiCommand::activate);
+}
+
+/**
+ * @brief A matching cancellation frees the active finger without activating on a late release.
+ */
+TEST(ShellTouchGestureTest, AcceptsNextTapAfterActiveFingerIsCanceled) {
+  input::ShellTouchGesture gesture {5, 100, 0.5f, 0.5f};
+  gesture.cancel(5);
+  ASSERT_EQ(gesture.finger, 0U);
+  EXPECT_EQ(gesture.release(5, 0.5f, 0.5f, 120), input::UiCommand::none);
+  gesture = {6, 125, 0.5f, 0.5f};
+  EXPECT_EQ(gesture.release(5, 0.5f, 0.5f, 130), input::UiCommand::none);
+  EXPECT_EQ(gesture.release(6, 0.5f, 0.5f, 140), input::UiCommand::activate);
+}
+
+/**
+ * @brief Matching releases still distinguish directional swipes and long presses.
+ */
+TEST(ShellTouchGestureTest, MapsSwipesAndHolds) {
+  input::ShellTouchGesture gesture {5, 100, 0.5f, 0.5f};
+  EXPECT_EQ(gesture.release(5, 0.8f, 0.55f, 150), input::UiCommand::move_right);
+  gesture = {6, 200, 0.5f, 0.5f};
+  EXPECT_EQ(gesture.release(6, 0.45f, 0.2f, 250), input::UiCommand::move_up);
+  gesture = {7, 300, 0.5f, 0.5f};
+  EXPECT_EQ(gesture.release(7, 0.5f, 0.5f, 800), input::UiCommand::open_context_menu);
+  gesture = {8, 900, 0.5f, 0.5f};
+  EXPECT_EQ(gesture.release(8, 0.5f, 0.5f, 2000), input::UiCommand::back);
+}
+
+/**
  * @brief Shared grid commands preserve direction, horizontal priority and neutral input.
  */
 TEST(UiInputTest, MapsDirectionalCommandsToGridSteps) {

@@ -7,9 +7,36 @@
 
 // standard includes
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 namespace input {
+  void ShellTouchGesture::cancel(std::uint64_t fingerId) {
+    if (finger == fingerId) {
+      *this = {};
+    }
+  }
+
+  UiCommand ShellTouchGesture::release(std::uint64_t fingerId, float endX, float endY, std::uint64_t now) {
+    if (finger == 0 || finger != fingerId) {
+      return UiCommand::none;
+    }
+    const float dx = endX - x;
+    const float dy = endY - y;
+    const auto held = now - startedAt;
+    *this = {};
+    if (std::max(std::fabs(dx), std::fabs(dy)) >= 0.05f) {
+      if (std::fabs(dx) > std::fabs(dy)) {
+        return direction_command(dx > 0.0f ? 1 : -1, 0);
+      }
+      return direction_command(0, dy > 0.0f ? 1 : -1);
+    }
+    if (held > 1000) {
+      return UiCommand::back;
+    }
+    return held > 450 ? UiCommand::open_context_menu : UiCommand::activate;
+  }
+
   UiCommand direction_command(int x, int y) {
     if (x != 0) {
       return x > 0 ? UiCommand::move_right : UiCommand::move_left;

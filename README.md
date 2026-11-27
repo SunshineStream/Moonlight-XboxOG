@@ -381,7 +381,8 @@ Configure the top-level project with the normal host toolchain. CMake uses the v
 For host and Xbox builds, CMake checks whether the compiler supports Clang's `unused-but-set-global` warning. When supported, this warning remains nonfatal for `moonlight-common-c`, whose debug counters are read only by assertions that are disabled in release builds. Other warnings retain the dependency's existing error policy.
 
 ```bash
-cmake -S . -B cmake-build-release -DBUILD_DOCS=OFF -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B cmake-build-release -DBUILD_DOCS=OFF -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_XBOX=ON -DBUILD_NATIVE_CLIENT=OFF
 ```
 
 Optional Xbox build settings:

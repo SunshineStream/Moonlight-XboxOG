@@ -105,6 +105,17 @@ namespace {
     return std::string(buffer.data());
   }
 
+#ifdef MOONLIGHT_NATIVE_CLIENT
+  /**
+   * @brief Recognize decoder errors that may require switching away from hardware.
+   * @param errorCode FFmpeg packet submission or frame receive result.
+   * @return True for a hardware, I/O or unsupported-operation failure.
+   */
+  bool is_hardware_decoder_failure(int errorCode) {
+    return errorCode == AVERROR_EXTERNAL || errorCode == AVERROR(EIO) || errorCode == AVERROR(ENOSYS);
+  }
+#endif
+
   /**
    * @brief Remove trailing CR and LF characters from an FFmpeg log line.
    *
@@ -1110,7 +1121,7 @@ namespace streaming {
       if (receiveResult < 0) {
         logging::warn("stream", std::string("avcodec_receive_frame failed for ") + video_.codecName + ": " + describe_ffmpeg_error(receiveResult));
 #ifdef MOONLIGHT_NATIVE_CLIENT
-        if (receiveResult == AVERROR_EXTERNAL || receiveResult == AVERROR(EIO) || receiveResult == AVERROR(ENOSYS)) {
+        if (is_hardware_decoder_failure(receiveResult)) {
           fallback_to_software_decoder();
         }
 #endif
@@ -1204,6 +1215,11 @@ namespace streaming {
     av_packet_unref(video_.packet);
     if (sendResult < 0) {
       logging::warn("stream", std::string("avcodec_send_packet failed for ") + video_.codecName + ": " + describe_ffmpeg_error(sendResult));
+#ifdef MOONLIGHT_NATIVE_CLIENT
+      if (is_hardware_decoder_failure(sendResult)) {
+        fallback_to_software_decoder();
+      }
+#endif
       return DR_NEED_IDR;
     }
 

@@ -44,6 +44,7 @@
 // local includes
 #include "src/input/shell_controller.h"
 #include "src/input/stream_exit.h"
+#include "src/input/stream_input.h"
 #include "src/logging/logger.h"
 #include "src/startup/memory_stats.h"
 #include "src/startup/video_mode.h"
@@ -112,6 +113,9 @@ namespace {
     streaming::FfmpegStreamBackend mediaBackend {};
     std::optional<Uint64> startupTick;  ///< Session entry tick, cleared when the first video frame is presented.
     std::optional<VIDEO_MODE> pendingVideoMode;  ///< Output to switch to immediately before presenting decoded video.
+#ifdef MOONLIGHT_DESKTOP
+    bool relativeMouseRequested = false;  ///< Last requested SDL mouse mode, including unsupported requests.
+#endif
     bool ttfInitialized = false;
   };
 
@@ -606,11 +610,44 @@ namespace {
     return ui::build_asset_path("fonts/vegur-regular.ttf");
   }
 
+#ifdef MOONLIGHT_DESKTOP
+  /**
+   * @brief Apply a relative mouse mode change on the SDL event thread.
+   * @param window Stream window receiving mouse events.
+   * @param enabled True to capture the pointer for relative movement.
+   */
+  void set_stream_relative_mouse_mode(SDL_Window *window, bool enabled) {
+    if (!SDL_SetWindowRelativeMouseMode(window, enabled)) {
+      logging::warn("input", std::string("Could not change relative mouse mode: ") + SDL_GetError());
+    }
+  }
+
+  /**
+   * @brief Release the pointer before transport shutdown or return to the shell.
+   * @param resources Stream state and renderer associated with the window.
+   */
+  void release_stream_mouse_capture(StreamUiResources &resources) {
+    resources.relativeMouseRequested = false;
+    if (resources.renderer != nullptr) {
+      if (SDL_Window *window = SDL_GetRenderWindow(resources.renderer); window != nullptr && SDL_GetWindowRelativeMouseMode(window)) {
+        set_stream_relative_mouse_mode(window, false);
+      }
+    }
+  }
+#endif
+
+  /**
+   * @brief Release stream resources and restore the shell's pointer behavior.
+   * @param resources Stream resources to close, or nullptr.
+   */
   void close_stream_ui_resources(StreamUiResources *resources) {
     if (resources == nullptr) {
       return;
     }
 
+#ifdef MOONLIGHT_DESKTOP
+    release_stream_mouse_capture(*resources);
+#endif
     resources->mediaBackend.shutdown();
     {
       resources->controller.close();
@@ -1136,6 +1173,17 @@ namespace {
     if (resources->controller.pump(resources->mediaBackend, resources->bodyFont, width, height, connectionState->connectionStarted.load(), resources->statisticsEnabled)) {
       request_stream_stop(connectionState);
     }
+#ifdef MOONLIGHT_DESKTOP
+    if (SDL_Window *window = SDL_GetRenderWindow(resources->renderer); window != nullptr) {
+      const bool playing = connectionState->connectionStarted.load() && !connectionState->stopRequested.load() && !connectionState->connectionTerminated.load();
+      const bool focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+      const bool capture = input::should_capture_stream_mouse(playing, resources->controller.has_overlay(), focused);
+      if (capture != resources->relativeMouseRequested) {
+        resources->relativeMouseRequested = capture;
+        set_stream_relative_mouse_mode(window, capture);
+      }
+    }
+#endif
 #ifdef MOONLIGHT_NATIVE_CLIENT
     for (unsigned int slot = 0; slot < connectionState->rumble.size(); ++slot) {
       if (const auto effect = connectionState->rumble[slot].exchange(0); effect != 0) {
@@ -1627,6 +1675,9 @@ namespace {
       }
       render_active_stream_frame_if_needed(loopContext, &lastIdleVideoIdrRequestTick);
     }
+#ifdef MOONLIGHT_DESKTOP
+    release_stream_mouse_capture(loopContext.resources);
+#endif
     loopContext.resources.controller.release_host_input();
   }
 

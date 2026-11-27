@@ -13,6 +13,17 @@
 
 namespace input {
   /**
+   * @brief Decide whether desktop gameplay should own the system pointer.
+   * @param playing True while the stream is connected and running.
+   * @param overlayVisible True while a local stream menu is open.
+   * @param focused True while the stream window has input focus.
+   * @return True when the window should use relative mouse input.
+   */
+  constexpr bool should_capture_stream_mouse(bool playing, bool overlayVisible, bool focused) {
+    return playing && !overlayVisible && focused;
+  }
+
+  /**
    * @brief One complete Moonlight gamepad sample.
    */
   struct ControllerState {

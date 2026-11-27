@@ -181,7 +181,6 @@ namespace input {
     ControllerNavigationHoldState right {};  ///< Right repeat state.
   };
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
   /**
    * @brief Origin and timing of the active shell touch gesture.
    */
@@ -190,8 +189,23 @@ namespace input {
     std::uint64_t startedAt = 0;  ///< Touch timestamp used to distinguish a tap from a hold.
     float x = 0;  ///< Normalized horizontal origin.
     float y = 0;  ///< Normalized vertical origin.
+
+    /**
+     * @brief Clear the active gesture when its finger is canceled.
+     * @param fingerId Canceled finger ID.
+     */
+    void cancel(std::uint64_t fingerId);
+
+    /**
+     * @brief Interpret a matching finger release and clear the gesture.
+     * @param fingerId Released finger ID.
+     * @param endX Normalized horizontal release position.
+     * @param endY Normalized vertical release position.
+     * @param now Monotonic time in milliseconds.
+     * @return Shell command, or none for an unrelated or canceled gesture.
+     */
+    UiCommand release(std::uint64_t fingerId, float endX, float endY, std::uint64_t now);
   };
-#endif
 
   /**
    * @brief Shell input lifetime, separate from the stream's input ownership.

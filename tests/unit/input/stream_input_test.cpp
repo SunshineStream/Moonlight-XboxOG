@@ -14,6 +14,16 @@
 #include <lizardbyte/common/testing.h>
 
 /**
+ * @brief Relative mouse capture requires focused gameplay with the stream menu closed.
+ */
+TEST(StreamMouseCaptureTest, RequiresActiveFocusedGameplay) {
+  EXPECT_TRUE(input::should_capture_stream_mouse(true, false, true));
+  EXPECT_FALSE(input::should_capture_stream_mouse(false, false, true));
+  EXPECT_FALSE(input::should_capture_stream_mouse(true, true, true));
+  EXPECT_FALSE(input::should_capture_stream_mouse(true, false, false));
+}
+
+/**
  * @brief Captures ordered transport packets without a host connection.
  */
 class StreamInputTest: public testing::Test {
