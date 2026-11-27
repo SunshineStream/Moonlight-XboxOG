@@ -119,7 +119,7 @@ namespace streaming {
      * @return True when the user confirms quit or closes the application window.
      */
     bool pump(FfmpegStreamBackend &backend, TTF_Font *font, int width, int height, bool active, bool &statisticsEnabled);
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     /**
      * @brief Apply host feedback to the local SDL device in a protocol slot.
      * @param slot Host controller number.
@@ -176,13 +176,13 @@ namespace streaming {
       input::StreamExitChord chord;  ///< Event-order chord detection.
       input::ControllerState sample {};  ///< Latest sampled state.
       bool chordDown = false;  ///< Chord edge latch.
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       std::array<std::uint16_t, 2> motionRate {};  ///< Accelerometer and gyro rates requested by the host.
       std::array<Uint64, 2> lastMotionTimestamp {};  ///< Last event timestamp forwarded per sensor.
 #endif
     };
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     /**
      * @brief Forward controller touch, sensor and battery events for an active stream.
      * @param event SDL event consumed by the input pump.

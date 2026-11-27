@@ -9,11 +9,11 @@
         android:allowBackup="false"
         android:banner="@drawable/tv_banner"
         android:icon="@mipmap/ic_launcher"
-        android:label="Moonlight"
-        android:theme="@style/Theme.Moonlight"
+        android:label="Sunshine"
+        android:theme="@style/Theme.Sunshine"
         android:usesCleartextTraffic="false">
         <activity
-            android:name=".MoonlightActivity"
+            android:name=".SunshineActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="true"
             android:screenOrientation="user">

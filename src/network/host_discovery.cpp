@@ -47,7 +47,7 @@ namespace {
   constexpr uint32_t DEFAULT_DISCOVERY_TIMEOUT_MILLISECONDS = 1500U;
 
 #ifdef NXDK
-  constexpr char kMdnsDiscoveryHostName[] = "moonlight-xbox";
+  constexpr char kMdnsDiscoveryHostName[] = "sunshine-client";
 #endif
 
   constexpr std::string_view kMdnsDiscoveryMethodName = "mDNS";
@@ -90,7 +90,7 @@ namespace {
    * @param result Discovery result to update.
    * @param displayName User-facing label for the discovered host.
    * @param address Reachable IPv4 address for the host.
-   * @param port Host HTTP port, or zero for the default Moonlight port.
+   * @param port Host HTTP port, or zero for the default Sunshine port.
    * @return True when a new host was appended.
    */
   bool append_discovered_host(network::DiscoverHostsResult *result, std::string displayName, const std::string &address, uint16_t port) {

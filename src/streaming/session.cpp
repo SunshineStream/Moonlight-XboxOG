@@ -37,7 +37,7 @@
   #include <openssl/rand.h>
 #endif
 
-#if defined(NXDK) && MOONLIGHT_INPUT_DIAGNOSTICS
+#if defined(NXDK) && SUNSHINE_INPUT_DIAGNOSTICS
   #include <hal/debug.h>
 #endif
 
@@ -53,6 +53,7 @@
 #include "src/streaming/stream_controls.h"
 #include "src/streaming/video_codec_selection.h"
 #include "src/ui/asset_path.h"
+#include "src/ui/brand_colors.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/sdl_render.h"
 #include "src/ui/shell_layout.h"
@@ -77,18 +78,12 @@ extern "C" std::uint64_t PltGetMicroseconds(void);
 
 namespace {
 
-  constexpr Uint8 BACKGROUND_RED = 0x08;
-  constexpr Uint8 BACKGROUND_GREEN = 0x0A;
-  constexpr Uint8 BACKGROUND_BLUE = 0x10;
-  constexpr Uint8 TEXT_RED = 0xF2;
-  constexpr Uint8 TEXT_GREEN = 0xF5;
-  constexpr Uint8 TEXT_BLUE = 0xF8;
   constexpr Uint32 STREAM_FRAME_DELAY_MILLISECONDS = 16U;
   constexpr Uint32 STREAM_PRESENT_POLL_MILLISECONDS = 2U;
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_MILLISECONDS = 1500U;
   constexpr Uint32 STREAM_VIDEO_IDLE_IDR_COOLDOWN_MILLISECONDS = 2000U;
   constexpr int MIN_STREAM_FPS = 15;
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   constexpr int MAX_STREAM_FPS = 120;
   constexpr int MAX_STREAM_BITRATE_KBPS = 150000;
 #else
@@ -113,7 +108,7 @@ namespace {
     streaming::FfmpegStreamBackend mediaBackend {};
     std::optional<Uint64> startupTick;  ///< Session entry tick, cleared when the first video frame is presented.
     std::optional<VIDEO_MODE> pendingVideoMode;  ///< Output to switch to immediately before presenting decoded video.
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
     bool relativeMouseRequested = false;  ///< Last requested SDL mouse mode, including unsupported requests.
 #endif
     bool ttfInitialized = false;
@@ -171,7 +166,7 @@ namespace {
     std::atomic<bool> connectionTerminated = false;
     std::atomic<bool> poorConnection = false;
     std::atomic<bool> stopRequested = false;
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     std::array<std::atomic<std::uint64_t>, 4> rumble {};  ///< Latest motor levels per host slot, with a pending marker.
     std::array<std::atomic<std::uint64_t>, 4> triggerRumble {};  ///< Latest trigger motor levels per host slot.
     std::array<std::array<std::atomic<std::uint32_t>, 2>, 4> motion {};  ///< Pending sensor rates per host slot.
@@ -610,7 +605,7 @@ namespace {
     return ui::build_asset_path("fonts/vegur-regular.ttf");
   }
 
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
   /**
    * @brief Apply a relative mouse mode change on the SDL event thread.
    * @param window Stream window receiving mouse events.
@@ -645,7 +640,7 @@ namespace {
       return;
     }
 
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
     release_stream_mouse_capture(*resources);
 #endif
     resources->mediaBackend.shutdown();
@@ -936,7 +931,7 @@ namespace {
     context->streamConfiguration.packetSize = streamParameters.packetSize;
     context->streamConfiguration.streamingRemotely = streamParameters.streamingRemotely;
     context->streamConfiguration.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     int decoderFormats = streaming::FfmpegStreamBackend::available_video_formats();
     if (streamParameters.videoCodec == app::VideoCodecSelection::h264) {
       decoderFormats &= VIDEO_FORMAT_H264;
@@ -946,7 +941,7 @@ namespace {
     context->streamConfiguration.supportedVideoFormats = streaming::supported_video_formats(streamParameters.videoCodec, launchResult.serverCodecModeSupport);
 #endif
     context->streamConfiguration.clientRefreshRateX100 = select_client_refresh_rate_x100(outputVideoMode);
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     context->streamConfiguration.colorSpace = COLORSPACE_REC_709;
     context->streamConfiguration.encryptionFlags = ENCFLG_ALL;
 #else
@@ -989,7 +984,7 @@ namespace {
     logging::info("stream", "Streaming transport started");
   }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   /**
    * @brief Publish a host rumble request for the SDL event thread.
    * @param slot Host controller slot.
@@ -1062,7 +1057,7 @@ namespace {
     }
 
     append_connection_protocol_message(active_connection_state(), message);
-    logging::log(connection_log_level(message), "moonlight", message);
+    logging::log(connection_log_level(message), "moonlight-common-c", message);
   }
 
   /**
@@ -1173,7 +1168,7 @@ namespace {
     if (resources->controller.pump(resources->mediaBackend, resources->bodyFont, width, height, connectionState->connectionStarted.load(), resources->statisticsEnabled)) {
       request_stream_stop(connectionState);
     }
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
     if (SDL_Window *window = SDL_GetRenderWindow(resources->renderer); window != nullptr) {
       const bool playing = connectionState->connectionStarted.load() && !connectionState->stopRequested.load() && !connectionState->connectionTerminated.load();
       const bool focused = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
@@ -1184,7 +1179,7 @@ namespace {
       }
     }
 #endif
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     for (unsigned int slot = 0; slot < connectionState->rumble.size(); ++slot) {
       if (const auto effect = connectionState->rumble[slot].exchange(0); effect != 0) {
         resources->controller.rumble(slot, static_cast<std::uint16_t>(effect >> 16), static_cast<std::uint16_t>(effect), false);
@@ -1337,7 +1332,7 @@ namespace {
    * @param resources Event-thread controller owner supplying the diagnostic state.
    */
   void render_stream_input_diagnostics(const StreamUiResources *resources) {
-#if defined(NXDK) && MOONLIGHT_INPUT_DIAGNOSTICS
+#if defined(NXDK) && SUNSHINE_INPUT_DIAGNOSTICS
     if (resources != nullptr) {
       debugResetCursor();
       for (const auto &line : resources->controller.diagnostic_lines()) {
@@ -1372,7 +1367,7 @@ namespace {
       }
       bodyText += line;
     }
-    constexpr SDL_Color text {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
+    constexpr SDL_Color text = ui::brand::TEXT;
     const auto rasterizeBody = [&bodyText, text, wrapWidth = static_cast<Uint32>(body.w)](TTF_Font *font) {
       return std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>(
         TTF_RenderText_Blended_Wrapped(font, bodyText.c_str(), 0, text, wrapWidth),
@@ -1389,7 +1384,7 @@ namespace {
       return false;
     }
 
-    SDL_SetRenderDrawColor(renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
+    SDL_SetRenderDrawColor(renderer, ui::brand::BACKGROUND.r, ui::brand::BACKGROUND.g, ui::brand::BACKGROUND.b, ui::brand::BACKGROUND.a);
     SDL_RenderClear(renderer);
     ui::draw_dialog_surface(renderer, {card.x, card.y, card.w, card.h});
     if (!render_text_line(renderer, resources.titleFont, dialog.title, {title.x, title.y, title.w, title.h}, text) || !render_text_surface(renderer, raster.get(), {body.x, body.y, body.w, body.h})) {
@@ -1398,7 +1393,7 @@ namespace {
     if (dialog.streamStartupStep.has_value()) {
       ui::draw_dialog_progress(renderer, {progress.x, progress.y, progress.w, progress.h}, static_cast<int>(*dialog.streamStartupStep), ui::STREAM_STARTUP_STEP_COUNT);
     }
-    return footer.empty() || render_text_line(renderer, resources.bodyFont, footer, {hint.x, hint.y, hint.w, hint.h}, {0x82, 0xB4, 0xFF, 0xFF});
+    return footer.empty() || render_text_line(renderer, resources.bodyFont, footer, {hint.x, hint.y, hint.w, hint.h}, ui::brand::ACCENT);
   }
 
 #ifdef NXDK
@@ -1675,7 +1670,7 @@ namespace {
       }
       render_active_stream_frame_if_needed(loopContext, &lastIdleVideoIdrRequestTick);
     }
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
     release_stream_mouse_capture(loopContext.resources);
 #endif
     loopContext.resources.controller.release_host_input();
@@ -1898,7 +1893,7 @@ namespace streaming {
     );
     resources.mediaBackend.initialize_callbacks(&startContext.videoCallbacks, &startContext.audioCallbacks);
     startContext.connectionCallbacks.stageStarting = on_stage_starting;
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     startContext.connectionCallbacks.rumble = on_controller_rumble<false>;
     startContext.connectionCallbacks.rumbleTriggers = on_controller_rumble<true>;
     startContext.connectionCallbacks.setMotionEventState = on_controller_motion;

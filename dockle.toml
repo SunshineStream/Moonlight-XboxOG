@@ -1,10 +1,10 @@
 [project]
-name = "Moonlight"
+name = "Sunshine client"
 version = "0.0.0"
-description = "Moonlight game streaming client for desktop, Android, iOS/tvOS and the original Xbox."
-repository = "https://github.com/SunshineStream/Moonlight-XboxOG"
-logo = "moonlight-logo.svg"
-favicon = "moonlight-logo.svg"
+description = "Sunshine game streaming client for desktop, Android, iOS/tvOS and the original Xbox."
+repository = "https://github.com/SunshineStream/Sunshine-client"
+logo = "sunshine-logo.svg"
+favicon = "sunshine-logo.svg"
 
 [build]
 output = "_site"
@@ -14,7 +14,7 @@ clean = true
 
 [[targets]]
 name = "api"
-title = "Moonlight documentation"
+title = "Sunshine documentation"
 framework = "doxygen"
 source = "."
 home = true

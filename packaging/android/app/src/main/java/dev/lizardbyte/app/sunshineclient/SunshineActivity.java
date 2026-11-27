@@ -1,4 +1,4 @@
-package dev.lizardbyte.app.moonlight;
+package dev.lizardbyte.app.sunshineclient;
 
 import android.os.Bundle;
 import android.view.View;
@@ -6,8 +6,8 @@ import android.view.ViewGroup;
 
 import org.libsdl.app.SDLActivity;
 
-/** Holds the launch background over SDL's surface until Moonlight presents its first splash frame. */
-public final class MoonlightActivity extends SDLActivity {
+/** Holds the launch background over SDL's surface until Sunshine presents its first splash frame. */
+public final class SunshineActivity extends SDLActivity {
     private View startupCover;
 
     @Override

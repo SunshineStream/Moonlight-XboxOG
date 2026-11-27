@@ -8,7 +8,7 @@
 // standard includes
 #include <string>
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   #include <SDL3/SDL.h>
 #endif
 
@@ -46,8 +46,8 @@ namespace startup {
   }
 
   std::string default_storage_path(std::string_view entryName) {
-#ifdef MOONLIGHT_NATIVE_CLIENT
-    // SDL creates a per-user writable application directory, including in a sandbox.
+#ifdef SUNSHINE_NATIVE_CLIENT
+    // Keep the original SDL directory so existing installations can still read their settings and pairing identity.
     static const auto root = [] {
       char *path = SDL_GetPrefPath("SunshineStream", "Moonlight");
       std::string result = path == nullptr ? "" : path;

@@ -1,18 +1,18 @@
 include_guard(GLOBAL)
 
 # Resolve a pinned archive using GitHub's published SHA-256 digest.
-function(moonlight_build_deps_asset asset output_url output_hash)
+function(sunshine_build_deps_asset asset output_url output_hash)
     if(CMAKE_VERSION VERSION_LESS "3.19")
         message(FATAL_ERROR "Resolving a build-deps release asset requires CMake 3.19 or newer.")
     endif()
     set(repository "https://api.github.com/repos/LizardByte/build-deps")
-    set(release "${CMAKE_BINARY_DIR}/_deps/build-deps-${MOONLIGHT_BUILD_DEPS_TAG}/release.json")
+    set(release "${CMAKE_BINARY_DIR}/_deps/build-deps-${SUNSHINE_BUILD_DEPS_TAG}/release.json")
     # Hosted runners can exhaust the shared IP's unauthenticated request quota.
     set(headers HTTPHEADER "Accept: application/vnd.github+json")
     if(NOT "$ENV{GH_TOKEN}" STREQUAL "")
         list(APPEND headers HTTPHEADER "Authorization: Bearer $ENV{GH_TOKEN}")
     endif()
-    file(DOWNLOAD "${repository}/releases/tags/${MOONLIGHT_BUILD_DEPS_TAG}" "${release}"
+    file(DOWNLOAD "${repository}/releases/tags/${SUNSHINE_BUILD_DEPS_TAG}" "${release}"
             ${headers} TLS_VERIFY ON TIMEOUT 60 STATUS status)
     list(GET status 0 status_code)
     if(NOT status_code EQUAL 0)
@@ -35,6 +35,6 @@ function(moonlight_build_deps_asset asset output_url output_hash)
         endif()
         math(EXPR index "${index} + 1")
     endwhile()
-    message(FATAL_ERROR "No ${asset} in build-deps ${MOONLIGHT_BUILD_DEPS_TAG}. "
+    message(FATAL_ERROR "No ${asset} in build-deps ${SUNSHINE_BUILD_DEPS_TAG}. "
             "Set FFMPEG_PREPARED_BINARIES to a target build.")
 endfunction()

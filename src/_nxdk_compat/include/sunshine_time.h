@@ -1,5 +1,5 @@
 /**
- * @file src/_nxdk_compat/include/moonlight_time.h
+ * @file src/_nxdk_compat/include/sunshine_time.h
  * @brief Converts UTC timestamps with caller-owned storage through the Xbox kernel.
  */
 #pragma once
@@ -23,7 +23,7 @@
  * @param result Receives the complete UTC calendar fields.
  * @return False if the timestamp cannot be represented as signed NT time.
  */
-inline bool moonlight_gmtime(std::time_t timestamp, std::tm &result) {
+inline bool sunshine_gmtime(std::time_t timestamp, std::tm &result) {
   constexpr std::int64_t epochOffset = 11644473600LL;
   constexpr std::int64_t ticksPerSecond = 10000000;
   if (timestamp < 0 || timestamp > std::numeric_limits<std::int64_t>::max() / ticksPerSecond - epochOffset) {

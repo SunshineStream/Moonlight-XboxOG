@@ -14,7 +14,7 @@
 namespace app {
 
   /**
-   * @brief Persisted Moonlight user settings stored in TOML.
+   * @brief Persisted Sunshine user settings stored in TOML.
    */
   struct AppSettings {
     logging::LogLevel loggingLevel = logging::LogLevel::none;  ///< Minimum runtime log level written to the log file.
@@ -24,7 +24,7 @@ namespace app {
     bool preferredVideoModeSet = false;  ///< True when preferredVideoMode contains a saved user preference.
     int streamFramerate = DEFAULT_STREAM_FRAMERATE;  ///< Preferred stream frame rate in frames per second.
     int streamBitrateKbps = DEFAULT_STREAM_BITRATE_KBPS;  ///< Preferred stream bitrate in kilobits per second.
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     app::VideoCodecSelection videoCodec = app::VideoCodecSelection::autoDetect;  ///< Preferred video codec for new streams.
 #else
     app::VideoCodecSelection videoCodec = app::VideoCodecSelection::preferMpeg2;  ///< Preferred video codec for new streams.
@@ -40,7 +40,7 @@ namespace app {
   };
 
   /**
-   * @brief Result of loading the persisted Moonlight settings file.
+   * @brief Result of loading the persisted Sunshine settings file.
    */
   struct LoadAppSettingsResult {
     AppSettings settings;  ///< Loaded settings, or defaults when the file is missing or invalid.
@@ -50,7 +50,7 @@ namespace app {
   };
 
   /**
-   * @brief Result of saving the persisted Moonlight settings file.
+   * @brief Result of saving the persisted Sunshine settings file.
    */
   struct SaveAppSettingsResult {
     bool success = false;  ///< True when the settings file was written successfully.
@@ -58,7 +58,7 @@ namespace app {
   };
 
   /**
-   * @brief Return the default path used for the persisted Moonlight settings file.
+   * @brief Return the default path used for the persisted Sunshine settings file.
    *
    * @return Default TOML settings file path.
    */
@@ -73,7 +73,7 @@ namespace app {
   LoadAppSettingsResult load_app_settings(const std::string &filePath = default_settings_path());
 
   /**
-   * @brief Save the persisted Moonlight settings file.
+   * @brief Save the persisted Sunshine settings file.
    *
    * @param settings Settings snapshot to write.
    * @param filePath Settings file to write.

@@ -78,7 +78,7 @@ jobs:
         run: |
           # Use Ninja in CI to avoid missing MinGW Makefiles dependency stamps on clean builds.
           cmake --preset client -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-            -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DMOONLIGHT_TEST_COVERAGE=ON
+            -DSUNSHINE_USE_PREBUILT_FFMPEG=ON -DBUILD_TESTS=ON -DSUNSHINE_TEST_COVERAGE=ON
 
       - name: Build client and tests
         run: cmake --build cmake-build-client --parallel
@@ -99,13 +99,13 @@ jobs:
         if: '!inputs.publish_release'
         working-directory: artifacts/bin
         env:
-          PACKAGE_NAME: Moonlight-Windows-${{ matrix.arch }}
-        run: cmake -E tar c "../${PACKAGE_NAME}.zip" --format=zip Moonlight.exe assets
+          PACKAGE_NAME: Sunshine-client-Windows-${{ matrix.arch }}
+        run: cmake -E tar c "../${PACKAGE_NAME}.zip" --format=zip SunshineClient.exe assets
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: '!inputs.publish_release'
         with:
-          name: Moonlight-Windows-${{ matrix.arch }}
+          name: Sunshine-client-Windows-${{ matrix.arch }}
           path: artifacts/*.zip
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -149,18 +149,18 @@ jobs:
           for arch in AMD64 ARM64; do
             (
               cd "Windows-signing-input-${arch}" || exit
-              cmake -E tar c "../Moonlight-Windows-${arch}.zip" --format=zip Moonlight.exe assets
+              cmake -E tar c "../Sunshine-client-Windows-${arch}.zip" --format=zip SunshineClient.exe assets
             )
           done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: Moonlight-Windows-AMD64
-          path: artifacts/Moonlight-Windows-AMD64.zip
+          name: Sunshine-client-Windows-AMD64
+          path: artifacts/Sunshine-client-Windows-AMD64.zip
           if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: Moonlight-Windows-ARM64
-          path: artifacts/Moonlight-Windows-ARM64.zip
+          name: Sunshine-client-Windows-ARM64
+          path: artifacts/Sunshine-client-Windows-ARM64.zip
           if-no-files-found: error

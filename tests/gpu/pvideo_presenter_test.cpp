@@ -230,7 +230,7 @@ int pb_busy() {
  * @param static_scanout Whether the presenter requested a single color page.
  * @return The simulated initialization result.
  */
-extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout) {
+extern "C" int sunshine_pb_init_pvideo_scanout(bool static_scanout) {
   ++hardware().initializations;
   hardware().staticScanout = static_scanout;
   hardware().originalStart = VIDEOREG(CRTC_START);
@@ -247,7 +247,7 @@ extern "C" int moonlight_pb_init_pvideo_scanout(bool static_scanout) {
 }
 
 /** @brief Queue depth detachment after the GPU background and overlay buffers are ready. */
-extern "C" void moonlight_pb_detach_depth_stencil() {
+extern "C" void sunshine_pb_detach_depth_stencil() {
   EXPECT_TRUE(hardware().staticScanout);
   EXPECT_TRUE(hardware().backgroundCleared);
   EXPECT_GE(hardware().allocations.size(), 2U);
@@ -259,7 +259,7 @@ extern "C" void moonlight_pb_detach_depth_stencil() {
 }
 
 /** @brief Record release only after a queued depth detachment has finished. */
-extern "C" void moonlight_pb_release_detached_depth_stencil() {
+extern "C" void sunshine_pb_release_detached_depth_stencil() {
   auto &depth = hardware().depthSurface;
   EXPECT_GT(depth.detachments, depth.releases);
   EXPECT_EQ(pb_busy(), 0);

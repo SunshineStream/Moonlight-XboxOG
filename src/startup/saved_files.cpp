@@ -242,7 +242,7 @@ namespace startup {
       return append_error(errorMessage, "Saved file deletion requires a valid path");
     }
     if (!path_is_managed_saved_file(path, resolvedConfig)) {
-      return append_error(errorMessage, "Refused to delete a file outside the Moonlight-managed storage set");
+      return append_error(errorMessage, "Refused to delete a file outside the Sunshine-managed storage set");
     }
 
     if (std::remove(path.c_str()) == 0) {

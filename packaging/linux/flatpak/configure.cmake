@@ -6,8 +6,8 @@ if(NOT GITHUB_CLONE_URL OR NOT GITHUB_COMMIT)
 endif()
 
 # Configure the application checkout and stage the checked-in dependency manifests.
-set(_app_id dev.lizardbyte.app.Moonlight)
+set(_app_id dev.lizardbyte.app.SunshineClient)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/${_app_id}.yml" "${_app_id}.yml" @ONLY)
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/modules" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
 set(_patch sdl3-steam-controller-trigger-clicks-and-haptics.patch)
-configure_file("${source_dir}/cmake/patches/${_patch}" "modules/moonlight/${_patch}" COPYONLY)
+configure_file("${source_dir}/cmake/patches/${_patch}" "modules/sunshine-client/${_patch}" COPYONLY)

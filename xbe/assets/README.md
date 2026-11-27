@@ -10,11 +10,14 @@ It also expands compact question-mark SVG arc flags for the older NanoSVG parser
 Downloaded sources remain in the build directory. The complete Lucide license, including Feather
 attribution, is included at `assets/licenses/lucide.txt` on the ISO.
 
-The grayscale host moons are first-party SVG artwork. Full, half and
-crescent phases indicate online paired, online unpaired and offline PCs respectively. The orbit is
-rendered separately so selection remains independent of reachability.
+The first-party host icons show a filled sun for paired online PCs, an outlined sun for unpaired online PCs,
+and a dim ring for offline PCs. The amber focus ring is rendered separately from the status icon.
 
-The Moonlight logo and controller button glyphs are separate bundled assets.
+The [Sunshine logo](../../sunshine-logo.svg) uses the official paths and colors from the host project.
+Run `uv run --locked python scripts/generate_sunshine_logo.py` from the repository root after changing it.
+The script updates the bundled logo, the four-arc atlas used by the startup and save animations, and
+the Android launcher and TV vectors.
+
 The first-party left/right stick glyphs are also used by the stream wheels and on-screen keyboard.
 The shell and stream controls share the same asset-path resolver and SVG rasterizer. Bundled paths
 use Xbox backslashes throughout for compatibility with the Xbox file APIs.

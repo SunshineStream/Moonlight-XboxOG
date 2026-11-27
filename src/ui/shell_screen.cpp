@@ -48,6 +48,7 @@
 #include "src/streaming/session.h"
 #include "src/streaming/video_overlay.h"
 #include "src/ui/asset_path.h"
+#include "src/ui/brand_colors.h"
 #include "src/ui/dialog_surface.h"
 #include "src/ui/host_probe_result_queue.h"
 #include "src/ui/mobile_orientation.h"
@@ -58,7 +59,7 @@
 #include "src/ui/shell_view.h"
 #include "src/ui/svg_assets.h"
 
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
   #include "src/ui/desktop_window.h"
 #endif
 
@@ -91,9 +92,9 @@ namespace {
    * @return True when the shell uses the current window dimensions and display scale.
    */
   bool uses_responsive_shell([[maybe_unused]] SDL_Renderer *renderer) {
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
     return true;
-#elif defined(__ANDROID__) || defined(MOONLIGHT_IOS)
+#elif defined(__ANDROID__) || defined(SUNSHINE_IOS)
     return (SDL_GetWindowFlags(SDL_GetRenderWindow(renderer)) & SDL_WINDOW_RESIZABLE) != 0;
 #else
     return false;
@@ -106,24 +107,13 @@ namespace {
   constexpr Uint32 HOST_PROBE_REFRESH_INTERVAL_MILLISECONDS = 10000U;
   constexpr Uint32 APP_LIST_REFRESH_INTERVAL_MILLISECONDS = 30000U;
 
-  constexpr Uint8 BACKGROUND_RED = 0x0D;
-  constexpr Uint8 BACKGROUND_GREEN = 0x12;
-  constexpr Uint8 BACKGROUND_BLUE = 0x1D;
-  constexpr Uint8 PANEL_RED = 0x1C;
-  constexpr Uint8 PANEL_GREEN = 0x28;
-  constexpr Uint8 PANEL_BLUE = 0x3D;
-  constexpr Uint8 PANEL_ALT_RED = 0x15;
-  constexpr Uint8 PANEL_ALT_GREEN = 0x1E;
-  constexpr Uint8 PANEL_ALT_BLUE = 0x2E;
-  constexpr Uint8 ACCENT_RED = 0x82;
-  constexpr Uint8 ACCENT_GREEN = 0xB4;
-  constexpr Uint8 ACCENT_BLUE = 0xFF;
-  constexpr Uint8 TEXT_RED = 0xF2;
-  constexpr Uint8 TEXT_GREEN = 0xF5;
-  constexpr Uint8 TEXT_BLUE = 0xF8;
-  constexpr Uint8 MUTED_RED = 0xA3;
-  constexpr Uint8 MUTED_GREEN = 0xAB;
-  constexpr Uint8 MUTED_BLUE = 0xB5;
+  using ui::brand::ACCENT;
+  using ui::brand::BACKGROUND;
+  using ui::brand::MUTED;
+  using ui::brand::PANEL;
+  using ui::brand::PANEL_ALT;
+  using ui::brand::TEXT;
+
   constexpr Sint16 TRIGGER_PAGE_SCROLL_THRESHOLD = 16000;
   constexpr Sint16 LEFT_STICK_NAVIGATION_THRESHOLD = input::STICK_NAVIGATION_THRESHOLD;  ///< Shared shell/OSK stick activation threshold.
   constexpr Sint16 LEFT_STICK_NAVIGATION_RELEASE_THRESHOLD = input::STICK_NAVIGATION_RELEASE_THRESHOLD;  ///< Shared hysteresis prevents near-center jitter.
@@ -253,7 +243,7 @@ namespace {
     logging::warn(category, "Holding the failure screen for 5 seconds before exit.");
     SDL_Delay(5000);
 #else
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Moonlight", message.c_str(), nullptr);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Sunshine", message.c_str(), nullptr);
 #endif
     return 1;
   }
@@ -790,10 +780,10 @@ namespace {
    */
   void render_card_surface(SDL_Renderer *renderer, const SDL_Rect &rect, bool selected) {
     if (selected) {
-      fill_rounded_rect(renderer, rect, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF});
-      fill_rounded_rect(renderer, {rect.x + 3, rect.y + 3, rect.w - 6, rect.h - 6}, {PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xFF}, 5);
+      fill_rounded_rect(renderer, rect, ACCENT);
+      fill_rounded_rect(renderer, {rect.x + 3, rect.y + 3, rect.w - 6, rect.h - 6}, PANEL, 5);
     } else {
-      fill_rounded_rect(renderer, rect, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF});
+      fill_rounded_rect(renderer, rect, PANEL_ALT);
     }
   }
 
@@ -1156,7 +1146,7 @@ namespace {
       return TTF_GetFontLineSkip(font);
     }
 
-    SDL_Surface *surface = TTF_RenderText_Blended_Wrapped(font, renderText.c_str(), 0, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, static_cast<Uint32>(maxWidth));
+    SDL_Surface *surface = TTF_RenderText_Blended_Wrapped(font, renderText.c_str(), 0, TEXT, static_cast<Uint32>(maxWidth));
     if (surface == nullptr) {
       return TTF_GetFontLineSkip(font);
     }
@@ -1200,7 +1190,7 @@ namespace {
     for (std::size_t index = 0; index < viewModel.keypad.lines.size(); ++index) {
       const std::string &line = viewModel.keypad.lines[index];
       if (cache != nullptr) {
-        if (!ensure_wrapped_text_texture(renderer, font, line, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalInnerWidth, &cache->lineTextures[index])) {
+        if (!ensure_wrapped_text_texture(renderer, font, line, TEXT, modalInnerWidth, &cache->lineTextures[index])) {
           modalTextHeight += measure_wrapped_text_height(font, line, modalInnerWidth) + 6;
           continue;
         }
@@ -1330,7 +1320,7 @@ namespace {
     AssetTextureCache *assetCache
   ) {
     const SDL_Color seedColor = placeholder_color(tile.name);
-    fill_rect(renderer, rect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE);
+    fill_rect(renderer, rect, PANEL_ALT.r, PANEL_ALT.g, PANEL_ALT.b);
     // A subdued tint distinguishes missing covers without imitating game artwork.
     fill_rect(renderer, rect, seedColor.r, seedColor.g, seedColor.b, 0x24);
     fill_rect(renderer, {rect.x, rect.y + rect.h - 3, rect.w, 3}, seedColor.r, seedColor.g, seedColor.b);
@@ -1340,7 +1330,7 @@ namespace {
     if (render_asset_icon(renderer, assetCache, iconPath, icon)) {
       return true;
     }
-    return render_text_centered_simple(renderer, labelFont, app_monogram(tile), {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, icon);
+    return render_text_centered_simple(renderer, labelFont, app_monogram(tile), TEXT, icon);
   }
 
   void draw_line(SDL_Renderer *renderer, int x1, int y1, int x2, int y2, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha = 0xFF) {  // NOSONAR(cpp:S107) low-level draw helper intentionally mirrors SDL primitive arguments
@@ -1367,7 +1357,7 @@ namespace {
     CoverArtTextureCache *textureCache,
     AssetTextureCache *assetCache
   ) {
-    fill_rect(renderer, rect, PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF);
+    fill_rect(renderer, rect, PANEL_ALT.r, PANEL_ALT.g, PANEL_ALT.b, 0xFF);
     if (SDL_Texture *texture = tile.boxArtCached ? load_cover_art_texture(renderer, textureCache, tile.boxArtCacheKey) : nullptr; texture != nullptr) {
       if (!render_texture_fill(renderer, texture, rect)) {
         return false;
@@ -1381,13 +1371,13 @@ namespace {
     // Captions live below the artwork; never cover game titles baked into the image.
     if (tile.selected) {
       for (int inset = 1; inset <= 3; ++inset) {
-        draw_rect(renderer, {rect.x - inset, rect.y - inset, rect.w + inset * 2, rect.h + inset * 2}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
+        draw_rect(renderer, {rect.x - inset, rect.y - inset, rect.w + inset * 2, rect.h + inset * 2}, ACCENT.r, ACCENT.g, ACCENT.b);
       }
     }
     if (tile.running) {
       const int size = std::min(42, std::max(24, rect.w / 3));
       const SDL_Rect paused {rect.x + rect.w - size - 8, rect.y + rect.h - size - 8, size, size};
-      fill_rounded_rect(renderer, paused, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xEF}, 6);
+      fill_rounded_rect(renderer, paused, {BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, 0xEF}, 6);
       render_asset_icon(renderer, assetCache, "icons\\pause.svg", {paused.x + 4, paused.y + 4, size - 8, size - 8});
     }
     const std::string badge = tile.badgeLabel;
@@ -1395,8 +1385,8 @@ namespace {
       const int badgeHeight = TTF_GetFontLineSkip(labelFont) + 8;
       const int badgeWidth = std::min(rect.w - 12, static_cast<int>(badge.size()) * std::max(7, TTF_GetFontHeight(labelFont) / 2) + 16);
       const SDL_Rect badgeRect {rect.x + 6, rect.y + 6, badgeWidth, badgeHeight};
-      fill_rounded_rect(renderer, badgeRect, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xEF}, 4);
-      if (!render_text_centered_simple(renderer, labelFont, badge, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, badgeRect)) {
+      fill_rounded_rect(renderer, badgeRect, {BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, 0xEF}, 4);
+      if (!render_text_centered_simple(renderer, labelFont, badge, TEXT, badgeRect)) {
         return false;
       }
     }
@@ -1453,20 +1443,20 @@ namespace {
   bool render_log_viewer_lines(SDL_Renderer *renderer, TTF_Font *smallFont, const ui::ShellViewModel &viewModel, const SDL_Rect &textRect, const LogViewerLayout &layout) {
     int contentCursorY = textRect.y + 6;
     if (layout.firstVisibleIndex > 0U) {
-      if (!render_text_line_simple(renderer, smallFont, "Earlier lines above", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, textRect.x + 6, contentCursorY, std::max(1, textRect.w - 12))) {
+      if (!render_text_line_simple(renderer, smallFont, "Earlier lines above", ACCENT, textRect.x + 6, contentCursorY, std::max(1, textRect.w - 12))) {
         return false;
       }
       contentCursorY += TTF_GetFontLineSkip(smallFont) + 4;
     }
 
     if (layout.visibleLines.size() == 1U && layout.visibleLines.front() == nullptr) {
-      if (!render_text_line_simple(renderer, smallFont, "The log file is empty.", {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, textRect.x + 6, contentCursorY, std::max(1, textRect.w - 12))) {
+      if (!render_text_line_simple(renderer, smallFont, "The log file is empty.", TEXT, textRect.x + 6, contentCursorY, std::max(1, textRect.w - 12))) {
         return false;
       }
     } else {
       for (const std::string *line : layout.visibleLines) {
         int drawnHeight = 0;
-        if (!render_text_line_simple(renderer, smallFont, truncate_text_for_render(*line, LOG_VIEWER_MAX_RENDER_CHARACTERS), {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, textRect.x + 6, contentCursorY, std::max(1, textRect.w - 12), &drawnHeight)) {
+        if (!render_text_line_simple(renderer, smallFont, truncate_text_for_render(*line, LOG_VIEWER_MAX_RENDER_CHARACTERS), TEXT, textRect.x + 6, contentCursorY, std::max(1, textRect.w - 12), &drawnHeight)) {
           return false;
         }
         contentCursorY += drawnHeight + 4;
@@ -1474,7 +1464,7 @@ namespace {
     }
 
     if (viewModel.logViewer.scrollOffset > 0U) {
-      return render_text_line_simple(renderer, smallFont, "Newer lines below", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, textRect.x + 6, std::max(textRect.y + 6, textRect.y + textRect.h - TTF_GetFontLineSkip(smallFont) - 6), std::max(1, textRect.w - 12));
+      return render_text_line_simple(renderer, smallFont, "Newer lines below", MUTED, textRect.x + 6, std::max(textRect.y + 6, textRect.y + textRect.h - TTF_GetFontLineSkip(smallFont) - 6), std::max(1, textRect.w - 12));
     }
     return true;
   }
@@ -1486,8 +1476,8 @@ namespace {
       return;
     }
 
-    fill_rect(renderer, trackRect, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xA0);
-    draw_rect(renderer, trackRect, TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0x30);
+    fill_rect(renderer, trackRect, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, 0xA0);
+    draw_rect(renderer, trackRect, TEXT.r, TEXT.g, TEXT.b, 0x30);
 
     const int thumbHeight = std::max(24, (trackRect.h * visibleItemCount) / totalItemCount);
     const int maxThumbTravel = std::max(0, trackRect.h - thumbHeight);
@@ -1495,7 +1485,7 @@ namespace {
     const int clampedStartItem = std::clamp(startItemIndex, 0, std::max(0, totalItemCount - visibleItemCount));
     const int thumbY = trackRect.y + ((maxThumbTravel * clampedStartItem) / maxStartItem);
     const SDL_Rect thumbRect {trackRect.x + 1, thumbY, std::max(1, trackRect.w - 2), thumbHeight};
-    fill_rect(renderer, thumbRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xD0);
+    fill_rect(renderer, thumbRect, ACCENT.r, ACCENT.g, ACCENT.b, 0xD0);
   }
 
   /**
@@ -1529,12 +1519,12 @@ namespace {
     const SDL_Rect modalRect = log_viewer_rect(viewModel, screenWidth, screenHeight, outerMargin);
     render_dialog_surface(renderer, modalRect);
 
-    if (!render_text_line_simple(renderer, bodyFont, viewModel.modal.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 18, modalRect.y + 28, modalRect.w - 36)) {
+    if (!render_text_line_simple(renderer, bodyFont, viewModel.modal.title, TEXT, modalRect.x + 18, modalRect.y + 28, modalRect.w - 36)) {
       return false;
     }
 
     int pathHeight = 0;
-    if (!render_text_line_simple(renderer, smallFont, "Path: " + viewModel.logViewer.path, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 18, modalRect.y + 64, modalRect.w - 36, &pathHeight)) {
+    if (!render_text_line_simple(renderer, smallFont, "Path: " + viewModel.logViewer.path, TEXT, modalRect.x + 18, modalRect.y + 64, modalRect.w - 36, &pathHeight)) {
       return false;
     }
 
@@ -1552,7 +1542,7 @@ namespace {
       std::max(1, modalRect.w - 36),
       std::max(1, contentBottom - contentAreaY),
     };
-    fill_rect(renderer, contentRect, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0x70);
+    fill_rect(renderer, contentRect, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, 0x70);
 
     const std::size_t maxOffset = viewModel.logViewer.lines.size() > 1U ? viewModel.logViewer.lines.size() - 1U : 0U;
     const std::size_t clampedOffset = std::min(viewModel.logViewer.scrollOffset, maxOffset);
@@ -1623,11 +1613,11 @@ namespace {
    */
   void restore_action_row_backgrounds(SDL_Renderer *renderer, const FolderDialogCache &folder, const ActionRowsLayout &layout) {
     if (layout.windowChanged) {
-      fill_rect(renderer, layout.bounds, 0x15, 0x1E, 0x2E);
+      fill_rect(renderer, layout.bounds, PANEL_ALT.r, PANEL_ALT.g, PANEL_ALT.b);
     } else {
       for (const auto index : {folder.selected, layout.selectedIndex}) {
         if (index >= layout.startIndex && index < layout.endIndex) {
-          fill_rect(renderer, {layout.bounds.x, layout.bounds.y + static_cast<int>(index - layout.startIndex) * layout.rowStep, layout.contentWidth, layout.rowHeight}, 0x15, 0x1E, 0x2E);
+          fill_rect(renderer, {layout.bounds.x, layout.bounds.y + static_cast<int>(index - layout.startIndex) * layout.rowStep, layout.contentWidth, layout.rowHeight}, PANEL_ALT.r, PANEL_ALT.g, PANEL_ALT.b);
         }
       }
     }
@@ -1706,9 +1696,9 @@ namespace {
     const int y = layout.bounds.y + static_cast<int>(index - layout.startIndex) * layout.rowStep;
     const SDL_Rect rowRect {layout.bounds.x, y, layout.contentWidth, layout.rowHeight};
     if (row.selected) {
-      fill_rounded_rect(renderer, rowRect, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, static_cast<Uint8>(active ? 0x28 : 0x12)}, 7);
+      fill_rounded_rect(renderer, rowRect, {ACCENT.r, ACCENT.g, ACCENT.b, static_cast<Uint8>(active ? 0x28 : 0x12)}, 7);
       if (active) {
-        fill_rect(renderer, {rowRect.x, rowRect.y + 8, 3, rowRect.h - 16}, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
+        fill_rect(renderer, {rowRect.x, rowRect.y + 8, 3, rowRect.h - 16}, ACCENT.r, ACCENT.g, ACCENT.b);
       }
     }
 
@@ -1722,16 +1712,16 @@ namespace {
     if (row.checkable) {
       const SDL_Rect checkbox {rowRect.x + rowRect.w - checkboxSize - 14, rowRect.y + (rowRect.h - checkboxSize) / 2, checkboxSize, checkboxSize};
       if (row.checked) {
-        fill_rounded_rect(renderer, checkbox, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, 4);
+        fill_rounded_rect(renderer, checkbox, ACCENT, 4);
         for (int stroke = 0; stroke < 2; ++stroke) {
-          draw_line(renderer, checkbox.x + checkboxSize / 4, checkbox.y + checkboxSize / 2 + stroke, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
-          draw_line(renderer, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, checkbox.x + checkboxSize * 3 / 4, checkbox.y + checkboxSize / 3 + stroke, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE);
+          draw_line(renderer, checkbox.x + checkboxSize / 4, checkbox.y + checkboxSize / 2 + stroke, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b);
+          draw_line(renderer, checkbox.x + checkboxSize * 5 / 12, checkbox.y + checkboxSize * 2 / 3 + stroke, checkbox.x + checkboxSize * 3 / 4, checkbox.y + checkboxSize / 3 + stroke, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b);
         }
       } else {
-        draw_rounded_rect_outline(renderer, checkbox, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, 4);
+        draw_rounded_rect_outline(renderer, checkbox, MUTED, 4);
       }
     }
-    const SDL_Color color = row.enabled ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
+    const SDL_Color color = row.enabled ? TEXT : MUTED;
     const int labelWidth = rowRect.x + rowRect.w - labelX - 12 - (row.checkable ? checkboxSize + 16 : 0);
     const int labelY = rowRect.y + (rowRect.h - TTF_GetFontLineSkip(font)) / 2;
     if (folder != nullptr) {
@@ -1808,11 +1798,11 @@ namespace {
 
     const int iconSize = std::max(18, buttonRect.h - 16);
     const SDL_Rect iconRect {buttonRect.x + 10, buttonRect.y + (buttonRect.h - iconSize) / 2, iconSize, iconSize};
-    if (const bool renderedIcon = !button.iconAssetPath.empty() && render_asset_icon(renderer, assetCache, button.iconAssetPath, iconRect); !renderedIcon && !render_text_centered(renderer, font, button.glyph, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, iconRect)) {
+    if (const bool renderedIcon = !button.iconAssetPath.empty() && render_asset_icon(renderer, assetCache, button.iconAssetPath, iconRect); !renderedIcon && !render_text_centered(renderer, font, button.glyph, TEXT, iconRect)) {
       return false;
     }
 
-    return render_text_line_simple(renderer, smallFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, iconRect.x + iconRect.w + 8, buttonRect.y + std::max(6, (buttonRect.h - TTF_GetFontLineSkip(smallFont)) / 2), buttonRect.w - (iconRect.w + 26));
+    return render_text_line_simple(renderer, smallFont, button.label, TEXT, iconRect.x + iconRect.w + 8, buttonRect.y + std::max(6, (buttonRect.h - TTF_GetFontLineSkip(smallFont)) / 2), buttonRect.w - (iconRect.w + 26));
   }
 
   /**
@@ -1900,7 +1890,7 @@ namespace {
       const SDL_Rect rect {x, bounds.y + (bounds.h - glyphSize) / 2, width, glyphSize};
       if (!key.empty()) {
         draw_rounded_rect_outline(renderer, rect, {0xB8, 0xC2, 0xD0, 0xFF}, 3);
-        render_text_centered_simple(renderer, font, key, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, rect);
+        render_text_centered_simple(renderer, font, key, TEXT, rect);
       } else {
         render_asset_icon(renderer, assets, asset, rect);
       }
@@ -1908,7 +1898,7 @@ namespace {
     };
     draw_glyph(action.iconAssetPath, action.keyLabel, widths.primary);
     draw_glyph(action.secondaryIconAssetPath, action.secondaryKeyLabel, widths.secondary);
-    return x >= right || render_text_line_simple(renderer, font, action.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, x, bounds.y + (bounds.h - TTF_GetFontLineSkip(font)) / 2, right - x);
+    return x >= right || render_text_line_simple(renderer, font, action.label, TEXT, x, bounds.y + (bounds.h - TTF_GetFontLineSkip(font)) / 2, right - x);
   }
 
   /**
@@ -2001,17 +1991,17 @@ namespace {
         render_asset_icon(renderer, assetCache, notification.iconAssetPath, {titleX, card.y + 28, iconSize, iconSize});
         titleX += iconSize + 10;
       }
-      if (!render_text_line_simple(renderer, titleFont, notification.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, titleX, card.y + 28, card.x + card.w - padding - titleX)) {
+      if (!render_text_line_simple(renderer, titleFont, notification.title, TEXT, titleX, card.y + 28, card.x + card.w - padding - titleX)) {
         return false;
       }
       const int footerY = card.y + card.h - padding - actionHeights[offset];
       const int bodyY = card.y + 28 + titleHeight + 8;
       const int bodyBottom = footerY - (notification.actions.empty() ? 0 : 12);
-      if (!render_bounded_text(renderer, bodyFont, notification.message, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {card.x + padding, bodyY, innerWidth, bodyBottom - bodyY})) {
+      if (!render_bounded_text(renderer, bodyFont, notification.message, MUTED, {card.x + padding, bodyY, innerWidth, bodyBottom - bodyY})) {
         return false;
       }
       if (!notification.actions.empty()) {
-        draw_line(renderer, card.x + padding, footerY - 6, card.x + card.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
+        draw_line(renderer, card.x + padding, footerY - 6, card.x + card.w - padding, footerY - 6, MUTED.r, MUTED.g, MUTED.b, 0x25);
         if (!render_footer_actions(renderer, bodyFont, assetCache, notification.actions, {card.x + padding, footerY, innerWidth, actionHeights[offset]}, hints)) {
           return false;
         }
@@ -2087,7 +2077,7 @@ namespace {
       case SDLK_KP_ENTER:
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::enter, shiftPressed);
       case SDLK_ESCAPE:
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       case SDLK_AC_BACK:
 #endif
         return input::map_keyboard_key_to_ui_command(input::KeyboardKey::escape, shiftPressed);
@@ -2649,7 +2639,7 @@ namespace {
     });
     if (saveResult.success) {
       state.settings.dirty = false;
-      logging::info("settings", "Saved Moonlight settings");
+      logging::info("settings", "Saved Sunshine settings");
       return;
     }
 
@@ -2807,7 +2797,7 @@ namespace {
 
     if (std::string errorMessage; !startup::delete_saved_file(update.persistence.savedFileDeletePath, &errorMessage)) {
       state.shell.statusMessage = errorMessage;
-      app::show_notification(state, app::NotificationKind::error, "File not deleted", "The file could not be removed. Restart Moonlight and try again.");
+      app::show_notification(state, app::NotificationKind::error, "File not deleted", "The file could not be removed. Restart Sunshine and try again.");
       logging::warn("storage", errorMessage);
       return;
     }
@@ -2878,7 +2868,7 @@ namespace {
 
     if (std::string errorMessage; !startup::delete_all_saved_files(&errorMessage)) {
       state.shell.statusMessage = errorMessage;
-      app::show_notification(state, app::NotificationKind::error, "Reset incomplete", "Some saved data could not be removed. Restart Moonlight and try again.");
+      app::show_notification(state, app::NotificationKind::error, "Reset incomplete", "Some saved data could not be removed. Restart Sunshine and try again.");
       logging::warn("storage", errorMessage);
       return;
     }
@@ -2888,7 +2878,7 @@ namespace {
     state.settings.savedFiles.clear();
     state.settings.savedFilesDirty = true;
     state.shell.statusMessage = "Factory reset completed";
-    app::show_notification(state, app::NotificationKind::success, "Reset complete", "Moonlight's saved PCs, settings and cached artwork have been removed.", 5000U);
+    app::show_notification(state, app::NotificationKind::success, "Reset complete", "Sunshine's saved PCs, settings and cached artwork have been removed.", 5000U);
     clear_cover_art_texture_cache(coverArtTextureCache);
     app::set_log_file_path(state, logging::default_log_file_path());
     logging::info("storage", state.shell.statusMessage);
@@ -3524,12 +3514,12 @@ namespace {
     }
 
     if (!discoveredHosts.empty()) {
-      logging::debug("hosts", "Auto discovery found " + std::to_string(discoveredHosts.size()) + " Moonlight-compatible host(s)");
+      logging::debug("hosts", "Auto discovery found " + std::to_string(discoveredHosts.size()) + " GameStream-compatible host(s)");
       if (nextHostProbeTick != nullptr) {
         *nextHostProbeTick = 0U;
       }
     } else {
-      logging::info("hosts", "Auto discovery completed without finding any Moonlight-compatible hosts. If you are using xemu's default user-mode network, use TAP networking or add the host manually.");
+      logging::info("hosts", "Auto discovery completed without finding any GameStream-compatible hosts. If you are using xemu's default user-mode network, use TAP networking or add the host manually.");
     }
     if (persistedHostCount > 0U && state.hosts.dirty) {
       persist_hosts(state, feedback);
@@ -3692,7 +3682,7 @@ namespace {
       update.requests.pairingAddress,
       app::effective_host_port(update.requests.pairingPort),
       update.requests.pairingPin,
-      "MoonlightXboxOG",
+      {},
       {},
     };
 
@@ -4002,7 +3992,7 @@ namespace {
   }
 
   struct BodyLinesRenderLayout {
-    SDL_Color color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
+    SDL_Color color = TEXT;
     int x = 0;
     int y = 0;
     int maxWidth = 0;
@@ -4050,10 +4040,10 @@ namespace {
     const int innerHeight = bodyPanel.h - panelPadding * 2;
     const auto layout = ui::calculate_settings_detail_layout({bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, innerWidth, innerHeight}, TTF_GetFontLineSkip(smallFont));
     // Crop text to the layout bounds and keep option-row positions independent of glyph metrics.
-    const bool success = render_text_line_simple(renderer, smallFont, viewModel.content.selectedMenuRowLabel, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.title.x, layout.title.y, layout.title.w) &&
-                         render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowDescription, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, sdl_rect(layout.description));
-    draw_line(renderer, layout.optionsHeader.x, layout.optionsHeader.y - 10, layout.optionsHeader.x + layout.optionsHeader.w, layout.optionsHeader.y - 10, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
-    return success && render_text_line_simple(renderer, smallFont, "Options", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.optionsHeader.x, layout.optionsHeader.y, layout.optionsHeader.w) && render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, sdl_rect(layout.options), rowHeight, {nullptr, viewModel.content.rightPanelActive});
+    const bool success = render_text_line_simple(renderer, smallFont, viewModel.content.selectedMenuRowLabel, TEXT, layout.title.x, layout.title.y, layout.title.w) &&
+                         render_bounded_text(renderer, smallFont, viewModel.content.selectedMenuRowDescription, MUTED, sdl_rect(layout.description));
+    draw_line(renderer, layout.optionsHeader.x, layout.optionsHeader.y - 10, layout.optionsHeader.x + layout.optionsHeader.w, layout.optionsHeader.y - 10, MUTED.r, MUTED.g, MUTED.b, 0x30);
+    return success && render_text_line_simple(renderer, smallFont, "Options", MUTED, layout.optionsHeader.x, layout.optionsHeader.y, layout.optionsHeader.w) && render_action_rows(renderer, bodyFont, viewModel.content.detailMenuRows, sdl_rect(layout.options), rowHeight, {nullptr, viewModel.content.rightPanelActive});
   }
 
   /**
@@ -4089,7 +4079,7 @@ namespace {
       const int coverWidth = std::min(cell.w, coverHeight * 2 / 3);
       const SDL_Rect cover {cell.x + (cell.w - coverWidth) / 2, cell.y, coverWidth, coverHeight};
       const auto &tile = viewModel.content.appTiles[index];
-      if (!render_app_cover(renderer, smallFont, tile, cover, textureCache, assetCache) || !render_text_centered_simple(renderer, smallFont, tile.name, tile.selected ? SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF} : SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {cell.x, cell.y + coverHeight + 8, cell.w, captionHeight - 8})) {
+      if (!render_app_cover(renderer, smallFont, tile, cover, textureCache, assetCache) || !render_text_centered_simple(renderer, smallFont, tile.name, tile.selected ? TEXT : MUTED, {cell.x, cell.y + coverHeight + 8, cell.w, captionHeight - 8})) {
         return false;
       }
     }
@@ -4130,10 +4120,10 @@ namespace {
       if (tile.selected) {
         render_asset_icon(renderer, assetCache, "hosts\\orbit.svg", icon);
       }
-      if (!render_text_centered_simple(renderer, bodyFont, tile.displayName, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, {card.x + 12, nameY, card.w - 24, nameHeight})) {
+      if (!render_text_centered_simple(renderer, bodyFont, tile.displayName, TEXT, {card.x + 12, nameY, card.w - 24, nameHeight})) {
         return false;
       }
-      const SDL_Color statusColor {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
+      const SDL_Color statusColor = MUTED;
       if (!render_text_centered_simple(renderer, smallFont, tile.statusLabel, statusColor, {card.x + 12, nameY + nameHeight + 6, card.w - 24, statusHeight})) {
         return false;
       }
@@ -4160,7 +4150,7 @@ namespace {
       renderer,
       smallFont,
       viewModel.content.bodyLines,
-      {{TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, gridRect.x + 24, gridRect.y + top, gridRect.w - 48, lineGap}
+      {TEXT, gridRect.x + 24, gridRect.y + top, gridRect.w - 48, lineGap}
     );
   }
 
@@ -4209,7 +4199,7 @@ namespace {
     if (statusIconSize > 0) {
       render_asset_icon(renderer, assetCache, modal.iconAssetPath, {bounds.x + padding, bounds.y + 28, statusIconSize, statusIconSize}, modal.busy ? ui::shell_spinner_angle(SDL_GetTicks()) : 0.0);
     }
-    if (!render_text_line_simple(renderer, titleFont, modal.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, bounds.x + padding + titleInset, bounds.y + 28, innerWidth - titleInset)) {
+    if (!render_text_line_simple(renderer, titleFont, modal.title, TEXT, bounds.x + padding + titleInset, bounds.y + 28, innerWidth - titleInset)) {
       return false;
     }
     const int footerY = bounds.y + bounds.h - padding - footerHeight;
@@ -4221,7 +4211,7 @@ namespace {
     const int textBottom = footerY - actionSpace - 12;
     for (const auto &line : modal.lines) {
       int drawnHeight = 0;
-      if (!render_bounded_text(renderer, smallFont, line, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {bounds.x + padding, cursorY, innerWidth, textBottom - cursorY}, &drawnHeight)) {
+      if (!render_bounded_text(renderer, smallFont, line, MUTED, {bounds.x + padding, cursorY, innerWidth, textBottom - cursorY}, &drawnHeight)) {
         return false;
       }
       cursorY += drawnHeight + lineGap;
@@ -4239,9 +4229,9 @@ namespace {
       ui::draw_dialog_progress(renderer, {bounds.x + padding, footerY + (footerHeight - progressHeight) / 2, innerWidth, progressHeight}, static_cast<int>(*modal.streamStartupStep), ui::STREAM_STARTUP_STEP_COUNT);
       return true;
     }
-    draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
+    draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED.r, MUTED.g, MUTED.b, 0x25);
     if (modal.busy) {
-      return render_text_line_simple(renderer, smallFont, "Please wait...", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, bounds.x + padding, footerY + 8, innerWidth);
+      return render_text_line_simple(renderer, smallFont, "Please wait...", ACCENT, bounds.x + padding, footerY + 8, innerWidth);
     }
     return render_footer_actions(renderer, smallFont, assetCache, footerActions, {bounds.x + padding, footerY + (footerHeight - hintHeight) / 2, innerWidth, hintHeight}, hints);
   }
@@ -4279,7 +4269,7 @@ namespace {
     const SDL_Rect bounds = sdl_rect(ui::calculate_shell_dialog(width, height, dialogWidth, desiredHeight));
     fill_rect(renderer, displayBounds, 0, 0, 0, 0xA0);
     render_dialog_surface(renderer, bounds);
-    if (!ensure_single_line_text_texture(renderer, bodyFont, viewModel.keypad.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, innerWidth, &cache->titleTexture) || !render_cached_text_texture(renderer, cache->titleTexture, bounds.x + padding, bounds.y + 28)) {
+    if (!ensure_single_line_text_texture(renderer, bodyFont, viewModel.keypad.title, TEXT, innerWidth, &cache->titleTexture) || !render_cached_text_texture(renderer, cache->titleTexture, bounds.x + padding, bounds.y + 28)) {
       return false;
     }
     int cursorY = bounds.y + padding + titleHeight + 12;
@@ -4298,17 +4288,17 @@ namespace {
         const SDL_Rect octetRect = sdl_rect(octets[index]);
         render_card_surface(renderer, octetRect, index == viewModel.keypad.activeOctet);
         const auto &digits = viewModel.keypad.addressOctets[index];
-        const SDL_Color color = digits.empty() ? SDL_Color {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF} : SDL_Color {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
+        const SDL_Color color = digits.empty() ? MUTED : TEXT;
         if (!render_text_centered_simple(renderer, bodyFont, digits.empty() ? "___" : digits, color, octetRect)) {
           return false;
         }
-        if (index < 3U && !render_text_centered_simple(renderer, bodyFont, ".", {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, {octetRect.x + octetRect.w, valueRect.y, separatorWidth, valueRect.h})) {
+        if (index < 3U && !render_text_centered_simple(renderer, bodyFont, ".", MUTED, {octetRect.x + octetRect.w, valueRect.y, separatorWidth, valueRect.h})) {
           return false;
         }
       }
     } else {
-      fill_rounded_rect(renderer, valueRect, {BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF}, 6);
-      if (!render_text_line_simple(renderer, bodyFont, viewModel.keypad.value, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, valueRect.x + 12, valueRect.y + 8, valueRect.w - 24)) {
+      fill_rounded_rect(renderer, valueRect, BACKGROUND, 6);
+      if (!render_text_line_simple(renderer, bodyFont, viewModel.keypad.value, TEXT, valueRect.x + 12, valueRect.y + 8, valueRect.w - 24)) {
         return false;
       }
     }
@@ -4332,11 +4322,11 @@ namespace {
         key = {left + 1, keysY + button.row * (keyHeight + gap), right - left - 3, button.height * (keyHeight + gap) - gap};
       }
       render_card_surface(renderer, key, button.selected);
-      if (!ensure_single_line_text_texture(renderer, bodyFont, button.label, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, key.w, &cache->buttonLabelTextures[index]) || !render_cached_centered_text_texture(renderer, cache->buttonLabelTextures[index], key)) {
+      if (!ensure_single_line_text_texture(renderer, bodyFont, button.label, TEXT, key.w, &cache->buttonLabelTextures[index]) || !render_cached_centered_text_texture(renderer, cache->buttonLabelTextures[index], key)) {
         return false;
       }
     }
-    draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x25);
+    draw_line(renderer, bounds.x + padding, footerY - 6, bounds.x + bounds.w - padding, footerY - 6, MUTED.r, MUTED.g, MUTED.b, 0x25);
     const auto &actions = viewModel.keypad.footerActions;
     return render_footer_actions(renderer, smallFont, assetCache, actions, {bounds.x + padding, footerY, innerWidth, footerHeight}, hints);
   }
@@ -4469,8 +4459,8 @@ namespace {
    */
   bool render_screenshot_viewer(SDL_Renderer *renderer, TTF_Font *bodyFont, TTF_Font *smallFont, const ui::ShellViewModel &view, const SDL_Rect &bounds, ScreenshotTextureCache &cache) {
     load_screenshot_texture(renderer, view.screenshot.path, cache);
-    const SDL_Color text {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF};
-    const SDL_Color muted {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF};
+    const SDL_Color text = TEXT;
+    const SDL_Color muted = MUTED;
     const int heading = TTF_GetFontLineSkip(bodyFont) + 8;
     const int caption = TTF_GetFontLineSkip(smallFont) + 6;
     const SDL_Rect picture {bounds.x, bounds.y + heading + caption, bounds.w, std::max(1, bounds.h - heading - caption * 2 - 12)};
@@ -4530,7 +4520,7 @@ namespace {
       return {};
     }
     if (uses_responsive_shell(renderer)) {
-#if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
+#if defined(__ANDROID__) || defined(SUNSHINE_IOS)
       // Mobile controls must fit between system bars and display cutouts.
       if (SDL_Rect safeArea {}; SDL_GetRenderSafeArea(renderer, &safeArea) && safeArea.w > 0 && safeArea.h > 0) {
         size.framebufferWidth = safeArea.w;
@@ -4637,7 +4627,7 @@ namespace {
     const SDL_Rect contentRect = sdl_rect(layout.content);
     const SDL_Rect footerRect = sdl_rect(layout.footer);
 
-    SDL_SetRenderDrawColor(renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
+    SDL_SetRenderDrawColor(renderer, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, 0xFF);
     if (!SDL_RenderClear(renderer) || !SDL_SetRenderScale(renderer, horizontalScale, verticalScale)) {
       return false;
     }
@@ -4655,7 +4645,7 @@ namespace {
 
     const int footerDividerY = footerRect.y - 1;
     const int contentBottom = contentRect.y + contentRect.h;
-    draw_line(renderer, footerRect.x, footerDividerY, footerRect.x + footerRect.w, footerDividerY, MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0x30);
+    draw_line(renderer, footerRect.x, footerDividerY, footerRect.x + footerRect.w, footerDividerY, MUTED.r, MUTED.g, MUTED.b, 0x30);
     if (screenshotViewer) {
       const SDL_Rect viewerBounds {headerRect.x, headerRect.y, headerRect.w, contentBottom - headerRect.y};
       if (!render_screenshot_viewer(renderer, bodyFont, smallFont, viewModel, viewerBounds, keypadModalLayoutCache->screenshot) || !render_footer_actions(renderer, smallFont, assetCache, footerActions, sdl_rect(layout.footerHints), hints)) {
@@ -4669,11 +4659,11 @@ namespace {
 
     const int logoSize = std::max(26, headerRect.h - 12);
     const SDL_Rect logoRect {headerRect.x, headerRect.y + (headerRect.h - logoSize) / 2, logoSize, logoSize};
-    render_asset_icon(renderer, assetCache, "moonlight-logo.svg", logoRect);
+    render_asset_icon(renderer, assetCache, "sunshine-logo.svg", logoRect);
     const SDL_Rect toolbarRect = sdl_rect(layout.toolbar);
     const bool stackedToolbar = toolbarRect.y != headerRect.y;
     const int brandWidth = stackedToolbar ? headerRect.w : headerRect.w / 3;
-    if (!render_text_line_simple(renderer, bodyFont, viewModel.frame.title, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, logoRect.x + logoSize + 10, headerRect.y + (headerRect.h - TTF_GetFontLineSkip(bodyFont)) / 2, brandWidth - logoSize - 10)) {
+    if (!render_text_line_simple(renderer, bodyFont, viewModel.frame.title, TEXT, logoRect.x + logoSize + 10, headerRect.y + (headerRect.h - TTF_GetFontLineSkip(bodyFont)) / 2, brandWidth - logoSize - 10)) {
       return false;
     }
     if (viewModel.frame.screen == app::ScreenId::hosts) {
@@ -4689,7 +4679,7 @@ namespace {
         buttonX += buttonWidth + buttonGap;
       }
     }
-    if (!render_text_line_simple(renderer, titleFont, viewModel.frame.pageTitle, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, layout.heading.x, layout.heading.y, layout.heading.w) || !render_text_line_simple(renderer, smallFont, viewModel.frame.subtitle, {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, layout.heading.x, layout.heading.y + TTF_GetFontLineSkip(titleFont) + 5, layout.heading.w)) {
+    if (!render_text_line_simple(renderer, titleFont, viewModel.frame.pageTitle, TEXT, layout.heading.x, layout.heading.y, layout.heading.w) || !render_text_line_simple(renderer, smallFont, viewModel.frame.subtitle, MUTED, layout.heading.x, layout.heading.y + TTF_GetFontLineSkip(titleFont) + 5, layout.heading.w)) {
       return false;
     }
 
@@ -4730,11 +4720,11 @@ namespace {
       }
       const SDL_Rect menuPanel = sdl_rect(panels.menu);
       const SDL_Rect bodyPanel = sdl_rect(panels.detail);
-      fill_rounded_rect(renderer, bodyPanel, {PANEL_ALT_RED, PANEL_ALT_GREEN, PANEL_ALT_BLUE, 0xFF});
+      fill_rounded_rect(renderer, bodyPanel, PANEL_ALT);
       // Focus belongs to the selected row, rather than an entire outlined pane.
 
       const SDL_Rect menuHeaderRect {menuPanel.x + panelPadding, menuPanel.y + panelPadding, menuPanel.w - (panelPadding * 2), std::max(34, TTF_GetFontLineSkip(smallFont) + 10)};
-      if (!render_text_line_simple(renderer, smallFont, settingsScreen ? "Categories" : "Actions", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, menuHeaderRect.x + 10, menuHeaderRect.y + std::max(6, (menuHeaderRect.h - TTF_GetFontLineSkip(smallFont)) / 2), menuHeaderRect.w - 20)) {
+      if (!render_text_line_simple(renderer, smallFont, settingsScreen ? "Categories" : "Actions", ACCENT, menuHeaderRect.x + 10, menuHeaderRect.y + std::max(6, (menuHeaderRect.h - TTF_GetFontLineSkip(smallFont)) / 2), menuHeaderRect.w - 20)) {
         return false;
       }
 
@@ -4752,7 +4742,7 @@ namespace {
               renderer,
               bodyFont,
               viewModel.content.bodyLines,
-              {{TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, bodyPanel.w - (panelPadding * 2), 8}
+              {TEXT, bodyPanel.x + panelPadding, bodyPanel.y + panelPadding, bodyPanel.w - (panelPadding * 2), 8}
             )) {
           return false;
         }
@@ -4781,16 +4771,16 @@ namespace {
       };
       SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
       fill_rect(renderer, overlayRect, 0x00, 0x00, 0x00, 0xD8);
-      draw_rect(renderer, overlayRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF);
+      draw_rect(renderer, overlayRect, ACCENT.r, ACCENT.g, ACCENT.b, 0xFF);
 
-      if (!render_text_line(renderer, bodyFont, viewModel.overlay.title, {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, overlayRect.x + 16, overlayRect.y + 16, overlayRect.w - 32)) {
+      if (!render_text_line(renderer, bodyFont, viewModel.overlay.title, ACCENT, overlayRect.x + 16, overlayRect.y + 16, overlayRect.w - 32)) {
         return false;
       }
 
       int overlayY = overlayRect.y + 54;
       for (const std::string &line : viewModel.overlay.lines) {
         int drawnHeight = 0;
-        if (!render_text_line(renderer, smallFont, line, {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, overlayRect.x + 16, overlayY, overlayRect.w - 32, &drawnHeight)) {
+        if (!render_text_line(renderer, smallFont, line, TEXT, overlayRect.x + 16, overlayY, overlayRect.w - 32, &drawnHeight)) {
           return false;
         }
         overlayY += drawnHeight + 6;
@@ -4807,11 +4797,11 @@ namespace {
           (screenWidth * 2) / 3,
           (screenHeight * 2) / 3,
         };
-        fill_rect(renderer, modalRect, PANEL_RED, PANEL_GREEN, PANEL_BLUE, 0xF2);
-        draw_rect(renderer, modalRect, ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE);
-        render_text_line_simple(renderer, bodyFont, "Log File", {ACCENT_RED, ACCENT_GREEN, ACCENT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 16, modalRect.w - 32);
-        render_text_line_simple(renderer, smallFont, "The full log viewer could not be rendered safely.", {TEXT_RED, TEXT_GREEN, TEXT_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54, modalRect.w - 32);
-        render_text_line_simple(renderer, smallFont, (viewModel.modal.footerActions.empty() || viewModel.modal.footerActions.back().keyLabel.empty() ? "Press B to close." : "Press Esc to close."), {MUTED_RED, MUTED_GREEN, MUTED_BLUE, 0xFF}, modalRect.x + 16, modalRect.y + 54 + TTF_GetFontLineSkip(smallFont) + 8, modalRect.w - 32);
+        fill_rect(renderer, modalRect, PANEL.r, PANEL.g, PANEL.b, 0xF2);
+        draw_rect(renderer, modalRect, ACCENT.r, ACCENT.g, ACCENT.b);
+        render_text_line_simple(renderer, bodyFont, "Log File", ACCENT, modalRect.x + 16, modalRect.y + 16, modalRect.w - 32);
+        render_text_line_simple(renderer, smallFont, "The full log viewer could not be rendered safely.", TEXT, modalRect.x + 16, modalRect.y + 54, modalRect.w - 32);
+        render_text_line_simple(renderer, smallFont, (viewModel.modal.footerActions.empty() || viewModel.modal.footerActions.back().keyLabel.empty() ? "Press B to close." : "Press Esc to close."), MUTED, modalRect.x + 16, modalRect.y + 54 + TTF_GetFontLineSkip(smallFont) + 8, modalRect.w - 32);
       }
     } else if (viewModel.modal.visible && !render_shell_dialog(renderer, fonts, assetCache, viewModel.modal, screenWidth, screenHeight, folderBrowser ? folder : nullptr)) {
       return false;
@@ -5114,7 +5104,7 @@ namespace {
     if (event.repeat != 0 || inputState == nullptr) {
       return input::UiCommand::none;
     }
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
     if (event.key == SDLK_F11) {
       ui::toggle_desktop_fullscreen(event.windowID);
       return input::UiCommand::none;
@@ -5131,7 +5121,7 @@ namespace {
     return inputState->keyboardNavigation.press(event.scancode, translate_keyboard_key(event.key, event.mod), SDL_GetTicks());
   }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   /**
    * @brief Translate a mouse release while ignoring SDL's synthetic touch mouse events.
    * @param state Shell state and current input device.
@@ -5196,7 +5186,7 @@ namespace {
           set_shell_input_device(state, inputState, input::UiInputDevice::gamepad);
         }
         return translate_trigger_axis(event.gaxis, &inputState->leftTriggerPressed, &inputState->rightTriggerPressed);
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       case SDL_EVENT_MOUSE_BUTTON_UP:
         return handle_shell_mouse_release(state, event.button, inputState);
       case SDL_EVENT_MOUSE_WHEEL:
@@ -5529,7 +5519,7 @@ namespace {
     }
 
     SDL_SetRenderDrawBlendMode(resources->renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(resources->renderer, BACKGROUND_RED, BACKGROUND_GREEN, BACKGROUND_BLUE, 0xFF);
+    SDL_SetRenderDrawColor(resources->renderer, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, 0xFF);
     SDL_RenderClear(resources->renderer);
     SDL_RenderPresent(resources->renderer);
 
@@ -5598,7 +5588,7 @@ namespace {
       return false;
     }
 
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
     if ((SDL_GetWindowFlags(SDL_GetRenderWindow(resources->renderer)) & SDL_WINDOW_MINIMIZED) != 0) {
       return true;
     }
@@ -5710,7 +5700,7 @@ namespace {
 
     if (window == nullptr) {
       state.shell.statusMessage = "Streaming requires a valid SDL window.";
-      app::show_notification(state, app::NotificationKind::error, "Couldn't start stream", "Restart Moonlight and try again.");
+      app::show_notification(state, app::NotificationKind::error, "Couldn't start stream", "Restart Sunshine and try again.");
       logging::error("stream", state.shell.statusMessage);
       return true;
     }
@@ -5738,7 +5728,7 @@ namespace {
     std::unique_ptr<SDL_Gamepad, decltype(&SDL_CloseGamepad)> retainedController(std::exchange(resources->controller, nullptr), &SDL_CloseGamepad);
     streaming::StreamSessionReport report;
     logging::info("stream", "Stream startup: menu preparation took " + std::to_string(SDL_GetTicks() - preparationStarted) + " ms");
-#if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
+#if defined(__ANDROID__) || defined(SUNSHINE_IOS)
     ui::set_mobile_streaming_orientation(window, true);
 #endif
     const bool streamStarted = streaming::run_stream_session(
@@ -5752,7 +5742,7 @@ namespace {
       },
       report
     );
-#if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
+#if defined(__ANDROID__) || defined(SUNSHINE_IOS)
     ui::set_mobile_streaming_orientation(window, false);
 #endif
     state.shell.statusMessage = std::move(report.message);

@@ -40,7 +40,7 @@ download_file() {
         return 0
     fi
 
-    curl -fsSL -A 'Moonlight-XboxOG setup-xemu' -o "$destination" "$uri"
+    curl -fsSL -A 'Sunshine-client setup-xemu' -o "$destination" "$uri"
 }
 
 extract_archive() {
@@ -97,7 +97,7 @@ copy_tree_preserving_existing() {
 }
 
 latest_xemu_tag() {
-    curl -fsSL --proto '=https' --proto-redir '=https' -A 'Moonlight-XboxOG setup-xemu' \
+    curl -fsSL --proto '=https' --proto-redir '=https' -A 'Sunshine-client setup-xemu' \
         'https://api.github.com/repos/xemu-project/xemu/releases/latest' |
         sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
         head -n 1

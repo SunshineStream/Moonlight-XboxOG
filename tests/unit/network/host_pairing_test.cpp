@@ -474,7 +474,7 @@ namespace {
                                                                    test_support::kTestIpv4Addresses[test_support::kIpLivingRoom],
                                                                    test_support::kTestPorts[test_support::kPortPairing],
                                                                    "1234",
-                                                                   "MoonlightXboxOG",
+                                                                   "Sunshine Client",
                                                                    identity,
                                                                  },
                                                                  &cancelRequested);
@@ -1306,9 +1306,9 @@ namespace {
     const network::PairingIdentity identity = network::create_pairing_identity();
     ASSERT_TRUE(network::is_valid_pairing_identity(identity));
 
-    EXPECT_EQ(network::pair_host({{}, 47989U, "1234", "MoonlightXboxOG", identity}).message, "Pairing requires a valid host address");
-    EXPECT_EQ(network::pair_host({test_support::kTestIpv4Addresses[test_support::kIpLivingRoom], 47989U, "123", "MoonlightXboxOG", identity}).message, "Pairing requires a four-digit PIN");
-    EXPECT_EQ(network::pair_host({test_support::kTestIpv4Addresses[test_support::kIpLivingRoom], 47989U, "1234", "MoonlightXboxOG", {}}).message, "Client pairing identity is missing or invalid");
+    EXPECT_EQ(network::pair_host({{}, 47989U, "1234", "Sunshine Client", identity}).message, "Pairing requires a valid host address");
+    EXPECT_EQ(network::pair_host({test_support::kTestIpv4Addresses[test_support::kIpLivingRoom], 47989U, "123", "Sunshine Client", identity}).message, "Pairing requires a four-digit PIN");
+    EXPECT_EQ(network::pair_host({test_support::kTestIpv4Addresses[test_support::kIpLivingRoom], 47989U, "1234", "Sunshine Client", {}}).message, "Client pairing identity is missing or invalid");
   }
 
   TEST(HostPairingTest, PairHostShortCircuitsWhenTheHostAlreadyReportsTheClientAsPaired) {
@@ -1328,7 +1328,7 @@ namespace {
       test_support::kTestIpv4Addresses[test_support::kIpLivingRoom],
       47989U,
       "1234",
-      "MoonlightXboxOG",
+      "Sunshine Client",
       identity,
     });
 
@@ -1338,6 +1338,9 @@ namespace {
     EXPECT_EQ(result.message, "The host already reports this client as paired");
   }
 
+  /**
+   * @brief Verify the default Sunshine device name and the host's rejection of the first pairing request.
+   */
   TEST(HostPairingTest, PairHostPreservesThePhaseOneRejectionMessage) {
     const network::PairingIdentity identity = network::create_pairing_identity();
     ASSERT_TRUE(network::is_valid_pairing_identity(identity));
@@ -1350,6 +1353,7 @@ namespace {
         return true;
       }
 
+      EXPECT_NE(request.pathAndQuery.find("&devicename=Sunshine&"), std::string::npos);
       EXPECT_NE(request.pathAndQuery.find("phrase=getservercert"), std::string::npos);
       response->statusCode = 200;
       response->body = make_pair_phase_response("0");
@@ -1360,7 +1364,7 @@ namespace {
       test_support::kTestIpv4Addresses[test_support::kIpLivingRoom],
       47989U,
       "1234",
-      "MoonlightXboxOG",
+      {},
       identity,
     });
 
@@ -1392,7 +1396,7 @@ namespace {
       test_support::kTestIpv4Addresses[test_support::kIpLivingRoom],
       47989U,
       "1234",
-      "MoonlightXboxOG",
+      "Sunshine Client",
       identity,
     });
 
@@ -1418,7 +1422,7 @@ namespace {
       test_support::kTestIpv4Addresses[test_support::kIpLivingRoom],
       47989U,
       pin,
-      "MoonlightXboxOG",
+      "Sunshine Client",
       clientIdentity,
     });
 
@@ -1450,7 +1454,7 @@ namespace {
       test_support::kTestIpv4Addresses[test_support::kIpLivingRoom],
       47989U,
       pin,
-      "MoonlightXboxOG",
+      "Sunshine Client",
       clientIdentity,
     });
 

@@ -6,9 +6,9 @@ for %%I in ("%SCRIPT_DIR%..") do set "PROJECT_ROOT=%%~fI"
 set "CALLER_DIR=%CD%"
 
 call :has_explicit_target %*
-if errorlevel 1 if not defined MOONLIGHT_XEMU_BUILD_DIR if not defined MOONLIGHT_XEMU_ISO_PATH if not defined MOONLIGHT_XEMU_TARGET_PATH (
+if errorlevel 1 if not defined SUNSHINE_XEMU_BUILD_DIR if not defined SUNSHINE_XEMU_ISO_PATH if not defined SUNSHINE_XEMU_TARGET_PATH (
     if /I not "%CALLER_DIR%"=="%PROJECT_ROOT%" (
-        set "MOONLIGHT_XEMU_TARGET_PATH=%CALLER_DIR%"
+        set "SUNSHINE_XEMU_TARGET_PATH=%CALLER_DIR%"
     )
 )
 
@@ -18,7 +18,7 @@ if errorlevel 1 (
 )
 
 pushd "%PROJECT_ROOT%" >nul
-call "%MOONLIGHT_MSYS2_BASH%" -lc "cd \"$1\" && shift && ./scripts/run-xemu.sh \"$@\"" bash "%CD%" %*
+call "%SUNSHINE_MSYS2_BASH%" -lc "cd \"$1\" && shift && ./scripts/run-xemu.sh \"$@\"" bash "%CD%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 popd >nul
 

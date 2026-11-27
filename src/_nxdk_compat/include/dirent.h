@@ -5,7 +5,7 @@
 #pragma once
 #include <errno.h>
 #include <stddef.h>
-typedef struct moonlight_nxdk_directory DIR;  ///< Opaque unsupported directory iterator.
+typedef struct sunshine_nxdk_directory DIR;  ///< Opaque unsupported directory iterator.
 
 /** @brief Directory entry shape required to compile OpenSSL's optional backend. */
 struct dirent {

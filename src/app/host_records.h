@@ -12,7 +12,7 @@
 
 namespace app {
 
-  inline constexpr uint16_t DEFAULT_HOST_PORT = 47989;  ///< Default HTTP port used by Moonlight-compatible hosts.
+  inline constexpr uint16_t DEFAULT_HOST_PORT = 47989;  ///< Default HTTP port used by GameStream-compatible hosts.
 
   /**
    * @brief Pairing state tracked for a saved host record.

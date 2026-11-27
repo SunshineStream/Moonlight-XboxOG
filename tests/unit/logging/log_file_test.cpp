@@ -137,7 +137,7 @@ namespace {
     const std::string filePath = test_log_file_path("source-location.log");
     std::remove(filePath.c_str());
 
-    ASSERT_TRUE(logging::append_log_file_entry({4, logging::LogLevel::info, "app", "with location", {2026, 4, 5, 13, 0, 4, 0}, {"C:\\repo\\Moonlight-XboxOG\\src\\main.cpp", 241}}, filePath));
+    ASSERT_TRUE(logging::append_log_file_entry({4, logging::LogLevel::info, "app", "with location", {2026, 4, 5, 13, 0, 4, 0}, {"C:\\repo\\Sunshine-client\\src\\main.cpp", 241}}, filePath));
 
     const logging::LoadLogFileResult loadedLog = logging::load_log_file(filePath, 0U);
     ASSERT_TRUE(loadedLog.fileFound);

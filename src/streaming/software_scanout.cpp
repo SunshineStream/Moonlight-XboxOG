@@ -51,7 +51,7 @@ namespace {
 
 namespace streaming {
   void SoftwareScanout::StagingBufferDeleter::operator()(std::byte *buffer) const noexcept {
-    moonlight_ffmpeg_aligned_free(buffer);
+    sunshine_ffmpeg_aligned_free(buffer);
   }
 
   SoftwareScanout::~SoftwareScanout() {
@@ -72,7 +72,7 @@ namespace streaming {
         // A second HD scanout allocation can reuse VRAM from the boot logo.
         // xemu may select the cached GPU texture at that address instead of
         // the CPU framebuffer. Keep the nxdk scanout address for HD modes.
-        auto *allocation = moonlight_ffmpeg_aligned_malloc(size + 64U, 32U);
+        auto *allocation = sunshine_ffmpeg_aligned_malloc(size + 64U, 32U);
         staging_.reset(static_cast<std::byte *>(allocation));
         pages_[1] = static_cast<std::uint8_t *>(allocation);
         if (allocation != nullptr) {

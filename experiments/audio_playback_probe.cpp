@@ -18,14 +18,14 @@
 #include "src/logging/logger.h"
 #include "src/streaming/audio_player.h"
 
-// The staged SDL library references Moonlight's USB hooks even when only audio is initialized.
+// The staged SDL library references Sunshine's USB hooks even when only audio is initialized.
 /** @brief Satisfy the SDL joystick initializer's USB hook for this input-free probe. */
-extern "C" void moonlight_usb_input_initialize() {
+extern "C" void sunshine_usb_input_initialize() {
   // This probe initializes no input devices.
 }
 
 /** @brief Satisfy the SDL event driver's USB hook for this input-free probe. */
-extern "C" void moonlight_usb_input_pump() {
+extern "C" void sunshine_usb_input_pump() {
   // This probe has no input events to pump.
 }
 

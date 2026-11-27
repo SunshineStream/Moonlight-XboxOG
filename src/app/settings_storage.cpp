@@ -451,7 +451,7 @@ namespace {
    */
   std::string format_settings_toml(const app::AppSettings &settings) {
     std::string content;
-    content += "# Moonlight Xbox OG user settings\n";
+    content += "# Sunshine Xbox OG user settings\n";
     content += "# This file is safe to edit by hand.\n\n";
     content += "[logging]\n";
     content += "# Controls runtime file logging. Use none to avoid disk writes on slow Xbox drives.\n";

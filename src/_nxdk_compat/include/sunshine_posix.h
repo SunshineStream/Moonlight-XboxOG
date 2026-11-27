@@ -1,6 +1,6 @@
 /**
- * @file src/_nxdk_compat/include/moonlight_posix.h
- * @brief Declare the small POSIX subset actually used by Moonlight on Xbox.
+ * @file src/_nxdk_compat/include/sunshine_posix.h
+ * @brief Declare the small POSIX subset actually used by Sunshine on Xbox.
  */
 #pragma once
 #include <errno.h>

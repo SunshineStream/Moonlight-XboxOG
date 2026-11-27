@@ -308,7 +308,7 @@ wheels = [
 ]
 
 [[package]]
-name = "moonlight-xboxog"
+name = "sunshine-client"
 source = { editable = "." }
 dependencies = [
     { name = "lizardbyte-common", extra = ["c"] },

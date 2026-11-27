@@ -1,6 +1,6 @@
 /**
  * @file src/_nxdk_compat/network/lwipopts.h.in
- * @brief Configure upstream nxdk's network stack for Moonlight UDP traffic.
+ * @brief Configure upstream nxdk's network stack for Sunshine UDP traffic.
  */
 #pragma once
 #include "@NXDK_DIR@/lib/net/nforceif/include/lwipopts.h"
@@ -24,8 +24,8 @@
 #define DEFAULT_THREAD_PRIO 1
 /** @brief Support bounded socket receives. */
 #define LWIP_SO_RCVTIMEO 1
-/** @brief Allow Moonlight to tune socket receive queues. */
+/** @brief Allow Sunshine to tune socket receive queues. */
 #define LWIP_SO_RCVBUF 1
-/** @brief Share Moonlight's timeval declaration with socket consumers. */
+/** @brief Share Sunshine's timeval declaration with socket consumers. */
 #define LWIP_TIMEVAL_PRIVATE 0
 #include <sys/time.h>

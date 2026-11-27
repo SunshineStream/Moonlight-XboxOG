@@ -28,7 +28,7 @@ namespace ui {
   };
 
   /**
-   * @brief Render-ready host tile for the Moonlight-style hosts page.
+   * @brief Render-ready host tile for the Sunshine-style hosts page.
    */
   struct ShellHostTile {
     std::string id;  ///< Stable host tile identifier.

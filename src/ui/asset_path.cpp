@@ -8,7 +8,7 @@
 // standard includes
 #include <algorithm>
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   #include <SDL3/SDL.h>
 #endif
 
@@ -17,7 +17,7 @@
 
 namespace ui {
   std::string build_asset_path(const std::string &relativePath) {
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     std::string path = relativePath;
     std::replace(path.begin(), path.end(), '\\', '/');
   #ifdef __ANDROID__
@@ -25,10 +25,10 @@ namespace ui {
   #else
     const char *base = SDL_GetBasePath();
     const std::string root = base == nullptr ? "" : base;
-    #ifdef MOONLIGHT_INSTALLED_ASSETS
+    #ifdef SUNSHINE_INSTALLED_ASSETS
     SDL_PathInfo info {};
     if (!SDL_GetPathInfo((root + "assets").c_str(), &info) || info.type != SDL_PATHTYPE_DIRECTORY) {
-      return std::string(MOONLIGHT_INSTALLED_ASSETS) + "/" + path;
+      return std::string(SUNSHINE_INSTALLED_ASSETS) + "/" + path;
     }
     #endif
     return root + "assets/" + path;

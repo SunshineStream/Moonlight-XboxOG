@@ -8,7 +8,7 @@ independently of a streaming host. They share production code and are disabled i
 From the repository root, using the normal build prerequisites and toolchain:
 
 ```bash
-cmake -S . -B cmake-build-experiments -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF -DMOONLIGHT_BUILD_VIDEO_EXPERIMENTS=ON -DMOONLIGHT_BUILD_AUDIO_EXPERIMENTS=ON
+cmake -S . -B cmake-build-experiments -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF -DSUNSHINE_BUILD_VIDEO_EXPERIMENTS=ON -DSUNSHINE_BUILD_AUDIO_EXPERIMENTS=ON
 cmake --build cmake-build-experiments
 ```
 

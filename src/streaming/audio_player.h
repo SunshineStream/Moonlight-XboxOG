@@ -23,7 +23,7 @@ struct _OPUS_MULTISTREAM_CONFIGURATION;
 namespace streaming {
 
   /**
-   * @brief Decode one Moonlight audio stream and queue its local mix through an SDL3 audio stream.
+   * @brief Decode one Sunshine audio stream and queue its local mix through an SDL3 audio stream.
    *
    * The transport configures playback before starting and releases the decoder
    * after joining its audio thread.
@@ -53,7 +53,7 @@ namespace streaming {
 
     /**
      * @brief Prepare the decoder and open the stereo SDL device.
-     * @param audioConfiguration Moonlight stream layout.
+     * @param audioConfiguration Sunshine stream layout.
      * @param opus Negotiated codec parameters.
      * @return Zero on success, including when playback is disabled.
      */
@@ -69,7 +69,7 @@ namespace streaming {
     void cleanup();
 
     /**
-     * @brief Decode and queue a Moonlight Opus payload.
+     * @brief Decode and queue a Sunshine Opus payload.
      * @param data Opus payload, or null for a lost packet.
      * @param length Payload size in bytes.
      * @return Number of PCM bytes queued.

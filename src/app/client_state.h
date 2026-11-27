@@ -31,7 +31,7 @@
 namespace app {
 
   /**
-   * @brief Top-level screens used by the Moonlight client shell.
+   * @brief Top-level screens used by the Sunshine client shell.
    */
   enum class ScreenId {
     home,  ///< Placeholder home screen identifier retained for shared shell logic.
@@ -119,7 +119,7 @@ namespace app {
   enum class ConfirmationAction {
     none,  ///< No destructive action is pending confirmation.
     delete_saved_file,  ///< Delete one saved file or directory.
-    factory_reset,  ///< Remove all persisted Moonlight state.
+    factory_reset,  ///< Remove all persisted Sunshine state.
     delete_screenshot,  ///< Remove the selected screenshot and its journal entry.
     quit_app,  ///< Terminate the selected in-progress app on its host.
   };

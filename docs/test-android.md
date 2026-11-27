@@ -5,10 +5,10 @@ The APK supports devices and emulator images that can run `arm64-v8a` apps on An
 
 ## Build or download the APK
 
-To test a pull request, download and extract the `Moonlight-Android` artifact from its GitHub
+To test a pull request, download and extract the `Sunshine-client-Android` artifact from its GitHub
 Actions run. The APK uses the release build variant and a test signing key for sideloading.
 Push builds use the distribution key when configured. Without the key, they upload
-`Moonlight-Android-unsigned`, which requires signing before installation.
+`Sunshine-client-Android-unsigned`, which requires signing before installation.
 You can install signed APKs from Windows, macOS, or Linux using
 [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools).
 
@@ -19,17 +19,17 @@ then run these commands from the repository root.
 
 ```bash
 git submodule update --init --recursive
-ndk_version="$(sed -nE 's/^moonlightNdk=([0-9.]+).*/\1/p' packaging/android/gradle.properties)"
+ndk_version="$(sed -nE 's/^sunshineNdk=([0-9.]+).*/\1/p' packaging/android/gradle.properties)"
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ndk_version"
 prefix="$PWD/cmake-build-android-deps"
-cmake -S cmake/mobile-deps -B "$prefix" -G Ninja -DMOONLIGHT_MOBILE_TARGET=android
+cmake -S cmake/mobile-deps -B "$prefix" -G Ninja -DSUNSHINE_MOBILE_TARGET=android
 cmake --build "$prefix"
 bash packaging/android/gradlew -p packaging/android :app:assembleRelease \
-  -PmoonlightSignReleaseForTesting=true
+  -PsunshineSignReleaseForTesting=true
 ```
 
 The signed test APK is in `packaging/android/app/build/outputs/apk/release/app-release.apk`.
-For debugger builds, use `:app:assembleDebug` and omit `-PmoonlightSignReleaseForTesting=true`.
+For debugger builds, use `:app:assembleDebug` and omit `-PsunshineSignReleaseForTesting=true`.
 
 ### Prepare dependencies on Windows
 
@@ -40,9 +40,9 @@ shell at the repository root and run:
 pacman -S --needed git make perl mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-meson \
   mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf
 git submodule update --init --recursive
-ndk_version="$(sed -nE 's/^moonlightNdk=([0-9.]+).*/\1/p' packaging/android/gradle.properties)"
+ndk_version="$(sed -nE 's/^sunshineNdk=([0-9.]+).*/\1/p' packaging/android/gradle.properties)"
 export ANDROID_NDK_HOME="$(cygpath -u "$LOCALAPPDATA")/Android/Sdk/ndk/$ndk_version"
-cmake -S cmake/mobile-deps -B cmake-build-android-deps -G Ninja -DMOONLIGHT_MOBILE_TARGET=android
+cmake -S cmake/mobile-deps -B cmake-build-android-deps -G Ninja -DSUNSHINE_MOBILE_TARGET=android
 cmake --build cmake-build-android-deps
 ```
 
@@ -78,8 +78,8 @@ provide your own app signing key during setup and use it for direct distribution
    - `ANDROID_KEY_PASSWORD` contains the signing key password.
 
 3. On pushes to the release branch, CI signs the APK and the Android App Bundle. Download the
-   APK from `Moonlight-Android` or the draft GitHub release. Download the signed `app-release.aab`
-   from the workflow's `Moonlight-Android-AppBundle` artifact for Play Console. Each workflow run
+   APK from `Sunshine-client-Android` or the draft GitHub release. Download the signed `app-release.aab`
+   from the workflow's `Sunshine-client-Android-AppBundle` artifact for Play Console. Each workflow run
    uses its run number as the Android version code. Pull requests use a test key.
 
 Google Play currently requires new phone apps to target API 36 or newer. Confirm the target SDK
@@ -111,7 +111,7 @@ Android requires the same signing key for app updates. CI runs and local builds 
 keys. If Android reports a signature mismatch, uninstall the installed build before installing the
 new APK. Uninstalling removes the app's local data.
 
-Open **Moonlight** from the device's app launcher. On a TV, verify that it appears in the TV apps
+Open **Sunshine** from the device's app launcher. On a TV, verify that it appears in the TV apps
 list and can be opened with the remote.
 
 ## Run in Android Studio
@@ -122,7 +122,7 @@ list and can be opened with the remote.
    Choose a system image at API 26 or later that supports `arm64-v8a`, such as an ARM64 image on
    Apple silicon. [Android’s virtual device guide](https://developer.android.com/studio/run/managing-avds)
 2. Start the emulator and drag the APK onto its screen, or use the same `adb install` command with
-   the emulator's serial. Open Moonlight from the emulator's app launcher.
+   the emulator's serial. Open Sunshine from the emulator's app launcher.
    [Android’s emulator installation guide](https://developer.android.com/studio/run/emulator-install-add-files)
 
 If installation reports an ABI mismatch, check `adb -s DEVICE_SERIAL shell getprop ro.product.cpu.abilist`.
@@ -139,8 +139,8 @@ locations, set these Gradle properties to their absolute paths in your user Grad
 file, usually `~/.gradle/gradle.properties`.
 
 ```properties
-moonlightAndroidDeps=/path/to/checkout/cmake-build-android-deps
-moonlightSdlSource=/path/to/prepared/SDL
+sunshineAndroidDeps=/path/to/checkout/cmake-build-android-deps
+sunshineSdlSource=/path/to/prepared/SDL
 ```
 
 In Android Studio, open **Settings > Build, Execution, Deployment > Build Tools > Gradle**.
@@ -150,8 +150,8 @@ download a compatible JDK if it cannot find one locally.
 [Gradle daemon JVM toolchains](https://docs.gradle.org/current/userguide/gradle_daemon.html#daemon_jvm_criteria)
 
 Select the `app` run configuration and choose a connected device or emulator in the toolbar.
-Click **Run** to build and install Moonlight with the default debug variant. To run the release
-variant with your local test key, add `moonlightSignReleaseForTesting=true` to your Gradle properties,
+Click **Run** to build and install Sunshine with the default debug variant. To run the release
+variant with your local test key, add `sunshineSignReleaseForTesting=true` to your Gradle properties,
 sync, and select `release` in **Build Variants**.
 [Android’s emulator run instructions](https://developer.android.com/studio/run/emulator)
 
@@ -161,6 +161,6 @@ sync, and select `release` in **Build Variants**.
    the Android Emulator run on the same computer, `10.0.2.2` reaches that computer's loopback
    interface. [Android’s emulator networking guide](https://developer.android.com/studio/run/emulator-networking-address)
 2. Pair with Sunshine and launch **Desktop**. Check video and audio, stop the stream, and confirm
-   Moonlight returns to its app list.
+   Sunshine returns to its app list.
 3. On hardware, test touch navigation on a phone and directional navigation and Back on a TV.
    Check gamepad input and hardware decoding with a physical device.

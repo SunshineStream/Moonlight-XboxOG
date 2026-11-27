@@ -18,7 +18,7 @@
 
 // local includes
 #ifdef NXDK
-  #include "src/_nxdk_compat/include/moonlight_time.h"
+  #include "src/_nxdk_compat/include/sunshine_time.h"
 #endif
 #include "src/app/file_save_activity.h"
 #include "src/platform/filesystem_utils.h"
@@ -76,7 +76,7 @@ namespace {
    */
   bool screenshot_utc_time(std::time_t time, std::tm &utc) {
 #ifdef NXDK
-    return moonlight_gmtime(time, utc);
+    return sunshine_gmtime(time, utc);
 #elif defined(_WIN32)
     return gmtime_s(&utc, &time) == 0;
 #else

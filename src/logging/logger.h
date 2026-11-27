@@ -17,7 +17,7 @@
 namespace logging {
 
   /**
-   * @brief Severity levels used by the Moonlight client logger.
+   * @brief Severity levels used by the Sunshine client logger.
    */
   enum class LogLevel {
     trace = 0,  ///< Verbose diagnostic output intended for deep tracing.

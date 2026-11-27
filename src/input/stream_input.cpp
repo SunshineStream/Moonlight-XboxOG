@@ -1,6 +1,6 @@
 /**
  * @file src/input/stream_input.cpp
- * @brief Routes ordered controller, keyboard and pointer input to Moonlight.
+ * @brief Routes ordered controller, keyboard and pointer input to Sunshine.
  */
 // class header include
 #include "src/input/stream_input.h"

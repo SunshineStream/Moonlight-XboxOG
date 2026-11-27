@@ -30,7 +30,7 @@ namespace {
   constexpr const char *SETTINGS_CATEGORY_PREFIX = "settings-category:";
   constexpr std::array<char, 10> ADD_HOST_ADDRESS_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
   constexpr std::array<char, 10> ADD_HOST_PORT_KEYPAD_CHARACTERS {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   constexpr std::array<int, 7> STREAM_FRAMERATE_OPTIONS {24, 30, 50, 60, 90, 100, 120};
   constexpr std::array<int, 20> STREAM_BITRATE_OPTIONS {1000, 2000, 3000, 5000, 8000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, 120000, 150000};
   constexpr std::array<app::VideoCodecSelection, 2> VIDEO_CODEC_OPTIONS {app::VideoCodecSelection::autoDetect, app::VideoCodecSelection::h264};
@@ -155,7 +155,7 @@ namespace {
       case app::SettingsCategory::storage:
         return "Choose the folder used to save stream screenshots.";
       case app::SettingsCategory::reset:
-        return "Review and delete Moonlight saved data, or remove everything with a full factory reset.";
+        return "Review and delete Sunshine saved data, or remove everything with a full factory reset.";
     }
 
     return "Control the runtime log file, the in-app log viewer, and xemu debugger output verbosity.";
@@ -590,8 +590,8 @@ namespace {
       case app::ScreenId::add_host:
         {
           std::vector<ui::MenuItem> items {
-            {"edit-address", "Host Address", "Enter the IPv4 address for the PC that should be added to Moonlight.", true},
-            {"edit-port", "Host Port", "Override the default Moonlight host port when the PC listens on a custom value.", true},
+            {"edit-address", "Host Address", "Enter the IPv4 address for the PC that should be added to Sunshine.", true},
+            {"edit-port", "Host Port", "Override the default Sunshine host port when the PC listens on a custom value.", true},
           };
           if (state.addHostDraft.addressInput.find_first_not_of(" \t\r\n") != std::string::npos) {
             items.insert(items.end(), {
@@ -647,8 +647,8 @@ namespace {
       case app::SettingsCategory::logging:
         return {
           {"view-log-file", "View Log File", "Open the runtime log file viewer so you can inspect the most recent log lines without leaving the shell.", true},
-          {"cycle-log-level", std::string("File Logging Level: ") + logging::to_string(state.settings.loggingLevel), "Choose the minimum severity written to moonlight.log. Lower levels produce more detail but increase disk writes.", true},
-#ifndef MOONLIGHT_NATIVE_CLIENT
+          {"cycle-log-level", std::string("File Logging Level: ") + logging::to_string(state.settings.loggingLevel), "Choose the minimum severity written to the log file. Lower levels produce more detail but increase disk writes.", true},
+#ifndef SUNSHINE_NATIVE_CLIENT
           {"cycle-xemu-console-log-level", std::string("xemu Console Level: ") + logging::to_string(state.settings.xemuConsoleLoggingLevel), "Choose the minimum severity mirrored to xemu through DbgPrint() when you launch xemu with a serial console.", true},
 #endif
         };
@@ -675,14 +675,14 @@ namespace {
           {
             "cycle-video-codec",
             std::string("Video Codec: ") + video_codec_selection_label(state.settings.video.codec),
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
             "Automatically negotiate H.264, HEVC, or AV1, or request H.264 for compatibility.",
 #else
             "Prefer MPEG-2 for faster decoding, use standard automatic negotiation, or request a specific codec.",
 #endif
             true,
           },
-#ifndef MOONLIGHT_NATIVE_CLIENT
+#ifndef SUNSHINE_NATIVE_CLIENT
           {
             "toggle-gpu-presentation",
             std::string("Video Presentation: ") + (state.settings.video.gpuPresentation ? "GPU" : "Software"),
@@ -713,7 +713,7 @@ namespace {
           },
           {
             "toggle-play-audio-on-xbox",
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
             std::string("Play Audio Locally: ") + (state.settings.audio.playOnXbox ? "On" : "Off"),
             "Play stream audio on this device.",
 #else
@@ -740,10 +740,10 @@ namespace {
       case app::SettingsCategory::reset:
         {
           std::vector<ui::MenuItem> items = {
-            {"factory-reset", "Factory Reset", "Delete every Moonlight saved file, including hosts, pairing identity, cached art, and logs.", true},
+            {"factory-reset", "Factory Reset", "Delete every Sunshine saved file, including hosts, pairing identity, cached art, and logs.", true},
           };
           for (const startup::SavedFileEntry &savedFile : state.settings.savedFiles) {
-            items.push_back({std::string(DELETE_SAVED_FILE_MENU_ID_PREFIX) + savedFile.path, "Delete " + savedFile.displayName, "Delete only this saved file from disk while leaving the rest of the Moonlight data intact.", true});
+            items.push_back({std::string(DELETE_SAVED_FILE_MENU_ID_PREFIX) + savedFile.path, "Delete " + savedFile.displayName, "Delete only this saved file from disk while leaving the rest of the Sunshine data intact.", true});
           }
           return items;
         }
@@ -955,7 +955,7 @@ namespace {
       state.shell.statusMessage = "Updated host address";
     } else {
       state.addHostDraft.portInput = state.addHostDraft.keypad.stagedInput;
-      state.shell.statusMessage = state.addHostDraft.portInput.empty() ? "Using default Moonlight host port 47989" : "Updated host port";
+      state.shell.statusMessage = state.addHostDraft.portInput.empty() ? "Using default Sunshine host port 47989" : "Updated host port";
     }
 
     state.addHostDraft.validationMessage.clear();
@@ -1298,7 +1298,7 @@ namespace {
     std::string pairingPin;
     if (std::string pinError; !network::generate_pairing_pin(&pairingPin, &pinError)) {
       state.shell.statusMessage = pinError.empty() ? "Failed to generate a secure pairing PIN." : std::move(pinError);
-      app::show_notification(state, app::NotificationKind::error, "Couldn't start pairing", "A secure pairing PIN could not be created. Restart Moonlight and try again.");
+      app::show_notification(state, app::NotificationKind::error, "Couldn't start pairing", "A secure pairing PIN could not be created. Restart Sunshine and try again.");
       return false;
     }
 
@@ -2714,7 +2714,7 @@ namespace app {
         ConfirmationAction::factory_reset,
         "Factory Reset",
         {
-          "Delete all Moonlight saved data?",
+          "Delete all Sunshine saved data?",
           "This removes hosts, settings, logs, pairing identity, and cached cover art.",
         }
       );

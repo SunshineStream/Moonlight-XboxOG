@@ -115,13 +115,13 @@ jobs:
       - name: Download Xbox artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          name: Moonlight-XboxOG-Linux
+          name: Sunshine-client-XboxOG-Linux
           path: artifacts
 
       - name: Download desktop artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          pattern: Moonlight-{Windows,macOS,Flatpak}-*
+          pattern: Sunshine-client-{Windows,macOS,Flatpak}-*
           path: artifacts
           merge-multiple: true
 
@@ -129,7 +129,7 @@ jobs:
         if: needs.build-android.outputs.signed_apk == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          name: Moonlight-Android
+          name: Sunshine-client-Android
           path: artifacts
 
       - name: Create/Update GitHub Release

@@ -79,9 +79,9 @@ namespace {
     EXPECT_FALSE(platform::path_has_prefix(matchingPath, {}));
     EXPECT_FALSE(platform::path_has_prefix(prefix, matchingPath));
 #if defined(_WIN32) || defined(NXDK)
-    EXPECT_TRUE(platform::path_has_prefix("C:\\Moonlight\\Data", "c:\\moonlight"));
+    EXPECT_TRUE(platform::path_has_prefix("C:\\Sunshine\\Data", "c:\\sunshine"));
 #else
-    EXPECT_FALSE(platform::path_has_prefix("/Moonlight/Data", "/moonlight"));
+    EXPECT_FALSE(platform::path_has_prefix("/Sunshine/Data", "/sunshine"));
 #endif
   }
 
@@ -162,7 +162,7 @@ namespace {
    */
   TEST_F(FilesystemUtilsTest, ChecksWritabilityWithoutLeavingFilesOrOverwritingCollisions) {
     ASSERT_TRUE(platform::ensure_directory_exists(rootDirectory));
-    const auto sentinel = test_support::join_path(rootDirectory, "moonlight-write-1.tmp");
+    const auto sentinel = test_support::join_path(rootDirectory, "sunshine-write-1.tmp");
     write_test_file(sentinel, "keep");
     std::string error = "old";
     EXPECT_TRUE(platform::directory_is_writable(rootDirectory, error)) << error;
@@ -181,7 +181,7 @@ namespace {
   TEST_F(FilesystemUtilsTest, FailsSafelyWhenAllWriteProbeNamesAlreadyExist) {
     ASSERT_TRUE(platform::ensure_directory_exists(rootDirectory));
     for (int i = 1; i <= 32; ++i) {
-      write_test_file(test_support::join_path(rootDirectory, "moonlight-write-" + std::to_string(i) + ".tmp"), "keep");
+      write_test_file(test_support::join_path(rootDirectory, "sunshine-write-" + std::to_string(i) + ".tmp"), "keep");
     }
     std::string error;
     EXPECT_FALSE(platform::directory_is_writable(rootDirectory, error));

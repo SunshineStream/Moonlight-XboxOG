@@ -3,9 +3,9 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Moonlight-XboxOG"
+name = "Sunshine-client"
 dynamic = ["version"]
-description = "Python tooling for Moonlight-XboxOG"
+description = "Python tooling for Sunshine-client"
 requires-python = ">=3.14"
 license = {text = "GPL-3.0-only"}
 authors = [
@@ -18,8 +18,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://app.lizardbyte.dev"
-Repository = "https://github.com/SunshineStream/Moonlight-XboxOG"
-Issues = "https://github.com/SunshineStream/Moonlight-XboxOG/issues"
+Repository = "https://github.com/SunshineStream/Sunshine-client"
+Issues = "https://github.com/SunshineStream/Sunshine-client/issues"
 
 [tool.uv.sources]
 lizardbyte-common = { path = "third-party/lizardbyte-common" }

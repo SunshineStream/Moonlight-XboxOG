@@ -18,7 +18,7 @@
   },
   {
     "type": "patch",
-    "path": "modules/moonlight/sdl3-steam-controller-trigger-clicks-and-haptics.patch",
+    "path": "modules/sunshine-client/sdl3-steam-controller-trigger-clicks-and-haptics.patch",
     "dest": "deps/sdl"
   }
 ]

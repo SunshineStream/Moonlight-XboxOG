@@ -18,11 +18,11 @@
 
 /** @brief Preserve FFmpeg's base-two exponential fallback for both precisions. */
 TEST(FfmpegMathTest, EvaluatesBaseTwoExponentials) {
-  EXPECT_DOUBLE_EQ(moonlight_ffmpeg_exp2(0.0), 1.0);
-  EXPECT_DOUBLE_EQ(moonlight_ffmpeg_exp2(4.0), 16.0);
-  EXPECT_DOUBLE_EQ(moonlight_ffmpeg_exp2(-3.0), 0.125);
-  EXPECT_FLOAT_EQ(moonlight_ffmpeg_exp2f(0.5F), 1.41421356F);
-  EXPECT_FLOAT_EQ(moonlight_ffmpeg_exp2f(-2.0F), 0.25F);
+  EXPECT_DOUBLE_EQ(sunshine_ffmpeg_exp2(0.0), 1.0);
+  EXPECT_DOUBLE_EQ(sunshine_ffmpeg_exp2(4.0), 16.0);
+  EXPECT_DOUBLE_EQ(sunshine_ffmpeg_exp2(-3.0), 0.125);
+  EXPECT_FLOAT_EQ(sunshine_ffmpeg_exp2f(0.5F), 1.41421356F);
+  EXPECT_FLOAT_EQ(sunshine_ffmpeg_exp2f(-2.0F), 0.25F);
 }
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -90,18 +90,18 @@ namespace {
 
     for (std::size_t i = 0; i < modes.size(); ++i) {
       ASSERT_EQ(nxdk_compat::set_x87_rounding_mode(modes[i]), 0);
-      EXPECT_EQ(moonlight_ffmpeg_lrint(2.5), expectedPositive[i]);
-      EXPECT_EQ(moonlight_ffmpeg_lrintf(-2.5F), expectedNegative[i]);
-      EXPECT_EQ(moonlight_ffmpeg_llrint(2.5), expectedPositive[i]);
-      EXPECT_EQ(moonlight_ffmpeg_llrintf(-2.5F), expectedNegative[i]);
+      EXPECT_EQ(sunshine_ffmpeg_lrint(2.5), expectedPositive[i]);
+      EXPECT_EQ(sunshine_ffmpeg_lrintf(-2.5F), expectedNegative[i]);
+      EXPECT_EQ(sunshine_ffmpeg_llrint(2.5), expectedPositive[i]);
+      EXPECT_EQ(sunshine_ffmpeg_llrintf(-2.5F), expectedNegative[i]);
     }
   }
 
   /** @brief FFmpeg's wide conversion preserves integers larger than an Xbox long. */
   TEST_F(FenvCompatTest, RoundsFfmpegValuesBeyondThe32BitRange) {
     ASSERT_EQ(nxdk_compat::set_x87_rounding_mode(0x0000), 0);
-    EXPECT_EQ(moonlight_ffmpeg_llrint(4294967297.75), 4294967298LL);
-    EXPECT_EQ(moonlight_ffmpeg_llrintf(-4294967296.0F), -4294967296LL);
+    EXPECT_EQ(sunshine_ffmpeg_llrint(4294967297.75), 4294967298LL);
+    EXPECT_EQ(sunshine_ffmpeg_llrintf(-4294967296.0F), -4294967296LL);
   }
 
 }  // namespace

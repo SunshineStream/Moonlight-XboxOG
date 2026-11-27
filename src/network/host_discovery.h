@@ -13,7 +13,7 @@
 namespace network {
 
   /**
-   * @brief One Moonlight-compatible host discovered through mDNS/DNS-SD.
+   * @brief One GameStream-compatible host discovered through mDNS/DNS-SD.
    */
   struct DiscoveredHost {
     std::string displayName;  ///< User-facing host name discovered from the service instance.
@@ -30,7 +30,7 @@ namespace network {
   };
 
   /**
-   * @brief Discover Moonlight-compatible hosts on the local network.
+   * @brief Discover GameStream-compatible hosts on the local network.
    *
    * The Xbox build uses lwIP mDNS/DNS-SD search support to look for compatible
    * GameStream services. Host-native test builds return scripted results when a

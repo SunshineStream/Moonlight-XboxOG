@@ -1,6 +1,6 @@
 /**
  * @file src/_nxdk_compat/include/sys/stat.h
- * @brief Reject optional POSIX metadata queries; Moonlight uses Win32 file APIs.
+ * @brief Reject optional POSIX metadata queries; Sunshine uses Win32 file APIs.
  */
 #pragma once
 #include <errno.h>
@@ -30,7 +30,7 @@ struct stat {
  * @param status Unmodified output record.
  * @return Always -1 with errno set to ENOSYS.
  */
-static inline int moonlight_nxdk_stat(const char *path, struct stat *status) {
+static inline int sunshine_nxdk_stat(const char *path, struct stat *status) {
   (void) path;
   (void) status;
   errno = ENOSYS;
@@ -44,7 +44,7 @@ static inline int moonlight_nxdk_stat(const char *path, struct stat *status) {
  * @param status Unmodified output record.
  * @return Always -1 with errno set to ENOSYS.
  */
-static inline int moonlight_nxdk_fstat(int descriptor, struct stat *status) {
+static inline int sunshine_nxdk_fstat(int descriptor, struct stat *status) {
   (void) descriptor;
   (void) status;
   errno = ENOSYS;
@@ -52,6 +52,6 @@ static inline int moonlight_nxdk_fstat(int descriptor, struct stat *status) {
 }
 
 /** @brief Scope path metadata adaptation to consumers of this private header. */
-#define stat(path, status) moonlight_nxdk_stat(path, status)
+#define stat(path, status) sunshine_nxdk_stat(path, status)
 /** @brief Scope descriptor metadata adaptation to this private header. */
-#define fstat(descriptor, status) moonlight_nxdk_fstat(descriptor, status)
+#define fstat(descriptor, status) sunshine_nxdk_fstat(descriptor, status)

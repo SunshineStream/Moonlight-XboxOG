@@ -20,7 +20,7 @@
 // lib includes
 extern "C" {
 #include <libavcodec/avcodec.h>
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   #include <libavutil/hwcontext.h>
 #endif
 #include <libavutil/cpu.h>
@@ -48,7 +48,7 @@ namespace {
   /**
    * @brief Opaque callback context passed by moonlight-common-c and FFmpeg.
    */
-  using MoonlightCallbackContext = void;
+  using SunshineCallbackContext = void;
 
   constexpr std::uint64_t STREAM_VIDEO_SUBMISSION_LOG_INTERVAL = 120;
   constexpr int STREAM_VIDEO_DROPPED_FRAME_STATUS = -2;
@@ -56,7 +56,7 @@ namespace {
   constexpr Uint32 STREAM_VIDEO_DECODE_YIELD_MILLISECONDS = 1U;
 
   /**
-   * @brief FFmpeg codec metadata selected from one negotiated Moonlight format.
+   * @brief FFmpeg codec metadata selected from one negotiated Sunshine format.
    */
   struct VideoCodecSelection {
     AVCodecID codecId = AV_CODEC_ID_NONE;  ///< FFmpeg codec identifier.
@@ -114,7 +114,7 @@ namespace {
     return result < 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
   }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   /**
    * @brief Recognize decoder errors that may require switching away from hardware.
    * @param errorCode FFmpeg packet submission or frame receive result.
@@ -168,7 +168,7 @@ namespace {
    * @param format `printf`-style format string.
    * @param arguments Variadic arguments matching `format`.
    */
-  void ffmpeg_log_callback(MoonlightCallbackContext *avClassContext, int level, const char *format, va_list arguments) {
+  void ffmpeg_log_callback(SunshineCallbackContext *avClassContext, int level, const char *format, va_list arguments) {
     std::array<char, 1024> buffer {};
     int printPrefix = 1;
     va_list argumentsCopy;
@@ -209,7 +209,7 @@ namespace {
   /**
    * @brief Resolve the FFmpeg decoder to use for one negotiated video format.
    *
-   * @param videoFormat Moonlight negotiated video format mask.
+   * @param videoFormat Sunshine negotiated video format mask.
    * @param selection Output codec selection populated on success.
    * @return True when the video format is supported by this backend.
    */
@@ -233,7 +233,7 @@ namespace {
       selection->displayName = "H.264";
       return true;
     }
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     if ((videoFormat & VIDEO_FORMAT_H265) != 0) {
       *selection = {AV_CODEC_ID_HEVC, "HEVC"};
       return true;
@@ -247,7 +247,7 @@ namespace {
     return false;
   }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   /**
    * @brief Find an FFmpeg software decoder for a portable format.
    * @param id FFmpeg codec ID.
@@ -427,7 +427,7 @@ namespace {
     return 0;
   }
 
-  int on_video_setup(int videoFormat, int width, int height, int redrawRate, MoonlightCallbackContext *context, int drFlags) {  // NOSONAR(cpp:S5008) moonlight-common-c requires a void* render context callback.
+  int on_video_setup(int videoFormat, int width, int height, int redrawRate, SunshineCallbackContext *context, int drFlags) {  // NOSONAR(cpp:S5008) moonlight-common-c requires a void* render context callback.
     auto *backend = static_cast<streaming::FfmpegStreamBackend *>(context);
     if (backend == nullptr) {
       return -1;
@@ -458,12 +458,12 @@ namespace {
 
   /**
    * @brief Prepare the active Opus decoder from the negotiated multistream configuration.
-   * @param audioConfiguration Negotiated Moonlight layout.
+   * @param audioConfiguration Negotiated Sunshine layout.
    * @param opusConfig Negotiated Opus channels and mappings.
-   * @param context Stream backend supplied by Moonlight.
+   * @param context Stream backend supplied by Sunshine.
    * @return Zero when playback can start or has been disabled.
    */
-  int on_audio_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATION opusConfig, MoonlightCallbackContext *context, int) {  // NOSONAR(cpp:S5008,cpp:S995) moonlight-common-c requires this callback signature.
+  int on_audio_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATION opusConfig, SunshineCallbackContext *context, int) {  // NOSONAR(cpp:S5008,cpp:S995) moonlight-common-c requires this callback signature.
     auto *backend = static_cast<streaming::FfmpegStreamBackend *>(context);
     if (backend == nullptr) {
       return -1;
@@ -499,7 +499,7 @@ namespace {
   }
 
   /**
-   * @brief Decode and queue the next Moonlight Opus payload.
+   * @brief Decode and queue the next Sunshine Opus payload.
    * @param sampleData Encoded payload, or null for a lost packet.
    * @param sampleLength Payload length in bytes.
    */
@@ -530,7 +530,7 @@ namespace {
  * @param whence SDL seek origin.
  * @return New byte position or a negative value on error.
  */
-extern "C" Sint64 moonlight_screenshot_file_seek(void *context, Sint64 offset, SDL_IOWhence whence) {
+extern "C" Sint64 sunshine_screenshot_file_seek(void *context, Sint64 offset, SDL_IOWhence whence) {
   auto &writer = *static_cast<ScreenshotFileProgress *>(context);
   writer.position = SDL_SeekIO(writer.file, offset, whence);
   return writer.position;
@@ -544,7 +544,7 @@ extern "C" Sint64 moonlight_screenshot_file_seek(void *context, Sint64 offset, S
  * @param status Receives the underlying stream's status after a partial write.
  * @return Bytes written.
  */
-extern "C" std::size_t moonlight_screenshot_file_write(void *context, const void *pixels, std::size_t size, SDL_IOStatus *status) {
+extern "C" std::size_t sunshine_screenshot_file_write(void *context, const void *pixels, std::size_t size, SDL_IOStatus *status) {
   auto &writer = *static_cast<ScreenshotFileProgress *>(context);
   const auto written = SDL_WriteIO(writer.file, pixels, size);
   if (written < size) {
@@ -557,7 +557,7 @@ extern "C" std::size_t moonlight_screenshot_file_write(void *context, const void
 }
 
 namespace streaming {
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   int FfmpegStreamBackend::available_video_formats() {
     int formats = 0;
     for (const int format : {VIDEO_FORMAT_H264, VIDEO_FORMAT_H265, VIDEO_FORMAT_AV1_MAIN8}) {
@@ -636,8 +636,8 @@ namespace streaming {
     ScreenshotFileProgress writer {file, progress, 54 + static_cast<Sint64>((surface.w * 3 + 3) & ~3) * surface.h};
     SDL_IOStreamInterface callbacks;
     SDL_INIT_INTERFACE(&callbacks);
-    callbacks.seek = moonlight_screenshot_file_seek;
-    callbacks.write = moonlight_screenshot_file_write;
+    callbacks.seek = sunshine_screenshot_file_seek;
+    callbacks.write = sunshine_screenshot_file_write;
     SDL_IOStream *progressFile = SDL_OpenIO(&callbacks, &writer);
     const bool encoded = progressFile != nullptr && SDL_SaveBMP_IO(&surface, progressFile, true);
     const bool closed = SDL_CloseIO(file);
@@ -837,7 +837,7 @@ namespace streaming {
       return -1;
     }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     const AVCodec *softwareCodec = find_software_decoder(codecSelection.codecId);
     const AVCodec *mediaCodec = find_mediacodec_decoder(codecSelection.codecId);
     const AVCodec *nativeCodec = codecSelection.codecId == AV_CODEC_ID_AV1 ? avcodec_find_decoder_by_name("av1") : softwareCodec;
@@ -873,7 +873,7 @@ namespace streaming {
     video_.codecContext->skip_loop_filter = AVDISCARD_ALL;
     video_.codecContext->skip_idct = AVDISCARD_NONREF;
 #endif
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     AVPixelFormat hardwareFormat = AV_PIX_FMT_NONE;
     const char *hardware = mediaCodec != nullptr ? "MediaCodec" : attach_hardware_decoder(*video_.codecContext, *codec, hardwareFormat);
     if (hardwareFormat != AV_PIX_FMT_NONE) {
@@ -901,7 +901,7 @@ namespace streaming {
       return openResult;
     }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     if (hardware != nullptr) {
       video_.softwareFallback = softwareCodec;
       logging::info("stream", std::string("Opened FFmpeg ") + video_.codecName + " with " + hardware + " acceleration");
@@ -912,7 +912,7 @@ namespace streaming {
     return 0;
   }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
   void FfmpegStreamBackend::fallback_to_software_decoder() {
     const auto *codec = std::exchange(video_.softwareFallback, nullptr);
     if (codec == nullptr) {
@@ -987,7 +987,7 @@ namespace streaming {
     video_.renderedFrameVersion = 0;
     video_.publishedFrameVersion.store(0);
     video_.codecName = "video";
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
     video_.softwareFallback = nullptr;
 #endif
     video_.decoderStopRequested.store(false);
@@ -1129,7 +1129,7 @@ namespace streaming {
       }
       if (receiveResult < 0) {
         logging::warn("stream", std::string("avcodec_receive_frame failed for ") + video_.codecName + ": " + describe_ffmpeg_error(receiveResult));
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
         if (is_hardware_decoder_failure(receiveResult)) {
           fallback_to_software_decoder();
         }
@@ -1137,7 +1137,7 @@ namespace streaming {
         return receiveResult;
       }
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       if (const int transfer = read_hardware_frame(*video_.decodedFrame, *video_.convertedFrame); transfer < 0) {
         fallback_to_software_decoder();
         return transfer;
@@ -1180,7 +1180,7 @@ namespace streaming {
       }
 
       if (offset + buffer->length > decodeUnit->fullLength) {
-        logging::warn("stream", "Moonlight supplied a video decode unit larger than its declared length");
+        logging::warn("stream", "Sunshine supplied a video decode unit larger than its declared length");
         return DR_NEED_IDR;
       }
 
@@ -1224,7 +1224,7 @@ namespace streaming {
     av_packet_unref(video_.packet);
     if (sendResult < 0) {
       logging::warn("stream", std::string("avcodec_send_packet failed for ") + video_.codecName + ": " + describe_ffmpeg_error(sendResult));
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       if (is_hardware_decoder_failure(sendResult)) {
         fallback_to_software_decoder();
       }

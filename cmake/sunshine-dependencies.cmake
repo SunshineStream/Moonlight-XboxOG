@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
 # Validate FFmpeg source and support files before attempting a configure.
-function(_moonlight_validate_xbox_ffmpeg_inputs ffmpeg_source_dir)
+function(_sunshine_validate_xbox_ffmpeg_inputs ffmpeg_source_dir)
     if(NOT EXISTS "${ffmpeg_source_dir}/configure")
         message(FATAL_ERROR "FFmpeg configure script not found in ${ffmpeg_source_dir}")
     endif()
@@ -14,7 +14,7 @@ function(_moonlight_validate_xbox_ffmpeg_inputs ffmpeg_source_dir)
 endfunction()
 
 # Read the FFmpeg source revision used in the rebuild signature.
-function(_moonlight_get_ffmpeg_revision out_var ffmpeg_source_dir)
+function(_sunshine_get_ffmpeg_revision out_var ffmpeg_source_dir)
     execute_process(
             COMMAND git -C "${ffmpeg_source_dir}" rev-parse HEAD
             OUTPUT_VARIABLE ffmpeg_revision
@@ -29,11 +29,11 @@ function(_moonlight_get_ffmpeg_revision out_var ffmpeg_source_dir)
 endfunction()
 
 # Compute the FFmpeg rebuild signature from source and support-file inputs.
-function(_moonlight_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
+function(_sunshine_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
     set(ffmpeg_cc_wrapper "${ARGV3}")
     set(ffmpeg_cxx_wrapper "${ARGV4}")
 
-    _moonlight_get_ffmpeg_revision(ffmpeg_revision "${ffmpeg_source_dir}")
+    _sunshine_get_ffmpeg_revision(ffmpeg_revision "${ffmpeg_source_dir}")
     file(READ "${nxdk_dir}/.moonlight-source.signature" nxdk_revision)
     file(SHA256 "${ffmpeg_cc_wrapper}" ffmpeg_cc_wrapper_hash)
     file(SHA256 "${ffmpeg_cxx_wrapper}" ffmpeg_cxx_wrapper_hash)
@@ -46,7 +46,7 @@ function(_moonlight_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
         file(SHA256 "${input}" input_hash)
         list(APPEND compat_hashes "${input}=${input_hash}")
     endforeach()
-    file(SHA256 "${CMAKE_SOURCE_DIR}/cmake/moonlight-dependencies.cmake" ffmpeg_dependency_manifest_hash)
+    file(SHA256 "${CMAKE_SOURCE_DIR}/cmake/sunshine-dependencies.cmake" ffmpeg_dependency_manifest_hash)
 
     set(signature_inputs
             "FFMPEG_REVISION=${ffmpeg_revision}"
@@ -68,7 +68,7 @@ function(_moonlight_compute_ffmpeg_signature out_var nxdk_dir ffmpeg_source_dir)
 endfunction()
 
 # Determine whether FFmpeg must be rebuilt from the saved signature and expected outputs.
-function(_moonlight_should_rebuild_ffmpeg out_var signature_file signature)
+function(_sunshine_should_rebuild_ffmpeg out_var signature_file signature)
     set(need_rebuild FALSE)
     if(NOT EXISTS "${signature_file}")
         set(need_rebuild TRUE)
@@ -80,7 +80,7 @@ function(_moonlight_should_rebuild_ffmpeg out_var signature_file signature)
         endif()
     endif()
 
-    _moonlight_has_missing_output(ffmpeg_missing_output ${ARGN})
+    _sunshine_has_missing_output(ffmpeg_missing_output ${ARGN})
     if(ffmpeg_missing_output)
         set(need_rebuild TRUE)
     endif()
@@ -89,7 +89,7 @@ function(_moonlight_should_rebuild_ffmpeg out_var signature_file signature)
 endfunction()
 
 # Convert FFmpeg build paths to shell paths for the active host platform.
-function(_moonlight_get_ffmpeg_shell_paths out_var)
+function(_sunshine_get_ffmpeg_shell_paths out_var)
     set(ffmpeg_source_dir "${ARGV1}")
     set(ffmpeg_install_dir "${ARGV2}")
     set(ffmpeg_build_dir "${ARGV3}")
@@ -98,12 +98,12 @@ function(_moonlight_get_ffmpeg_shell_paths out_var)
     set(ffmpeg_cxx_wrapper "${ARGV6}")
 
     if(CMAKE_HOST_WIN32)
-        _moonlight_to_msys_path(ffmpeg_source_shell_path "${ffmpeg_source_dir}")
-        _moonlight_to_msys_path(ffmpeg_install_shell_path "${ffmpeg_install_dir}")
-        _moonlight_to_msys_path(ffmpeg_build_shell_path "${ffmpeg_build_dir}")
-        _moonlight_to_msys_path(nxdk_shell_path "${nxdk_dir}")
-        _moonlight_to_msys_path(ffmpeg_cc_wrapper_shell_path "${ffmpeg_cc_wrapper}")
-        _moonlight_to_msys_path(ffmpeg_cxx_wrapper_shell_path "${ffmpeg_cxx_wrapper}")
+        _sunshine_to_msys_path(ffmpeg_source_shell_path "${ffmpeg_source_dir}")
+        _sunshine_to_msys_path(ffmpeg_install_shell_path "${ffmpeg_install_dir}")
+        _sunshine_to_msys_path(ffmpeg_build_shell_path "${ffmpeg_build_dir}")
+        _sunshine_to_msys_path(nxdk_shell_path "${nxdk_dir}")
+        _sunshine_to_msys_path(ffmpeg_cc_wrapper_shell_path "${ffmpeg_cc_wrapper}")
+        _sunshine_to_msys_path(ffmpeg_cxx_wrapper_shell_path "${ffmpeg_cxx_wrapper}")
     else()
         set(ffmpeg_source_shell_path "${ffmpeg_source_dir}")
         set(ffmpeg_install_shell_path "${ffmpeg_install_dir}")
@@ -124,7 +124,7 @@ function(_moonlight_get_ffmpeg_shell_paths out_var)
 endfunction()
 
 # Compose FFmpeg configure arguments for the nxdk target.
-function(_moonlight_get_ffmpeg_configure_args out_var)
+function(_sunshine_get_ffmpeg_configure_args out_var)
     set(ffmpeg_source_shell_path "${ARGV1}")
     set(ffmpeg_install_shell_path "${ARGV2}")
     set(ffmpeg_cc_shell_path "sh ${ARGV3}")
@@ -138,7 +138,7 @@ function(_moonlight_get_ffmpeg_configure_args out_var)
             sh
             "${ffmpeg_source_shell_path}/configure"
             "--prefix=${ffmpeg_install_shell_path}"
-            "--extra-ldflags=${MOONLIGHT_NXDK_COMPAT_LIBRARY}"
+            "--extra-ldflags=${SUNSHINE_NXDK_COMPAT_LIBRARY}"
             --extra-cflags=-mstackrealign
             --enable-cross-compile
             --arch=x86
@@ -197,11 +197,11 @@ function(_moonlight_get_ffmpeg_configure_args out_var)
 endfunction()
 
 # Execute an FFmpeg command in MSYS2 with nxdk paths ahead of the host PATH.
-function(_moonlight_run_windows_ffmpeg_command description nxdk_shell_path ffmpeg_build_shell_path)
-    _moonlight_get_windows_msys2_shell(msys2_shell)
-    _moonlight_join_shell_command(ffmpeg_command ${ARGN})
-    _moonlight_shell_quote(quoted_nxdk_shell_path "${nxdk_shell_path}")
-    _moonlight_shell_quote(quoted_ffmpeg_build_shell_path "${ffmpeg_build_shell_path}")
+function(_sunshine_run_windows_ffmpeg_command description nxdk_shell_path ffmpeg_build_shell_path)
+    _sunshine_get_windows_msys2_shell(msys2_shell)
+    _sunshine_join_shell_command(ffmpeg_command ${ARGN})
+    _sunshine_shell_quote(quoted_nxdk_shell_path "${nxdk_shell_path}")
+    _sunshine_shell_quote(quoted_ffmpeg_build_shell_path "${ffmpeg_build_shell_path}")
 
     string(CONCAT ffmpeg_script
             "unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL; "
@@ -220,7 +220,7 @@ function(_moonlight_run_windows_ffmpeg_command description nxdk_shell_path ffmpe
 endfunction()
 
 # Rebuild and install FFmpeg for the Xbox target.
-function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_dir ffmpeg_install_dir)
+function(_sunshine_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_dir ffmpeg_install_dir)
     set(ffmpeg_cc_wrapper "${ARGV4}")
     set(ffmpeg_cxx_wrapper "${ARGV5}")
     set(signature_file "${ARGV6}")
@@ -229,7 +229,7 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
     file(REMOVE_RECURSE "${ffmpeg_build_dir}" "${ffmpeg_install_dir}")
     file(MAKE_DIRECTORY "${ffmpeg_build_dir}")
 
-    _moonlight_get_ffmpeg_shell_paths(
+    _sunshine_get_ffmpeg_shell_paths(
             ffmpeg_shell_paths
             "${ffmpeg_source_dir}"
             "${ffmpeg_install_dir}"
@@ -243,7 +243,7 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
     list(GET ffmpeg_shell_paths 3 nxdk_shell_path)
     list(GET ffmpeg_shell_paths 4 ffmpeg_cc_wrapper_shell_path)
     list(GET ffmpeg_shell_paths 5 ffmpeg_cxx_wrapper_shell_path)
-    _moonlight_get_ffmpeg_configure_args(
+    _sunshine_get_ffmpeg_configure_args(
             ffmpeg_configure_args
             "${ffmpeg_source_shell_path}"
             "${ffmpeg_install_shell_path}"
@@ -251,13 +251,13 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
             "${ffmpeg_cxx_wrapper_shell_path}")
 
     if(CMAKE_HOST_WIN32)
-        _moonlight_run_windows_ffmpeg_command(
+        _sunshine_run_windows_ffmpeg_command(
                 "FFmpeg configure"
                 "${nxdk_shell_path}"
                 "${ffmpeg_build_shell_path}"
                 ${ffmpeg_configure_args})
     else()
-        moonlight_run_nxdk_command(
+        sunshine_run_nxdk_command(
                 "FFmpeg configure"
                 "${nxdk_dir}"
                 "${ffmpeg_build_dir}"
@@ -265,7 +265,7 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
     endif()
 
     if(CMAKE_HOST_WIN32)
-        _moonlight_run_windows_ffmpeg_command(
+        _sunshine_run_windows_ffmpeg_command(
                 "FFmpeg build"
                 "${nxdk_shell_path}"
                 "${ffmpeg_build_shell_path}"
@@ -273,7 +273,7 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
                 -j4
                 install)
     else()
-        moonlight_run_nxdk_command(
+        sunshine_run_nxdk_command(
                 "FFmpeg build"
                 "${nxdk_dir}"
                 "${ffmpeg_build_dir}"
@@ -286,11 +286,11 @@ function(_moonlight_rebuild_xbox_ffmpeg nxdk_dir ffmpeg_source_dir ffmpeg_build_
 endfunction()
 
 # Prepare the static FFmpeg libraries used by the Xbox streaming runtime.
-function(moonlight_prepare_xbox_ffmpeg nxdk_dir)
+function(sunshine_prepare_xbox_ffmpeg nxdk_dir)
     CPMGetPackage(ffmpeg)
     set(ffmpeg_cc_wrapper "${CMAKE_SOURCE_DIR}/scripts/ffmpeg-nxdk-cc.sh")
     set(ffmpeg_cxx_wrapper "${CMAKE_SOURCE_DIR}/scripts/ffmpeg-nxdk-cxx.sh")
-    _moonlight_validate_xbox_ffmpeg_inputs(
+    _sunshine_validate_xbox_ffmpeg_inputs(
             "${ffmpeg_SOURCE_DIR}"
             "${ffmpeg_cc_wrapper}"
             "${ffmpeg_cxx_wrapper}"
@@ -308,13 +308,13 @@ function(moonlight_prepare_xbox_ffmpeg nxdk_dir)
             "${ffmpeg_install_dir}/lib/libswresample.a")
 
     file(MAKE_DIRECTORY "${ffmpeg_state_dir}")
-    _moonlight_compute_ffmpeg_signature(
+    _sunshine_compute_ffmpeg_signature(
             signature
             "${nxdk_dir}"
             "${ffmpeg_SOURCE_DIR}"
             "${ffmpeg_cc_wrapper}"
             "${ffmpeg_cxx_wrapper}")
-    _moonlight_should_rebuild_ffmpeg(
+    _sunshine_should_rebuild_ffmpeg(
             need_rebuild
             "${signature_file}"
             "${signature}"
@@ -322,7 +322,7 @@ function(moonlight_prepare_xbox_ffmpeg nxdk_dir)
 
     if(need_rebuild)
         message(STATUS "Preparing FFmpeg for Xbox at ${ffmpeg_build_dir}")
-        _moonlight_rebuild_xbox_ffmpeg(
+        _sunshine_rebuild_xbox_ffmpeg(
                 "${nxdk_dir}"
                 "${ffmpeg_SOURCE_DIR}"
                 "${ffmpeg_build_dir}"
@@ -335,8 +335,8 @@ function(moonlight_prepare_xbox_ffmpeg nxdk_dir)
         message(STATUS "Using existing FFmpeg Xbox outputs from ${ffmpeg_install_dir}")
     endif()
 
-    set(MOONLIGHT_FFMPEG_INCLUDE_DIR "${ffmpeg_install_dir}/include" PARENT_SCOPE)
-    set(MOONLIGHT_FFMPEG_LIBRARIES
+    set(SUNSHINE_FFMPEG_INCLUDE_DIR "${ffmpeg_install_dir}/include" PARENT_SCOPE)
+    set(SUNSHINE_FFMPEG_LIBRARIES
             "${ffmpeg_install_dir}/lib/libavcodec.a"
             "${ffmpeg_install_dir}/lib/libswscale.a"
             "${ffmpeg_install_dir}/lib/libswresample.a"
@@ -345,7 +345,7 @@ function(moonlight_prepare_xbox_ffmpeg nxdk_dir)
 endfunction()
 
 # Keep known upstream dependency warnings nonfatal without changing other diagnostics.
-function(_moonlight_configure_common_warnings)
+function(_sunshine_configure_common_warnings)
     if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
         target_compile_options(moonlight-common-c PRIVATE -Wno-error=cast-function-type)
         return()
@@ -359,23 +359,23 @@ function(_moonlight_configure_common_warnings)
     # Clang 23 diagnoses upstream's debug counters when NDEBUG removes their assertion reads.
     # Probe the warning directly because nxdk wrappers can have an unknown CMake compiler ID.
     include(CheckCCompilerFlag)
-    check_c_compiler_flag("-Werror=unused-but-set-global" MOONLIGHT_HAS_UNUSED_BUT_SET_GLOBAL)
-    if(MOONLIGHT_HAS_UNUSED_BUT_SET_GLOBAL)
+    check_c_compiler_flag("-Werror=unused-but-set-global" SUNSHINE_HAS_UNUSED_BUT_SET_GLOBAL)
+    if(SUNSHINE_HAS_UNUSED_BUT_SET_GLOBAL)
         target_compile_options(moonlight-common-c PRIVATE -Wno-error=unused-but-set-global)
     endif()
 endfunction()
 
 # Keep Homebrew's headers behind the bundled OpenSSL headers on native macOS builds.
-function(moonlight_prioritize_bundled_openssl_headers target)
+function(sunshine_prioritize_bundled_openssl_headers target)
     if(APPLE AND NOT CMAKE_CROSSCOMPILING)
         set_property(TARGET "${target}" PROPERTY NO_SYSTEM_FROM_IMPORTED TRUE)
         target_include_directories("${target}" BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
     endif()
 endfunction()
 
-# Prepare dependencies that are common to multiple Moonlight components
-macro(MOONLIGHT_PREPARE_COMMON_DEPENDENCIES)
-    if(BUILD_NATIVE_CLIENT AND CMAKE_CROSSCOMPILING AND NOT MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
+# Prepare dependencies that are common to multiple Sunshine components
+macro(SUNSHINE_PREPARE_COMMON_DEPENDENCIES)
+    if(BUILD_NATIVE_CLIENT AND CMAKE_CROSSCOMPILING AND NOT SUNSHINE_BUILD_KIND STREQUAL "XBOX")
         # Cross SDKs supply their own static OpenSSL builds for the selected ABI.
         set(OPENSSL_USE_STATIC_LIBS TRUE)
         find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto SSL)
@@ -383,10 +383,10 @@ macro(MOONLIGHT_PREPARE_COMMON_DEPENDENCIES)
         include(GetOpenSSL REQUIRED)
     endif()
 
-    if(NOT TARGET moonlight-openssl)
-        add_library(moonlight-openssl INTERFACE)
-        add_library(Moonlight::OpenSSL ALIAS moonlight-openssl)
-        target_link_libraries(moonlight-openssl
+    if(NOT TARGET sunshine-openssl)
+        add_library(sunshine-openssl INTERFACE)
+        add_library(SunshineClient::OpenSSL ALIAS sunshine-openssl)
+        target_link_libraries(sunshine-openssl
                 INTERFACE
                 OpenSSL::SSL
                 OpenSSL::Crypto)
@@ -397,46 +397,46 @@ macro(MOONLIGHT_PREPARE_COMMON_DEPENDENCIES)
     CPMGetPackage(moonlight-common-c)
     CPMGetPackage(tomlplusplus)
 
-    if(TARGET moonlight-common-c AND DEFINED MOONLIGHT_OPENSSL_EXTERNAL_TARGET)
-        if(TARGET ${MOONLIGHT_OPENSSL_EXTERNAL_TARGET})
-            add_dependencies(moonlight-common-c ${MOONLIGHT_OPENSSL_EXTERNAL_TARGET})
+    if(TARGET moonlight-common-c AND DEFINED SUNSHINE_OPENSSL_EXTERNAL_TARGET)
+        if(TARGET ${SUNSHINE_OPENSSL_EXTERNAL_TARGET})
+            add_dependencies(moonlight-common-c ${SUNSHINE_OPENSSL_EXTERNAL_TARGET})
         endif()
     endif()
 
     if(TARGET moonlight-common-c)
-        _moonlight_configure_common_warnings()
+        _sunshine_configure_common_warnings()
     endif()
 
-    if(MOONLIGHT_BUILD_KIND STREQUAL "XBOX")
+    if(SUNSHINE_BUILD_KIND STREQUAL "XBOX")
         if(NOT DEFINED NXDK_DIR OR NXDK_DIR STREQUAL "")
             message(FATAL_ERROR "NXDK_DIR must be defined before preparing Xbox dependencies")
         endif()
 
-        set(MOONLIGHT_NXDK_NET_INCLUDE_DIR "${NXDK_DIR}/lib/net")
-        set(MOONLIGHT_NXDK_LIBC_EXTENSIONS_DIR "${NXDK_DIR}/lib/xboxrt/libc_extensions")
-        set(MOONLIGHT_NXDK_LWIP_POSIX_COMPAT_DIR "${NXDK_DIR}/lib/net/lwip/src/include/compat/posix")
+        set(SUNSHINE_NXDK_NET_INCLUDE_DIR "${NXDK_DIR}/lib/net")
+        set(SUNSHINE_NXDK_LIBC_EXTENSIONS_DIR "${NXDK_DIR}/lib/xboxrt/libc_extensions")
+        set(SUNSHINE_NXDK_LWIP_POSIX_COMPAT_DIR "${NXDK_DIR}/lib/net/lwip/src/include/compat/posix")
         if(TARGET enet)
             target_compile_definitions(enet PRIVATE NXDK)
-            target_link_libraries(enet PUBLIC NXDK::NXDK NXDK::Net moonlight_nxdk_compat)
+            target_link_libraries(enet PUBLIC NXDK::NXDK NXDK::Net sunshine_nxdk_compat)
             target_include_directories(enet PRIVATE
-                    "${MOONLIGHT_NXDK_NET_INCLUDE_DIR}"
-                    "${MOONLIGHT_NXDK_LIBC_EXTENSIONS_DIR}"
-                    "${MOONLIGHT_NXDK_LWIP_POSIX_COMPAT_DIR}")
+                    "${SUNSHINE_NXDK_NET_INCLUDE_DIR}"
+                    "${SUNSHINE_NXDK_LIBC_EXTENSIONS_DIR}"
+                    "${SUNSHINE_NXDK_LWIP_POSIX_COMPAT_DIR}")
             target_compile_options(enet PRIVATE -Wno-unused-function -Wno-error=unused-function)
         endif()
 
         if(TARGET moonlight-common-c)
             target_compile_definitions(moonlight-common-c PRIVATE NXDK)
-            target_link_libraries(moonlight-common-c PUBLIC moonlight_nxdk_compat NXDK::Net)
+            target_link_libraries(moonlight-common-c PUBLIC sunshine_nxdk_compat NXDK::Net)
             target_include_directories(moonlight-common-c PRIVATE
-                    "${MOONLIGHT_NXDK_NET_INCLUDE_DIR}"
-                    "${MOONLIGHT_NXDK_LIBC_EXTENSIONS_DIR}"
-                    "${MOONLIGHT_NXDK_LWIP_POSIX_COMPAT_DIR}")
+                    "${SUNSHINE_NXDK_NET_INCLUDE_DIR}"
+                    "${SUNSHINE_NXDK_LIBC_EXTENSIONS_DIR}"
+                    "${SUNSHINE_NXDK_LWIP_POSIX_COMPAT_DIR}")
             target_compile_options(moonlight-common-c PRIVATE
                     -Wno-unused-function
                     -Wno-error=unused-function)
         endif()
 
-        moonlight_prepare_xbox_ffmpeg("${NXDK_DIR}")
+        sunshine_prepare_xbox_ffmpeg("${NXDK_DIR}")
     endif()
 endmacro()

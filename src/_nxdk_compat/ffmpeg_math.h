@@ -12,7 +12,7 @@
  * @param exponent The exponent to raise two to.
  * @return Two raised to the given exponent.
  */
-static inline double moonlight_ffmpeg_exp2(double exponent) {
+static inline double sunshine_ffmpeg_exp2(double exponent) {
   const double natural_log_of_two = 0x1.62e42fefa39efp-1;
   return exp(exponent * natural_log_of_two);
 }
@@ -22,8 +22,8 @@ static inline double moonlight_ffmpeg_exp2(double exponent) {
  * @param exponent The exponent to raise two to.
  * @return Two raised to the given exponent, converted to float.
  */
-static inline float moonlight_ffmpeg_exp2f(float exponent) {
-  return (float) moonlight_ffmpeg_exp2(exponent);
+static inline float sunshine_ffmpeg_exp2f(float exponent) {
+  return (float) sunshine_ffmpeg_exp2(exponent);
 }
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -32,7 +32,7 @@ static inline float moonlight_ffmpeg_exp2f(float exponent) {
  * @param value The value to round.
  * @return The rounded integer, or the x87 integer indefinite value if it is unrepresentable.
  */
-static inline long moonlight_ffmpeg_lrint(double value) {
+static inline long sunshine_ffmpeg_lrint(double value) {
   int32_t result;
   __asm__ volatile("fistpl %0" : "=m"(result) : "t"(value) : "st");
   return result;
@@ -43,8 +43,8 @@ static inline long moonlight_ffmpeg_lrint(double value) {
  * @param value The value to round.
  * @return The rounded integer, or the x87 integer indefinite value if it is unrepresentable.
  */
-static inline long moonlight_ffmpeg_lrintf(float value) {
-  return moonlight_ffmpeg_lrint(value);
+static inline long sunshine_ffmpeg_lrintf(float value) {
+  return sunshine_ffmpeg_lrint(value);
 }
 
 /**
@@ -52,7 +52,7 @@ static inline long moonlight_ffmpeg_lrintf(float value) {
  * @param value The value to round.
  * @return The rounded integer, or the x87 integer indefinite value if it is unrepresentable.
  */
-static inline long long moonlight_ffmpeg_llrint(double value) {
+static inline long long sunshine_ffmpeg_llrint(double value) {
   int64_t result;
   __asm__ volatile("fistpll %0" : "=m"(result) : "t"(value) : "st");
   return result;
@@ -63,7 +63,7 @@ static inline long long moonlight_ffmpeg_llrint(double value) {
  * @param value The value to round.
  * @return The rounded integer, or the x87 integer indefinite value if it is unrepresentable.
  */
-static inline long long moonlight_ffmpeg_llrintf(float value) {
-  return moonlight_ffmpeg_llrint(value);
+static inline long long sunshine_ffmpeg_llrintf(float value) {
+  return sunshine_ffmpeg_llrint(value);
 }
 #endif

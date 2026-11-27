@@ -1,24 +1,28 @@
 <div align="center">
   <img
-    src="moonlight-logo.svg"
-    alt="Moonlight icon"
+    src="sunshine-logo.svg"
+    alt="Sunshine icon"
     width="256"
   />
-  <h1 align="center">Moonlight</h1>
-  <h4 align="center">Moonlight game streaming client for desktop, Android, iOS/tvOS and the original Xbox.</h4>
+  <h1 align="center">Sunshine</h1>
+  <h4 align="center">Official Sunshine client for desktop, Android, iOS, tvOS and the original Xbox.</h4>
 </div>
 
 <div align="center">
-  <a href="https://github.com/SunshineStream/Moonlight-XboxOG"><img src="https://img.shields.io/github/stars/SunshineStream/Moonlight-XboxOG.svg?logo=github&style=for-the-badge" alt="GitHub stars"></a>
-  <a href="https://github.com/SunshineStream/Moonlight-XboxOG/actions/workflows/ci.yml?query=branch%3Amaster"><img src="https://img.shields.io/github/actions/workflow/status/SunshineStream/Moonlight-XboxOG/ci.yml.svg?branch=master&label=CI%20build&logo=github&style=for-the-badge" alt="GitHub Workflow Status (CI)"></a>
-  <a href="https://codecov.io/gh/SunshineStream/Moonlight-XboxOG"><img src="https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fapp.lizardbyte.dev%2Fdashboard%2Fshields%2Fcodecov%2FMoonlight-XboxOG.json&style=for-the-badge&logo=codecov" alt="Codecov"></a>
-  <a href="https://sonarcloud.io/project/overview?id=SunshineStream_Moonlight-XboxOG"><img src="https://img.shields.io/sonar/quality_gate/SunshineStream_Moonlight-XboxOG.svg?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarqubecloud&label=sonarcloud" alt="SonarCloud"></a>
+  <a href="https://github.com/SunshineStream/Sunshine-client"><img src="https://img.shields.io/github/stars/SunshineStream/Sunshine-client.svg?logo=github&style=for-the-badge" alt="GitHub stars"></a>
+  <a href="https://github.com/SunshineStream/Sunshine-client/actions/workflows/ci.yml?query=branch%3Amaster"><img src="https://img.shields.io/github/actions/workflow/status/SunshineStream/Sunshine-client/ci.yml.svg?branch=master&label=CI%20build&logo=github&style=for-the-badge" alt="GitHub Workflow Status (CI)"></a>
+  <a href="https://codecov.io/gh/SunshineStream/Sunshine-client"><img src="https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fapp.lizardbyte.dev%2Fdashboard%2Fshields%2Fcodecov%2FSunshine-client.json&style=for-the-badge&logo=codecov" alt="Codecov"></a>
+  <a href="https://sonarcloud.io/project/overview?id=SunshineStream_Sunshine-client"><img src="https://img.shields.io/sonar/quality_gate/SunshineStream_Sunshine-client.svg?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarqubecloud&label=sonarcloud" alt="SonarCloud"></a>
 </div>
 
 # Overview
 
-Moonlight streams games from a computer running Sunshine. Select a PC to pair or open its app
+The Sunshine client streams games from your Sunshine host. Select a PC to pair or open its app
 library. Use a controller, keyboard, or touch navigation where the client supports it.
+
+Upgrades from Moonlight reuse existing Windows, macOS, standalone Linux and original Xbox save data.
+Android, iOS, tvOS and Flatpak builds use new app identifiers and need to pair again if you used an
+earlier client under the Moonlight name.
 
 - [Desktop](#desktop) (Windows, Linux, and macOS)
 - [Android](#android) (phones and Android TV)
@@ -30,16 +34,19 @@ library. Use a controller, keyboard, or touch navigation where the client suppor
 <details>
 <summary>Windows screenshot</summary>
 
-![Moonlight startup on Windows](./docs/images/screenshots/windows-splash.png)
+![Sunshine startup on Windows](./docs/images/screenshots/windows-splash.png)
 
 </details>
 
-The desktop and mobile builds use the SDL3 target `moonlight_client`, with per-user storage and
+The desktop and mobile builds use the SDL3 target `sunshine_client`, with per-user storage and
 stream profiles up to 3840×2160 at 120 FPS. Auto codec selection negotiates H.264, HEVC, or AV1 in SDR
 according to the host and available FFmpeg decoders. FFmpeg can use D3D11VA or DXVA2 on Windows,
 VA-API or CUDA on Linux, VideoToolbox on Apple platforms, and MediaCodec on Android when the
 target build and device provide the decoder. Hardware frames are copied into the SDL presentation
 path.
+
+For an existing build tree, run the configure preset again to pick up the renamed targets and
+`SUNSHINE_` options.
 
 SDL3 supports mapped gamepads and host-driven rumble, motion, touchpad, battery, and LED features
 when the device exposes them. Its Steam Controller 2 backport exposes digital trigger clicks and
@@ -55,7 +62,7 @@ fit the window, and streamed video keeps its aspect ratio. Press **F11** in the 
 ### Windows
 
 In CLion, enable the **SDL client (UCRT64)** CMake profile and select **Windows Client**
-to build and launch `moonlight_client`. From the UCRT64 shell, use `client-ucrt64`.
+to build and launch `sunshine_client`. From the UCRT64 shell, use `client-ucrt64`.
 The preset downloads the pinned FFmpeg package during configure.
 
 ```bash
@@ -70,25 +77,18 @@ The release workflow signs the Windows executable with Azure Artifact Signing.
 Use `client` and enable the prebuilt package if you want to use it.
 
 ```bash
-cmake --preset client -DMOONLIGHT_USE_PREBUILT_FFMPEG=ON
+cmake --preset client -DSUNSHINE_USE_PREBUILT_FFMPEG=ON
 cmake --build --preset client --parallel
 ```
 
 The prebuilt option downloads a LizardByte/build-deps archive pinned in `package-lock.cmake` and
 verifies it against the release asset checksum. Set `FFMPEG_PREPARED_BINARIES` to an extracted target
 FFmpeg prefix to build offline with that artifact.
-Linux distribution uses `packaging/linux/flatpak/dev.lizardbyte.app.Moonlight.yml`. The Flatpak
+Linux distribution uses `packaging/linux/flatpak/dev.lizardbyte.app.SunshineClient.yml`. The Flatpak
 grants device access so SDL can use raw HID for advanced controller features.
 The release workflow signs, notarizes, and staples the macOS DMG.
 
 ## Android
-
-<details>
-<summary>Android screenshot</summary>
-
-![Moonlight settings in an Android emulator](./docs/images/screenshots/android-portrait.png)
-
-</details>
 
 The APK includes Android and Android TV launcher entries. See [Testing on Android and Android TV](docs/test-android.md)
 for building, installing on hardware, and running in Android Studio.
@@ -100,30 +100,9 @@ for Xcode setup, development signing, and simulator builds.
 
 ## Original Xbox
 
-<details>
-<summary>Original Xbox screenshots from xemu</summary>
-
-![Splash Screen](./docs/images/screenshots/01-splash.png)
-![Hosts Screen](./docs/images/screenshots/02-hosts.png)
-![Apps Screen](./docs/images/screenshots/03-apps.png)
-
-![Settings](./docs/images/screenshots/04-settings.png)
-![Add Host](./docs/images/screenshots/05-add-host.png)
-![IP Address Entry](./docs/images/screenshots/06-ip-address.png)
-![App Actions](./docs/images/screenshots/07-app-actions.png)
-![Connection Test Progress](./docs/images/screenshots/08-connection-testing.png)
-![Successful Connection Test](./docs/images/screenshots/09-connection-success.png)
-![Failed Connection Test](./docs/images/screenshots/10-connection-failed.png)
-![Notification Stack](./docs/images/screenshots/11-notifications.png)
-![Stream controls](./docs/images/screenshots/12-stream-controls.png)
-![On-screen keyboard](./docs/images/screenshots/13-stream-keyboard.png)
-![Screenshot notification](./docs/images/screenshots/14-screenshot-notification.png)
-
-</details>
-
 The interface takes its compact navigation and PC cards from Moonlight Qt, with a library designed
 for a controller and a television. Select a PC to pair or open its apps. Game covers have separate
-captions, and a blue focus ring shows which card will open. Running apps carry a **PLAYING** badge.
+captions, and an amber focus ring shows which card will open. Running apps carry a **PLAYING** badge.
 Missing artwork uses Lucide desktop or gamepad placeholders.
 Use the D-pad or left stick to navigate, **A** to select, **B** to go back and **Y** for host or app
 actions. Move up from the first PC row to reach Settings, Support and Add Host.
@@ -132,8 +111,8 @@ for host or app actions. Button hints follow the keyboard or controller you are 
 On the hosts page, **Alt + F4** exits the client. **PgUp / PgDn** scroll the log viewer;
 hold **Shift** for faster scrolling. **Backspace** dismisses a notification or changes the log pane.
 
-PCs use grayscale moon artwork: a full moon for paired online PCs, a half moon for
-online PCs awaiting pairing, and a crescent for offline PCs. A separate orbit shows controller focus.
+A filled sun marks paired online PCs. An outlined sun with rays marks PCs awaiting pairing, and a
+dim ring marks offline PCs. A separate amber ring shows controller focus.
 
 Settings categories have icons and the detail panel extends beside the page heading, with a fixed help
 area above its options so changing values keeps the list in place. Dialogs contain their controller
@@ -159,7 +138,7 @@ No network connection or JavaScript runtime is needed to display the icons on th
 
 ### Video codec selection
 
-**Settings → Display → Video Codec** defaults to **Auto (Prefer MPEG-2)**. Moonlight tries MPEG-2
+**Settings → Display → Video Codec** defaults to **Auto (Prefer MPEG-2)**. Sunshine tries MPEG-2
 when the host advertises it and uses standard automatic negotiation if it is unavailable or the
 MPEG-2 handshake fails. Choose **Auto** for standard negotiation, which prefers H.264, then MPEG-2,
 then H.263+. You can also select H.264, MPEG-2, or H.263+ directly.
@@ -168,23 +147,23 @@ Sunshine must enable `mpeg2_mode = 2` or `h263p_mode = 2` to advertise the corre
 These Sunshine protocol extensions are available to any client implementing their negotiation and decoding.
 
 The preference is saved as `streaming.video_codec` in the settings file. The default value is
-`"prefer_mpeg2"`. Moonlight also reads the older `streaming.video_decoder` key for compatibility.
+`"prefer_mpeg2"`. Sunshine also reads the older `streaming.video_decoder` key for compatibility.
 `video_codec` takes precedence when both exist.
 
 ### Video presentation
 
 **Settings → Display → Video Presentation** defaults to **GPU**, which uses NV2A color conversion and
 scaling with automatic software fallback. **Software** combines the decoded video and overlay on the
-CPU before displaying each frame. Moonlight keeps your selection in `streaming.gpu_presentation`.
+CPU before displaying each frame. Sunshine keeps your selection in `streaming.gpu_presentation`.
 
 **Settings → Display → GPU Video Buffers** applies to new GPU streams at any resolution. **Auto**
 tries three buffers at 720p when the packed source fits a 1280×720 buffer and uses two elsewhere. Choose **2**
-to save memory or **3** to pack the next frame while the previous one waits for scanout. If Moonlight
+to save memory or **3** to pack the next frame while the previous one waits for scanout. If Sunshine
 cannot allocate the spare, it uses two buffers. The `streaming.gpu_buffer_count` settings key accepts
 `0` (Auto), `2`, and `3`. The stream log reports the number of GPU buffers in use.
 
 With 1080i enabled in the Xbox video settings, **Stream Resolution → 1920×1080** requests a
-1920×1080 stream and uses native 1080i output. Moonlight uses a 16-bit RGB framebuffer in this mode
+1920×1080 stream and uses native 1080i output. Sunshine uses a 16-bit RGB framebuffer in this mode
 to leave memory for the H.264 decoder.
 
 ### Stream audio
@@ -317,7 +296,7 @@ nxdk_dependencies=(
   "mingw-w64-ucrt-x86_64-make"
   "mingw-w64-ucrt-x86_64-nasm"
 )
-moonlight_dependencies=(
+sunshine_dependencies=(
   "diffutils"
   "patch"
   "perl"
@@ -327,7 +306,7 @@ moonlight_dependencies=(
   "mingw-w64-ucrt-x86_64-nodejs"
   "mingw-w64-ucrt-x86_64-pkgconf"
 )
-dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
+dependencies=("${nxdk_dependencies[@]}" "${sunshine_dependencies[@]}")
 pacman -S "${dependencies[@]}"
 ```
 
@@ -345,13 +324,13 @@ nxdk_dependencies=(
   "llvm"
   "nasm"
 )
-moonlight_dependencies=(
+sunshine_dependencies=(
   "patch"
   "doxygen"
   "graphviz"
   "nodejs"
 )
-dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
+dependencies=("${nxdk_dependencies[@]}" "${sunshine_dependencies[@]}")
 apt install "${dependencies[@]}"
 ```
 
@@ -365,12 +344,12 @@ nxdk_dependencies=(
   "llvm"
   "nasm"
 )
-moonlight_dependencies=(
+sunshine_dependencies=(
   "doxygen"
   "graphviz"
   "node"
 )
-dependencies=("${nxdk_dependencies[@]}" "${moonlight_dependencies[@]}")
+dependencies=("${nxdk_dependencies[@]}" "${sunshine_dependencies[@]}")
 brew install "${dependencies[@]}"
 ```
 
@@ -387,11 +366,11 @@ cmake -S . -B cmake-build-release -DBUILD_DOCS=OFF -DCMAKE_BUILD_TYPE=Release \
 
 Optional Xbox build settings:
 
-| CMake option                        | Default | Purpose                                                                                        |
-| ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `MOONLIGHT_BUILD_VIDEO_EXPERIMENTS` | `OFF`   | Build the standalone [video probes](experiments/README.md).                                    |
-| `MOONLIGHT_BUILD_AUDIO_EXPERIMENTS` | `OFF`   | Build the standalone [audio playback probe](experiments/README.md#audio-playback-probe).       |
-| `MOONLIGHT_INPUT_DIAGNOSTICS`       | `OFF`   | Show controller state and event counters. Select Software presentation to see the debug strip. |
+| CMake option                       | Default | Purpose                                                                                        |
+| ---------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `SUNSHINE_BUILD_VIDEO_EXPERIMENTS` | `OFF`   | Build the standalone [video probes](experiments/README.md).                                    |
+| `SUNSHINE_BUILD_AUDIO_EXPERIMENTS` | `OFF`   | Build the standalone [audio playback probe](experiments/README.md#audio-playback-probe).       |
+| `SUNSHINE_INPUT_DIAGNOSTICS`       | `OFF`   | Show controller state and event counters. Select Software presentation to see the debug strip. |
 
 Pass these options when configuring. Existing build directories retain cached build options until
 explicitly reconfigured.
@@ -431,18 +410,18 @@ build-ucrt64.bat
 
 ### Dependency compatibility on Xbox
 
-The SDK submodule tracks upstream XboxDev/nxdk, including its upstream PDCLib. Moonlight's
+The SDK submodule tracks upstream XboxDev/nxdk, including its upstream PDCLib. Sunshine's
 Xbox adapters live in `src/_nxdk_compat` and are built by `cmake/nxdk-compat.cmake`.
 All SDK libraries, host tools and generated lwIP files are built under the build
 directory, including for direct Xbox presets. `cmake/nxdk-toolchain.cmake` prepares
 that copy before compiler checks and then loads the stock nxdk toolchain. SDK
 revision changes and local edits to tracked SDK files refresh the copy; unrelated
-untracked files and existing build products are excluded. `MOONLIGHT_NXDK_DIR`
-selects the source checkout; `MOONLIGHT_NXDK_BUILD_DIR` selects the build copy.
+untracked files and existing build products are excluded. `SUNSHINE_NXDK_DIR`
+selects the source checkout; `SUNSHINE_NXDK_BUILD_DIR` selects the build copy.
 
 The Xbox child build fetches [nxdk-sdl3](https://github.com/Ryzee119/nxdk-sdl3),
 SDL3_image, and SDL3_ttf at the revisions in `package-lock.cmake`.
-Moonlight applies its boot USB keyboard and mouse hooks, video-mode integration,
+Sunshine applies its boot USB keyboard and mouse hooks, video-mode integration,
 and audio teardown changes to copies of the port's drivers in the build directory.
 The shell uses the Xbox SDL3 renderer when the output mode supports it and falls
 back to software rendering. Streaming uses a software SDL3 renderer for its
@@ -457,7 +436,7 @@ network-interface layout matches lwIP.
 
 The compatibility layer provides real wall-clock, sleep and reentrant string helpers.
 FFmpeg's unused POSIX descriptor/file helpers and OpenSSL's optional POSIX directory
-and metadata queries fail explicitly with `ENOSYS`. Moonlight's Win32 file APIs,
+and metadata queries fail explicitly with `ENOSYS`. Sunshine's Win32 file APIs,
 standard stdio and custom OpenSSL socket BIO continue to handle saved data and pairing.
 FFmpeg configure probes still link actual Xbox libraries and the local timing helpers.
 
@@ -470,13 +449,13 @@ platform path, with memory mapping and temporary-file creation disabled.
 ### CLion on Windows
 
 Enable the **Xbox Release (UCRT64)** CMake profile, then select **Xbox - Build and Run in xemu**
-from the run configuration menu. **Run** builds `moonlight_xbox` and opens the resulting
-`cmake-build-xbox-release-ucrt64/Moonlight.iso` in xemu. To package the ISO on its own, build the
-`moonlight_xbox` target. The `moonlight_xbox_executable` target builds the intermediate binary.
+from the run configuration menu. **Run** builds `sunshine_xbox` and opens the resulting
+`cmake-build-xbox-release-ucrt64/Sunshine.iso` in xemu. To package the ISO on its own, build the
+`sunshine_xbox` target. The `sunshine_xbox_executable` target builds the intermediate binary.
 
 Use **Xbox and Host Tests Release (UCRT64)** when you also need the native test targets or
 documentation. That profile builds the Xbox client in a child directory and puts the ISO at
-`cmake-build-release-ucrt64/xbox/Moonlight.iso`.
+`cmake-build-release-ucrt64/xbox/Sunshine.iso`.
 
 For the first xemu launch, you can either run the shared `Setup portable xemu` configuration or run the Windows wrapper manually:
 
@@ -486,10 +465,10 @@ scripts\setup-xemu.cmd
 
 The shared Xbox run configuration builds the ISO before invoking `scripts\run-xemu.cmd` with
 the selected CMake build directory. A local run configuration can also set its working directory
-to the build output. The launcher uses that directory when no explicit target or `MOONLIGHT_XEMU_*`
+to the build output. The launcher uses that directory when no explicit target or `SUNSHINE_XEMU_*`
 path override is provided.
 
-The setup script downloads xemu and the emulator support files into `.local/xemu`, then refreshes launcher manifests used by `scripts/run-xemu.sh`. Existing files under `.local/xemu` are preserved by default so a local xemu install or support bundle is not overwritten unless you pass `--force`. The launcher accepts `MOONLIGHT_XEMU_BUILD_DIR`, `MOONLIGHT_XEMU_ISO_PATH`, `--build-dir <cmake-build-dir>`, `--iso <iso-path>`, or a single positional path that can point at either a build directory or an ISO file. If you do not pass a path, it falls back across available `cmake-build-*` outputs and prefers the newest built ISO.
+The setup script downloads xemu and the emulator support files into `.local/xemu`, then refreshes launcher manifests used by `scripts/run-xemu.sh`. Existing files under `.local/xemu` are preserved by default so a local xemu install or support bundle is not overwritten unless you pass `--force`. The launcher accepts `SUNSHINE_XEMU_BUILD_DIR`, `SUNSHINE_XEMU_ISO_PATH`, `--build-dir <cmake-build-dir>`, `--iso <iso-path>`, or a single positional path that can point at either a build directory or an ISO file. If you do not pass a path, it falls back across available `cmake-build-*` outputs and prefers the newest built ISO.
 
 When xemu runs with its default user-mode network, multicast mDNS traffic is not forwarded reliably, so automatic host discovery may not find your PC. For reliable discovery, launch xemu with `--network tap --tap-ifname <adapter>` or add the host manually from the Xbox UI.
 
@@ -506,14 +485,14 @@ scripts\setup-xemu.cmd --skip-support-files
 
 ## Host-native unit tests
 
-The Xbox executable cannot run directly on Windows, macOS, or Linux, so the top-level project builds `test_moonlight` natively while the Xbox binary is built by an internal child configure that uses the `nxdk` toolchain. Keep Xbox runtime code thin and move logic you want to test into platform-neutral sources that can be linked into `test_moonlight`.
+The Xbox executable cannot run directly on Windows, macOS, or Linux, so the top-level project builds `test_sunshine` natively while the Xbox binary is built by an internal child configure that uses the `nxdk` toolchain. Keep Xbox runtime code thin and move logic you want to test into platform-neutral sources that can be linked into `test_sunshine`.
 
 ### Windows via MSYS2 UCRT64
 
 From `cmd.exe` in the project root, open a UCRT64 shell using the local MSYS2 installation:
 
 ```bat
-call scripts\find-msys2.cmd && "%MOONLIGHT_MSYS2_SHELL%" -defterm -here -no-start -ucrt64
+call scripts\find-msys2.cmd && "%SUNSHINE_MSYS2_SHELL%" -defterm -here -no-start -ucrt64
 ```
 
 Configure, build, and run the tests from the UCRT64 shell:
@@ -532,7 +511,7 @@ ctest --test-dir cmake-build-host-tests-ucrt64 --output-on-failure
 ```bash
 cmake -S . -B cmake-build-host-tests \
   -DBUILD_TESTS=ON -DBUILD_XBOX=OFF -DBUILD_NATIVE_CLIENT=OFF -DBUILD_DOCS=OFF
-cmake --build cmake-build-host-tests --target test_moonlight
+cmake --build cmake-build-host-tests --target test_sunshine
 ctest --test-dir cmake-build-host-tests --output-on-failure
 ```
 

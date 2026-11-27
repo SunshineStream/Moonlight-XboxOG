@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
 /**
  * @brief Display or requested stream dimensions for the portable client.
  */

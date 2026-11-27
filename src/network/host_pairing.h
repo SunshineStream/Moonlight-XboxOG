@@ -15,7 +15,7 @@
 namespace network {
 
   /**
-   * @brief Client identity material used for Moonlight host pairing.
+   * @brief Client identity material used for Sunshine host pairing.
    */
   struct PairingIdentity {
     std::string uniqueId;  ///< Stable unique identifier presented to the host.
@@ -84,7 +84,7 @@ namespace network {
     int width = 640;  ///< Requested stream width in pixels.
     int height = 480;  ///< Requested stream height in pixels.
     int fps = 30;  ///< Requested stream frame rate.
-    int audioConfiguration = 0;  ///< Moonlight audio configuration bitfield.
+    int audioConfiguration = 0;  ///< Sunshine audio configuration bitfield.
     bool playAudioOnPc = false;  ///< True when the host PC should continue local audio playback during streaming.
     int clientRefreshRateX100 = 0;  ///< Optional client refresh rate multiplied by 100.
     std::string remoteInputAesKeyHex;  ///< Hex-encoded 16-byte remote-input AES key.
@@ -112,7 +112,7 @@ namespace network {
   bool is_valid_pairing_identity(const PairingIdentity &identity);
 
   /**
-   * @brief Create a fresh client identity for Moonlight pairing.
+   * @brief Create a fresh client identity for Sunshine pairing.
    *
    * @param errorMessage Optional output for key or certificate generation failures.
    * @return Generated pairing identity, or an empty identity on failure.

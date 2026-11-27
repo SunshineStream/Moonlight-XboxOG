@@ -1,6 +1,6 @@
 /**
  * @file src/main.cpp
- * @brief Runs the Moonlight startup sequence and main loop.
+ * @brief Runs the Sunshine startup sequence and main loop.
  */
 // standard includes
 #include <algorithm>
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#if defined(MOONLIGHT_NATIVE_CLIENT) && !defined(_WIN32)
+#if defined(SUNSHINE_NATIVE_CLIENT) && !defined(_WIN32)
   #include <csignal>
 #endif
 
@@ -120,13 +120,13 @@ namespace {
 
     if (!loadResult.fileFound) {
       logging::info("settings", "No persisted settings file found. Using defaults.");
-#ifdef MOONLIGHT_NATIVE_CLIENT
+#ifdef SUNSHINE_NATIVE_CLIENT
       state.settings.streamBitrateKbps = app::default_stream_bitrate_kbps(1920, 1080, state.settings.streamFramerate);
 #endif
       return;
     }
 
-    logging::info("settings", "Loaded persisted Moonlight settings");
+    logging::info("settings", "Loaded persisted Sunshine settings");
     if (!loadResult.cleanupRequired) {
       return;
     }
@@ -242,11 +242,12 @@ namespace {
  * @return Process exit code.
  */
 int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
-#if defined(MOONLIGHT_NATIVE_CLIENT) && !defined(_WIN32)
+#if defined(SUNSHINE_NATIVE_CLIENT) && !defined(_WIN32)
   // A host can close a TCP connection while OpenSSL is writing to it.
   std::signal(SIGPIPE, SIG_IGN);
 #endif
 #ifndef NXDK
+  SDL_SetAppMetadata("Sunshine", nullptr, "dev.lizardbyte.app.SunshineClient");
   // Route TV remotes to the same directional navigation as a keyboard.
   SDL_SetHint(SDL_HINT_TV_REMOTE_AS_JOYSTICK, "0");
   #ifdef __ANDROID__
@@ -316,18 +317,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
 
   debug_print_startup_checkpoint("About to create SDL window");
   SDL_Window *window = SDL_CreateWindow(
-#ifdef NXDK
-    "Moonlight Xbox",
-#else
-    "Moonlight",
-#endif
+    "Sunshine",
     bestVideoMode.width,
     bestVideoMode.height,
 #ifdef NXDK
     0
 #else
     SDL_WINDOW_HIGH_PIXEL_DENSITY | (SDL_IsTV() ? SDL_WINDOW_FULLSCREEN : 0)
-  #if defined(__ANDROID__) || defined(MOONLIGHT_IOS)
+  #if defined(__ANDROID__) || defined(SUNSHINE_IOS)
       | (SDL_IsTV() ? 0 : SDL_WINDOW_RESIZABLE)
   #endif
 #endif
@@ -360,7 +357,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
     return !startupTask.completed.load();
   });
 
-#ifdef MOONLIGHT_DESKTOP
+#ifdef SUNSHINE_DESKTOP
   // Resizing invalidates the window surface used by the splash.
   if (!SDL_SetWindowMinimumSize(window, 640, 360)) {
     logging::warn("sdl", std::string("Could not set the minimum window size: ") + SDL_GetError());

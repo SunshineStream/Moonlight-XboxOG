@@ -93,7 +93,7 @@ case "${target}" in
     sdl_patch="${source_root}/cmake/patches/sdl3-steam-controller-trigger-clicks-and-haptics.patch"
     (
       cd -- "${sdl_src}"
-      # Staged archives omit .git. Keep git apply from looking up the parent Moonlight checkout.
+      # Staged archives omit .git. Keep git apply from looking up the parent Sunshine checkout.
       export GIT_CEILING_DIRECTORIES="${work_dir}"
       if ! git apply --reverse --check "${sdl_patch}" 2>/dev/null; then
         git apply "${sdl_patch}"
@@ -127,7 +127,7 @@ case "${target}" in
   *) echo "Unsupported target: ${target}" >&2; exit 2 ;;
 esac
 
-jobs="${MOONLIGHT_BUILD_JOBS:-4}"
+jobs="${SUNSHINE_BUILD_JOBS:-4}"
 if [[ -z "${meson_cc}" ]]; then
   meson_cc="'${cc}'"
 fi
