@@ -24,6 +24,8 @@ on:
         required: false
       AZURE_TENANT_ID:
         required: false
+      CODECOV_TOKEN:
+        required: false
 
 jobs:
   build:
@@ -51,6 +53,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           submodules: recursive
+
       - uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c  # v2.34.0
         with:
           msystem: ${{ matrix.msystem }}
@@ -86,21 +89,25 @@ jobs:
           build-dir: cmake-build-client
           platform: Windows-${{ matrix.arch }}
           test-shell: 'msys2 {0}'
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Stage Windows client
         run: |
           cmake --install cmake-build-client --prefix "$PWD/artifacts" --strip
+
       - name: Package Windows client
         if: '!inputs.publish_release'
         working-directory: artifacts/bin
         env:
           PACKAGE_NAME: Moonlight-Windows-${{ matrix.arch }}
         run: cmake -E tar c "../${PACKAGE_NAME}.zip" --format=zip Moonlight.exe assets
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: '!inputs.publish_release'
         with:
           name: Moonlight-Windows-${{ matrix.arch }}
           path: artifacts/*.zip
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: inputs.publish_release
         with:
@@ -121,6 +128,7 @@ jobs:
         with:
           pattern: Windows-signing-input-*
           path: artifacts
+
       - name: Sign Windows executable
         uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
         with:
@@ -133,6 +141,7 @@ jobs:
           files-folder: ${{ github.workspace }}\artifacts
           files-folder-filter: exe
           files-folder-recurse: true
+
       - name: Package signed clients
         working-directory: artifacts
         shell: bash
@@ -143,11 +152,13 @@ jobs:
               cmake -E tar c "../Moonlight-Windows-${arch}.zip" --format=zip Moonlight.exe assets
             )
           done
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: Moonlight-Windows-AMD64
           path: artifacts/Moonlight-Windows-AMD64.zip
           if-no-files-found: error
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: Moonlight-Windows-ARM64

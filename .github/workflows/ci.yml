@@ -58,6 +58,7 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   build-apple:
     name: Apple
@@ -96,55 +97,6 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-
-  windows-coverage:
-    name: Coverage / ${{ matrix.platform }}
-    if: ${{ !cancelled() && startsWith(github.repository, 'SunshineStream/') }}
-    needs:
-      - build-windows
-      - build-xbox
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - Windows-AMD64
-          - Windows-ARM64
-          - Xbox-host-Windows
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-
-      - name: Download test reports
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          pattern: Tests-${{ matrix.platform }}
-          merge-multiple: true
-          path: coverage
-
-      - name: Upload coverage to Codecov
-        if: hashFiles('coverage/coverage.info') != ''
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
-        with:
-          disable_search: true
-          fail_ci_if_error: true
-          files: coverage/coverage.info
-          flags: ${{ matrix.platform }}
-          report_type: coverage
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Upload test results to Codecov
-        if: hashFiles('coverage/tests/test_results.xml') != ''
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
-        with:
-          disable_search: true
-          fail_ci_if_error: true
-          files: coverage/tests/test_results.xml
-          flags: ${{ matrix.platform }}
-          report_type: test_results
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   release:
     name: Draft release

@@ -134,7 +134,7 @@ runs:
 
     - name: Upload coverage to Codecov
       if: >-
-        ${{ !cancelled() && runner.os != 'Windows' && steps.coverage.outcome == 'success' &&
+        ${{ !cancelled() && steps.coverage.outcome == 'success' &&
         startsWith(github.repository, 'SunshineStream/') }}
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
       with:
@@ -147,8 +147,9 @@ runs:
 
     - name: Upload test results to Codecov
       if: >-
-        ${{ !cancelled() && runner.os != 'Windows' &&
+        ${{ !cancelled() &&
         (steps.tests.outcome == 'success' || steps.tests.outcome == 'failure') &&
+        hashFiles(format('{0}/tests/test_results.xml', inputs.build-dir)) != '' &&
         startsWith(github.repository, 'SunshineStream/') }}
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
       with:
