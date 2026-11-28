@@ -8,8 +8,6 @@
 // standard includes
 #include <cstdint>
 #include <cstdio>
-#include <filesystem>
-#include <iterator>
 #include <string>
 
 // lib includes
@@ -29,7 +27,7 @@ namespace {
 
   class FilesystemUtilsTest: public BaseTest {  // NOSONAR(cpp:S3656) protected members are required by gtest
   protected:
-    std::string rootDirectory = "filesystem-utils-test";
+    std::string rootDirectory = test_support::scratch_path("filesystem-utils-test");
     std::string nestedDirectory = test_support::join_path(test_support::join_path(rootDirectory, "level-one"), "level-two");
     std::string filePath = test_support::join_path(nestedDirectory, "payload.bin");
 
@@ -55,7 +53,7 @@ namespace {
 
     EXPECT_TRUE(platform::ensure_directory_exists({}, &errorMessage)) << errorMessage;
     EXPECT_TRUE(platform::ensure_directory_exists(nestedDirectory, &errorMessage)) << errorMessage;
-    EXPECT_TRUE(std::filesystem::is_directory(nestedDirectory));
+    EXPECT_TRUE(test_support::is_directory(nestedDirectory));
     EXPECT_TRUE(platform::ensure_directory_exists(nestedDirectory, &errorMessage)) << errorMessage;
   }
 
@@ -146,7 +144,7 @@ namespace {
     std::string error = "old";
     EXPECT_TRUE(platform::create_child_directory(rootDirectory, "New folder", error));
     EXPECT_TRUE(error.empty());
-    EXPECT_TRUE(std::filesystem::is_directory(test_support::join_path(rootDirectory, "New folder")));
+    EXPECT_TRUE(test_support::is_directory(test_support::join_path(rootDirectory, "New folder")));
     EXPECT_FALSE(platform::create_child_directory(rootDirectory, "New folder", error));
     EXPECT_FALSE(error.empty());
     write_test_file(test_support::join_path(rootDirectory, "file.txt"), "keep");
@@ -154,7 +152,7 @@ namespace {
     EXPECT_FALSE(platform::create_child_directory(rootDirectory, "../escape", error));
     EXPECT_FALSE(platform::create_child_directory({}, "Folder", error));
     EXPECT_FALSE(platform::create_child_directory(test_support::join_path(rootDirectory, "missing"), "Folder", error));
-    EXPECT_EQ(std::filesystem::file_size(test_support::join_path(rootDirectory, "file.txt")), 4);
+    EXPECT_EQ(test_support::file_size(test_support::join_path(rootDirectory, "file.txt")), 4);
   }
 
   /**
@@ -167,8 +165,8 @@ namespace {
     std::string error = "old";
     EXPECT_TRUE(platform::directory_is_writable(rootDirectory, error)) << error;
     EXPECT_TRUE(error.empty());
-    EXPECT_EQ(std::filesystem::file_size(sentinel), 4);
-    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(rootDirectory), std::filesystem::directory_iterator {}), 1);
+    EXPECT_EQ(test_support::file_size(sentinel), 4);
+    EXPECT_EQ(test_support::entry_count(rootDirectory), 1);
     EXPECT_FALSE(platform::directory_is_writable({}, error));
     EXPECT_FALSE(platform::directory_is_writable(sentinel, error));
     EXPECT_FALSE(platform::directory_is_writable(test_support::join_path(rootDirectory, "missing"), error));
@@ -186,7 +184,7 @@ namespace {
     std::string error;
     EXPECT_FALSE(platform::directory_is_writable(rootDirectory, error));
     EXPECT_FALSE(error.empty());
-    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(rootDirectory), std::filesystem::directory_iterator {}), 32);
+    EXPECT_EQ(test_support::entry_count(rootDirectory), 32);
   }
 
 }  // namespace

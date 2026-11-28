@@ -2,17 +2,18 @@
  * @file tests/xbox/guest/time_test.cpp
  * @brief Exercise Sunshine's timing adapters against the Xbox kernel.
  */
-// test header include
-#include "src/_nxdk_compat/include/sunshine_time.h"
+#if defined(NXDK)
+  // test header include
+  #include "src/_nxdk_compat/include/sunshine_time.h"
 
-// standard includes
-#include <cerrno>
+  // standard includes
+  #include <cerrno>
 
-// lib includes
-#include <lizardbyte/common/testing.h>
+  // lib includes
+  #include <lizardbyte/common/testing.h>
 
-// local includes
-#include "src/_nxdk_compat/include/sys/time.h"
+  // local includes
+  #include "src/_nxdk_compat/include/sys/time.h"
 
 /** @brief Convert known timestamps through the Xbox kernel and preserve caller-owned storage. */
 TEST(XboxGuestTime, ConvertsEpochAndLeapDay) {
@@ -63,3 +64,4 @@ TEST(XboxGuestTime, RejectsInvalidTimevalArguments) {
   EXPECT_EQ(now.tv_sec, 123);
   EXPECT_EQ(now.tv_usec, 456);
 }
+#endif

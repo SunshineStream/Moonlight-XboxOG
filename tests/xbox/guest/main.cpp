@@ -2,9 +2,6 @@
  * @file tests/xbox/guest/main.cpp
  * @brief Report GoogleTest results and coverage to the host from the Xbox test XBE.
  */
-// standard includes
-#include <memory>
-
 // lib includes
 #include <lizardbyte/common/testing.h>
 #include <synchapi.h>
@@ -12,21 +9,14 @@
 
 // local includes
 #include "gcov_serial.h"
+#include "src/platform/filesystem_utils.h"
+
+// test includes
+#include "tests/support/filesystem_test_utils.h"
 
 namespace {
-  /** @brief Emit result records on the kernel's serial console for the test runner. */
+  /** @brief Emit result records on COM2 for the test runner. */
   class SerialResults: public testing::EmptyTestEventListener {
-    /**
-     * @brief Mirror a failing assertion to the serial log for diagnosis.
-     * @param result The assertion's result and diagnostic.
-     */
-    void OnTestPartResult(const testing::TestPartResult &result) override {
-      if (result.failed()) {
-        DbgPrint("Assertion at %s:%d\r\n", result.file_name(), result.line_number());
-        DbgPrint("%.200s\r\n", result.summary());
-      }
-    }
-
     /**
      * @brief Emit a result record after each test.
      * @param info The completed test.
@@ -37,7 +27,7 @@ namespace {
       if (result->Skipped()) {
         status = "SKIP";
       }
-      DbgPrint("SUNSHINE_TEST_CASE %s %s %s\r\n", status, info.test_suite_name(), info.name());
+      sunshine_write_guest_record("SUNSHINE_TEST_CASE %s %s %s\r\n", status, info.test_suite_name(), info.name());
     }
   };
 }  // namespace
@@ -47,18 +37,19 @@ namespace {
  * @return This process waits for the emulator runner to shut down the guest.
  */
 int main() {
+  sunshine_prepare_guest_records();
+  if (!platform::ensure_directory_exists(test_support::guest_scratch_directory)) {
+    DbgPrint("Failed to create the Xbox guest test directory\r\n");
+    sunshine_write_guest_record("SUNSHINE_TEST_DONE 1 0\r\n");
+    return 1;
+  }
   testing::InitGoogleTest();
   auto *tests = testing::UnitTest::GetInstance();
-  auto &listeners = tests->listeners();
-  std::unique_ptr<testing::TestEventListener> defaultPrinter {
-    listeners.Release(listeners.default_result_printer())
-  };
-  defaultPrinter.reset();
-  listeners.Append(new SerialResults);
+  tests->listeners().Append(new SerialResults);
 
   const int result = RUN_ALL_TESTS();
   sunshine_write_guest_coverage();
-  DbgPrint("SUNSHINE_TEST_DONE %d %d\r\n", result, tests->test_to_run_count());
+  sunshine_write_guest_record("SUNSHINE_TEST_DONE %d %d\r\n", result, tests->test_to_run_count());
   Sleep(INFINITE);
   return result;
 }

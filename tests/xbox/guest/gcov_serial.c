@@ -1,13 +1,12 @@
 /**
  * @file tests/xbox/guest/gcov_serial.c
- * @brief Write Clang's gcda records to xemu's serial console after the guest tests.
+ * @brief Write Clang's gcda records to xemu over COM2 after the guest tests.
  */
 // standard includes
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
-
-// lib includes
-#include <xboxkrnl/xboxkrnl.h>
+#include <stdio.h>
 
 // local includes
 #include "gcov_serial.h"
@@ -17,7 +16,7 @@ typedef void (*GcovWriter)(void);
 
 /** @brief Maximum number of translation units instrumented in one guest test XBE. */
 enum {
-  MAX_GCOV_WRITERS = 64
+  MAX_GCOV_WRITERS = SUNSHINE_GCOV_MAX_WRITERS
 };
 
 static GcovWriter writers[MAX_GCOV_WRITERS];  ///< Registered at startup by the instrumented objects.
@@ -25,11 +24,71 @@ static size_t writer_count;  ///< Number of successfully registered writers.
 static char serial_hex[129];  ///< Holds up to 64 bytes encoded as hex plus a terminator.
 static size_t serial_size;  ///< Number of encoded characters currently in the buffer.
 
-/** @brief Send a complete line within the kernel's DbgPrint message size limit. */
+/** @brief Xbox port addresses used for the second serial channel. */
+enum {
+  SUPER_IO_INDEX = 0x2e,
+  SUPER_IO_DATA = 0x2f,
+  COVERAGE_UART = 0x2f8
+};
+
+/**
+ * @brief Write one byte to an Xbox I/O port.
+ * @param port I/O port address.
+ * @param value Byte to write.
+ */
+static void write_port(uint16_t port, uint8_t value) {
+  __asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port));
+}
+
+/**
+ * @brief Set a register in the LPC47M157.
+ * @param reg Index of the configuration register.
+ * @param value Byte to write.
+ */
+static void set_super_io_register(uint8_t reg, uint8_t value) {
+  write_port(SUPER_IO_INDEX, reg);
+  write_port(SUPER_IO_DATA, value);
+}
+
+void sunshine_prepare_guest_records(void) {
+  // Enable the second serial device, using polling so the guest does not need an IRQ handler.
+  write_port(SUPER_IO_INDEX, 0x55);  // Enter configuration mode.
+  set_super_io_register(0x07, 0x05);  // Select COM2.
+  set_super_io_register(0x60, COVERAGE_UART >> 8);
+  set_super_io_register(0x61, COVERAGE_UART & 0xff);
+  set_super_io_register(0x70, 0);
+  set_super_io_register(0x30, 1);
+  write_port(SUPER_IO_INDEX, 0xaa);  // Apply the configuration.
+
+  write_port(COVERAGE_UART + 1, 0);  // Disable UART interrupts.
+  write_port(COVERAGE_UART + 3, 0x80);  // Select the baud divisor registers.
+  write_port(COVERAGE_UART, 1);  // Use 115200 baud.
+  write_port(COVERAGE_UART + 1, 0);
+  write_port(COVERAGE_UART + 3, 3);  // Eight data bits, no parity, one stop bit.
+}
+
+void sunshine_write_guest_record(const char *format, ...) {
+  char buffer[256];
+  va_list args;
+  va_start(args, format);
+  const int length = vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+  const char *record = length >= 0 && length < (int) sizeof(buffer) ? buffer : "SUNSHINE_GCOV_ERROR Result record exceeds buffer size\r\n";
+  // COM1 stays available to DbgPrint and GoogleTest throughout the run.
+  for (const char *byte = record; *byte != '\0'; ++byte) {
+    uint8_t line_status;
+    do {
+      __asm__ volatile("inb %1, %0" : "=a"(line_status) : "Nd"((uint16_t) (COVERAGE_UART + 5)));
+    } while ((line_status & 0x20) == 0);  // Wait for the transmitter to accept the byte.
+    write_port(COVERAGE_UART, (uint8_t) *byte);
+  }
+}
+
+/** @brief Send a complete gcda record line through the coverage serial port. */
 static void flush_serial(void) {
   if (serial_size != 0) {
     serial_hex[serial_size] = '\0';
-    DbgPrint("SUNSHINE_GCOV_DATA %s\r\n", serial_hex);
+    sunshine_write_guest_record("SUNSHINE_GCOV_DATA %s\r\n", serial_hex);
     serial_size = 0;
   }
 }
@@ -58,7 +117,7 @@ static void write_word(uint32_t value) {
 void llvm_gcov_init(GcovWriter writeout, GcovWriter reset) {
   (void) reset;
   if (writer_count == MAX_GCOV_WRITERS) {
-    DbgPrint("SUNSHINE_GCOV_ERROR Too many instrumented translation units\r\n");
+    sunshine_write_guest_record("SUNSHINE_GCOV_ERROR Too many instrumented translation units\r\n");
     return;
   }
   writers[writer_count++] = writeout;
@@ -83,7 +142,7 @@ void llvm_gcda_start_file(const char *filename, uint32_t version, uint32_t check
       basename = current + 1;
     }
   }
-  DbgPrint("SUNSHINE_GCOV_BEGIN %s\r\n", basename);
+  sunshine_write_guest_record("SUNSHINE_GCOV_BEGIN %s\r\n", basename);
   write_word(0x67636461);  // GCDA magic.
   write_word(version);
   write_word(checksum);
@@ -130,5 +189,5 @@ void llvm_gcda_end_file(void) {
   write_word(0);
   write_word(0);
   flush_serial();
-  DbgPrint("SUNSHINE_GCOV_END\r\n");
+  sunshine_write_guest_record("SUNSHINE_GCOV_END\r\n");
 }

@@ -9,7 +9,7 @@ usage() {
     cat <<'EOF'
 Usage: run-xemu.sh [--check] [--build-dir dir] [--iso path] [--network mode] [--tap-ifname name] [--test-output dir] [path]
 
-Use --test-output to capture serial output and isolate the test guest's disk writes.
+Use --test-output to capture guest coverage records and isolate the test guest's disk writes.
 
 Environment overrides:
   SUNSHINE_XEMU_BUILD_DIR
@@ -404,7 +404,7 @@ test_args=()
 if [[ -n "$test_output" ]]; then
     eeprom_path="$test_output/eeprom.bin"
     xemu_config_path="$test_output/xemu.toml"
-    serial_args=(-device lpc47m157 -serial "file:$(to_native_path "$test_output/serial.log")")
+    serial_args=(-device lpc47m157 -serial stdio -serial "file:$(to_native_path "$test_output/coverage.log")")
     test_args=(-snapshot)
 fi
 

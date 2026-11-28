@@ -8,7 +8,6 @@ Usage: setup-xemu.sh [--force] [--skip-support-files]
 
 Downloads a portable xemu build into .local/xemu and refreshes launcher manifests.
 Existing .local/xemu files are preserved unless --force is passed.
-Set SUNSHINE_XEMU_TAG to select a release instead of the latest version.
 EOF
     return 0
 }
@@ -157,7 +156,7 @@ detect_platform() {
             ;;
     esac
 
-    printf '%s\n%s\n' "$os_name" "$arch_name"
+    printf '%s %s\n' "$os_name" "$arch_name"
 }
 
 find_first_file() {
@@ -265,10 +264,8 @@ xemu_exe="$(find_existing_xemu_executable "$app_dir" || true)"
 if [[ -n "$xemu_exe" && "$force_download" -eq 0 ]]; then
     reused_existing_xemu=1
 else
-    mapfile -t platform_info < <(detect_platform)
-    os_name="${platform_info[0]}"
-    arch_name="${platform_info[1]}"
-    tag="${SUNSHINE_XEMU_TAG:-$(latest_xemu_tag)}"
+    read -r os_name arch_name < <(detect_platform)
+    tag="$(latest_xemu_tag)"
     if [[ -z "$tag" ]]; then
         echo 'Could not determine the latest xemu release tag.' >&2
         exit 1

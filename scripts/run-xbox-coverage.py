@@ -16,44 +16,52 @@ RESULT = re.compile(rb"^SUNSHINE_TEST_DONE ([01]) (\d+)\r?\n", re.MULTILINE)
 GUEST_TEST_DIR = "tests/xbox/guest"
 
 
+def wait_for_guest_report(xemu, reports):
+    """Allow steady test and coverage progress while detecting a stalled guest."""
+    timeout = 120
+    deadline = time.monotonic() + timeout
+    run_limit = time.monotonic() + 600
+    size = 0
+    while time.monotonic() < min(deadline, run_limit):
+        if reports.is_file():
+            new_size = reports.stat().st_size
+            if new_size > size:
+                size = new_size
+                deadline = time.monotonic() + timeout
+                transcript = reports.read_bytes()
+                if RESULT.search(transcript):
+                    return transcript
+        if xemu.poll() is not None:
+            raise ValueError(f"xemu stopped before guest tests completed (exit {xemu.returncode})")
+        time.sleep(0.25)
+    raise ValueError("Timed out waiting for the Xbox guest tests and coverage")
+
+
 def run_xemu(build, output):
-    """Wait for a complete guest report, keeping emulator logs on every exit."""
+    """Wait for a complete guest report while xemu writes to the terminal."""
     launcher = Path(__file__).with_name("run-xemu.sh").resolve()
     shell = shutil.which("bash")
     if not shell:
         raise ValueError("Bash is needed to run the xemu launcher")
-    serial = output / "serial.log"
-    with (output / "xemu.log").open("wb") as log:
-        command = [
-            shell, launcher.as_posix(), "--iso", (build / "SunshineTests.iso").as_posix(),
-            "--test-output", output.as_posix(), "--network", "none",
-        ]
-        with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=log) as xemu:
-            try:
-                deadline = time.monotonic() + 120
-                while time.monotonic() < deadline:
-                    if serial.is_file():
-                        transcript = serial.read_bytes()
-                        if RESULT.search(transcript):
-                            return transcript
-                    if xemu.poll() is not None:
-                        raise ValueError(f"xemu stopped before guest tests completed (exit {xemu.returncode})")
-                    time.sleep(0.25)
-                raise ValueError("Timed out waiting for guest tests and coverage")
-            finally:
-                if xemu.poll() is None:
-                    if os.name == "nt":
-                        # MSYS2 exec waits for the native xemu process as a child.
-                        subprocess.run(
-                            ["taskkill", "/pid", str(xemu.pid), "/t", "/f"],
-                            stdout=log, stderr=log, check=False,
-                        )
-                    else:
-                        xemu.terminate()
-                    try:
-                        xemu.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        xemu.kill()
+    reports = output / "coverage.log"
+    command = [
+        shell, launcher.as_posix(), "--iso", (build / "SunshineTests.iso").as_posix(),
+        "--test-output", output.as_posix(), "--network", "none",
+    ]
+    with subprocess.Popen(command, stdin=subprocess.DEVNULL) as xemu:
+        try:
+            return wait_for_guest_report(xemu, reports)
+        finally:
+            if xemu.poll() is None:
+                if os.name == "nt":
+                    # MSYS2 exec waits for the native xemu process as a child.
+                    subprocess.run(["taskkill", "/pid", str(xemu.pid), "/t", "/f"], check=False)
+                else:
+                    xemu.terminate()
+                try:
+                    xemu.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    xemu.kill()
 
 
 def write_test_results(transcript, output):
@@ -68,10 +76,9 @@ def write_test_results(transcript, output):
     for result, classname, name in cases:
         test = ET.SubElement(suite, "testcase", classname=classname.decode("ascii"), name=name.decode("ascii"))
         if result == b"FAIL":
-            ET.SubElement(test, "failure", message="See serial.log for assertion output")
+            ET.SubElement(test, "failure", message="See the xemu terminal output for the assertion")
         elif result == b"SKIP":
             ET.SubElement(test, "skipped")
-        print(f"{result.decode()} {classname.decode()}.{name.decode()}")
     suite.set("failures", str(sum(result == b"FAIL" for result, _, _ in cases)))
     suite.set("skipped", str(sum(result == b"SKIP" for result, _, _ in cases)))
     ET.ElementTree(results).write(output / "test_results.xml", encoding="utf-8", xml_declaration=True)
@@ -81,7 +88,7 @@ def write_test_results(transcript, output):
 
 
 def read_coverage_streams(transcript):
-    """Decode each complete gcda stream framed by the guest's serial records."""
+    """Decode each complete gcda stream framed by the guest's debug records."""
     data_files = {}
     current = None
     for line in transcript.splitlines():
@@ -162,7 +169,7 @@ def main():
     build = args.build.resolve()
     output = build / "xemu-coverage"
     output.mkdir(exist_ok=True)
-    for name in ("serial.log", "test_results.xml", "coverage.info"):
+    for name in ("coverage.log", "test_results.xml", "coverage.info"):
         (output / name).unlink(missing_ok=True)
     object_dir = build / GUEST_TEST_DIR / "CMakeFiles/sunshine_xbox_coverage.dir"
     for data in object_dir.rglob("*.gcda"):
@@ -173,7 +180,7 @@ def main():
         extract_coverage(transcript, object_dir)
         generate_report(object_dir, output)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        parser.exit(1, f"{error}. See {output / 'xemu.log'} and {output / 'serial.log'}.\n")
+        parser.exit(1, f"{error}. See the xemu terminal output and {output / 'coverage.log'}.\n")
     return failure
 
 

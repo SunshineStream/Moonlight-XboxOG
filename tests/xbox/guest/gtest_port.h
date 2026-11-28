@@ -34,3 +34,9 @@ inline int strcasecmp(const char *lhs, const char *rhs) {
 
 /** @brief Route GoogleTest's optional std::cout diagnostics to nxdk's available stream. */
 #define cout cerr
+
+// Shared test fixtures can run without the host-only stdio capture hooks.
+#include <lizardbyte/common/testing.h>
+
+/** @brief GoogleTest fixture base for shared tests running in the Xbox guest. */
+using BaseTest = ::testing::Test;

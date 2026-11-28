@@ -65,8 +65,7 @@ target_sources(sunshine_xbox_executable
         $<TARGET_OBJECTS:sunshine_nxdk_net_init>
         $<TARGET_OBJECTS:sunshine_video_scanout>
 )
-target_include_directories(sunshine_xbox_executable
-        SYSTEM PRIVATE
+set(SUNSHINE_XBOX_INCLUDE_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${SUNSHINE_FFMPEG_INCLUDE_DIR}"
         "${tomlplusplus_SOURCE_DIR}/include"
@@ -76,8 +75,7 @@ target_include_directories(sunshine_xbox_executable
         "${NXDK_DIR}/lib/usb/libusbohci/inc"
         "${NXDK_DIR}/lib/usb/libusbohci_xbox"
 )
-target_link_libraries(sunshine_xbox_executable
-        PUBLIC
+set(SUNSHINE_XBOX_LIBRARIES
         moonlight-common-c
         ${SUNSHINE_FFMPEG_LIBRARIES}
         NXDK::NXDK
@@ -91,6 +89,8 @@ target_link_libraries(sunshine_xbox_executable
         OpenSSL::Crypto
         OpenSSL::SSL
 )
+target_include_directories(sunshine_xbox_executable SYSTEM PRIVATE ${SUNSHINE_XBOX_INCLUDE_DIRS})
+target_link_libraries(sunshine_xbox_executable PUBLIC ${SUNSHINE_XBOX_LIBRARIES})
 target_compile_options(sunshine_xbox_executable
         PRIVATE
         ${SUNSHINE_COMPILE_OPTIONS}
@@ -99,15 +99,14 @@ target_compile_options(sunshine_xbox_executable
 # NASM's freestanding i386 objects do not carry Windows SafeSEH metadata; the
 # final Xbox image is packaged as XBE and does not use the Windows PE loader.
 target_link_options(sunshine_xbox_executable PRIVATE /safeseh:no)
-target_compile_definitions(sunshine_xbox_executable
-        PRIVATE
+set(SUNSHINE_XBOX_COMPILE_DEFINITIONS
         XBOX
         NXDK
         USBH_USE_EXTERNAL_CONFIG="usbh_config_xbox.h"
         TOML_EXCEPTIONS=0
-        TOML_ENABLE_WINDOWS_COMPAT=0)
-target_compile_definitions(sunshine_xbox_executable PRIVATE
+        TOML_ENABLE_WINDOWS_COMPAT=0
         SUNSHINE_INPUT_DIAGNOSTICS=$<BOOL:${SUNSHINE_INPUT_DIAGNOSTICS}>)
+target_compile_definitions(sunshine_xbox_executable PRIVATE ${SUNSHINE_XBOX_COMPILE_DEFINITIONS})
 add_dependencies(sunshine_xbox_executable moonlight-common-c)
 
 if(BUILD_DOCS)
