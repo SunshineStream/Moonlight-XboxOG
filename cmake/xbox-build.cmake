@@ -128,6 +128,10 @@ endif()
 set(_cxbe ${_packaging_env} "${NXDK_DIR}/tools/cxbe/cxbe${_packaging_tool_suffix}")
 set(_extract_xiso ${_packaging_env} "${NXDK_DIR}/tools/extract-xiso/build/extract-xiso${_packaging_tool_suffix}")
 
+if(SUNSHINE_BUILD_XBOX_TESTS)
+    add_subdirectory(tests/xbox/guest)
+endif()
+
 # Expose the same ISO target in the direct Xbox profile and its host parent.
 add_custom_target(sunshine_xbox ALL
         COMMAND "${CMAKE_COMMAND}" -E copy_directory

@@ -4,7 +4,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--build-dir <dir> | <dir>] [--clean|clean] [--distclean|distclean] [--coverage]"
+  echo "Usage: $0 [--build-dir <dir> | <dir>] [--clean|clean] [--distclean|distclean] [--coverage] [--xbox-coverage]"
   return 0
 }
 
@@ -16,6 +16,7 @@ case "${HOST_SYSTEM}" in
 esac
 CLEAN_BUILD=0
 ENABLE_TEST_COVERAGE=0
+ENABLE_XBOX_COVERAGE=OFF
 POSITIONAL_BUILD_DIR_SET=0
 
 while [[ "$#" -gt 0 ]]; do
@@ -39,6 +40,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --coverage)
       ENABLE_TEST_COVERAGE=1
+      shift
+      ;;
+    --xbox-coverage)
+      ENABLE_XBOX_COVERAGE=ON
       shift
       ;;
     -h|--help)
@@ -75,6 +80,7 @@ cmake_configure_args=(
   -DBUILD_NATIVE_CLIENT=OFF
   -DBUILD_TESTS=ON
   -DBUILD_XBOX=ON
+  -DSUNSHINE_BUILD_XBOX_TESTS="${ENABLE_XBOX_COVERAGE}"
   -DCMAKE_DEPENDS_USE_COMPILER=FALSE
   -DCMAKE_BUILD_TYPE=Release
 )

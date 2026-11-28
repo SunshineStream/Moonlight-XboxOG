@@ -8,6 +8,7 @@ Usage: setup-xemu.sh [--force] [--skip-support-files]
 
 Downloads a portable xemu build into .local/xemu and refreshes launcher manifests.
 Existing .local/xemu files are preserved unless --force is passed.
+Set SUNSHINE_XEMU_TAG to select a release instead of the latest version.
 EOF
     return 0
 }
@@ -118,13 +119,13 @@ select_xemu_asset() {
             printf 'xemu-win-aarch64-release.zip\n'
             ;;
         macos:*)
-            printf 'xemu-%s-macos-universal.zip\n' "$tag"
+            printf 'xemu-%s-macos-universal.zip\n' "${tag#v}"
             ;;
         linux:x86_64|linux:amd64)
-            printf 'xemu-%s-x86_64.AppImage\n' "$tag"
+            printf 'xemu-%s-x86_64.AppImage\n' "${tag#v}"
             ;;
         linux:arm64|linux:aarch64)
-            printf 'xemu-%s-aarch64.AppImage\n' "$tag"
+            printf 'xemu-%s-aarch64.AppImage\n' "${tag#v}"
             ;;
         *)
             return 1
@@ -267,14 +268,14 @@ else
     mapfile -t platform_info < <(detect_platform)
     os_name="${platform_info[0]}"
     arch_name="${platform_info[1]}"
-    tag="$(latest_xemu_tag)"
+    tag="${SUNSHINE_XEMU_TAG:-$(latest_xemu_tag)}"
     if [[ -z "$tag" ]]; then
         echo 'Could not determine the latest xemu release tag.' >&2
         exit 1
     fi
 
     asset_name="$(select_xemu_asset "$os_name" "$arch_name" "$tag")"
-    asset_url="https://github.com/xemu-project/xemu/releases/latest/download/${asset_name}"
+    asset_url="https://github.com/xemu-project/xemu/releases/download/${tag}/${asset_name}"
     asset_path="$downloads_dir/$asset_name"
 
     download_file "$asset_url" "$asset_path" "$force_download"

@@ -500,6 +500,25 @@ scripts\setup-xemu.cmd --skip-support-files
 > [Xbox EEPROM Editor](https://github.com/Ernegien/XboxEepromEditor). 1080i streaming is demanding
 > on the emulated CPU, especially when using software presentation.
 
+### Guest tests and coverage in xemu
+
+Build the instrumented test disc, set up xemu, and run the tests from the repository root.
+On Windows, run these commands in UCRT64 and use `cmake-build-release-ucrt64/xbox` as the Xbox
+build directory. Use the `llvm-cov` from the same LLVM installation as Clang.
+
+```bash
+bash build.sh --xbox-coverage
+bash scripts/setup-xemu.sh
+uv sync --locked
+uv run --locked python scripts/run-xbox-coverage.py cmake-build-release/xbox
+```
+
+The build creates `SunshineTests.iso` beside the release ISO. The runner boots the test disc in xemu
+and recovers test results and coverage counters from the guest's serial console. It pairs the counters
+with the coverage notes from the same build, then writes JUnit, LCOV, and logs under
+`xbox/xemu-coverage/`. Linux CI runs xemu under Xvfb and uploads the report to Codecov with the
+`Xbox-guest-xemu` flag.
+
 ## Host-native unit tests
 
 The Xbox executable cannot run directly on Windows, macOS, or Linux, so the top-level project builds `test_sunshine` natively while the Xbox binary is built by an internal child configure that uses the `nxdk` toolchain. Keep Xbox runtime code thin and move logic you want to test into platform-neutral sources that can be linked into `test_sunshine`.
