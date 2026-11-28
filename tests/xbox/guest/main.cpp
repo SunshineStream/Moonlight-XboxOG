@@ -2,6 +2,9 @@
  * @file tests/xbox/guest/main.cpp
  * @brief Report GoogleTest results and coverage to the host from the Xbox test XBE.
  */
+// standard includes
+#include <string>
+
 // lib includes
 #include <lizardbyte/common/testing.h>
 #include <synchapi.h>
@@ -27,7 +30,8 @@ namespace {
       if (result->Skipped()) {
         status = "SKIP";
       }
-      sunshine_write_guest_record("SUNSHINE_TEST_CASE %s %s %s\r\n", status, info.test_suite_name(), info.name());
+      const auto record = std::string("SUNSHINE_TEST_CASE ") + status + ' ' + info.test_suite_name() + ' ' + info.name() + "\r\n";
+      sunshine_write_guest_text(record.c_str());
     }
   };
 }  // namespace
@@ -40,7 +44,7 @@ int main() {
   sunshine_prepare_guest_records();
   if (!platform::ensure_directory_exists(test_support::guest_scratch_directory)) {
     DbgPrint("Failed to create the Xbox guest test directory\r\n");
-    sunshine_write_guest_record("SUNSHINE_TEST_DONE 1 0\r\n");
+    sunshine_write_guest_text("SUNSHINE_TEST_DONE 1 0\r\n");
     return 1;
   }
   testing::InitGoogleTest();
@@ -49,7 +53,8 @@ int main() {
 
   const int result = RUN_ALL_TESTS();
   sunshine_write_guest_coverage();
-  sunshine_write_guest_record("SUNSHINE_TEST_DONE %d %d\r\n", result, tests->test_to_run_count());
+  const auto done = "SUNSHINE_TEST_DONE " + std::to_string(result) + ' ' + std::to_string(tests->test_to_run_count()) + "\r\n";
+  sunshine_write_guest_text(done.c_str());
   Sleep(INFINITE);
   return result;
 }

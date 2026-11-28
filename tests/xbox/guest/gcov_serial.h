@@ -9,11 +9,10 @@ extern "C" {
 #endif
 
   /**
-   * @brief Send a formatted machine-readable record to xemu over COM2.
-   * @param format Printf format string.
-   * @param ... Format arguments.
+   * @brief Send part or all of a machine-readable record to xemu over COM2.
+   * @param text Null-terminated text to transmit.
    */
-  void sunshine_write_guest_record(const char *format, ...);
+  void sunshine_write_guest_text(const char *text);
 
   /** @brief Configure the second LPC47M157 serial port for coverage records. */
   void sunshine_prepare_guest_records(void);

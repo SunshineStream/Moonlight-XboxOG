@@ -189,13 +189,15 @@ namespace test_support {
    * @param path Fixture directory.
    * @return True when the directory is ready for use.
    */
-  inline bool create_directory(const std::string &path) {
 #ifdef NXDK
+  inline bool create_directory(const std::string &path) {
     return CreateDirectoryA(path.c_str(), nullptr) || is_directory(path);
+  }
 #else
+  inline bool create_directory(const std::filesystem::path &path) {
     std::error_code error;
     return std::filesystem::create_directory(path, error) || std::filesystem::is_directory(path, error);
-#endif
   }
+#endif
 
 }  // namespace test_support

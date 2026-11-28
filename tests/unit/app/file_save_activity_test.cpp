@@ -41,7 +41,7 @@ TEST(FileSaveActivityTest, RemainsActiveUntilTheLastWriterFinishes) {
   bool finish = false;
   // nxdk implements condition variables, but its exception runtime cannot
   // construct the exception state used by std::promise.
-  std::thread worker([&] {
+  std::thread worker([&changed, &entered, &finish, &mutex] {
     const app::FileSaveActivity saving;
     std::unique_lock lock(mutex);
     entered = true;

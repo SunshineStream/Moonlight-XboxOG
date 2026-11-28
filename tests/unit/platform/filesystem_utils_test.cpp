@@ -57,6 +57,22 @@ namespace {
     EXPECT_TRUE(platform::ensure_directory_exists(nestedDirectory, &errorMessage)) << errorMessage;
   }
 
+#ifdef NXDK
+  /**
+   * @brief A missing directory on the Xbox disc reports an error even when the caller omits diagnostics.
+   */
+  TEST(FolderPickerFilesystemTest, RefusesToCreateDirectoriesOnTheReadOnlyXboxDisc) {
+    ASSERT_TRUE(test_support::exists("D:\\default.xbe"));
+    const std::string directory = "D:\\sunshine-tests-output";
+    std::string error;
+
+    EXPECT_FALSE(platform::ensure_directory_exists(directory, &error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_FALSE(platform::ensure_directory_exists(directory));
+    EXPECT_FALSE(test_support::exists(directory));
+  }
+#endif
+
   TEST_F(FilesystemUtilsTest, ReportsRegularFileSizesAndRejectsDirectoriesOrMissingPaths) {
     ASSERT_TRUE(platform::ensure_directory_exists(nestedDirectory, nullptr));
     write_test_file(filePath, "payload");

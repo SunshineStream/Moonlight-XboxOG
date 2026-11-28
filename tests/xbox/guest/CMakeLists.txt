@@ -1,6 +1,6 @@
 # Use the vendored GoogleTest sources with only the features nxdk supplies.
 set(_gtest_source "${CMAKE_SOURCE_DIR}/third-party/lizardbyte-common/third-party/googletest/googletest")
-add_library(sunshine_xbox_gtest STATIC gtest_serial.cpp)
+add_library(sunshine_xbox_gtest STATIC "${_gtest_source}/src/gtest-all.cc")
 target_include_directories(sunshine_xbox_gtest SYSTEM PUBLIC
         "${_gtest_source}/include"
         "${CMAKE_SOURCE_DIR}/third-party/lizardbyte-common/tests/support/include")
@@ -15,6 +15,8 @@ target_compile_definitions(sunshine_xbox_gtest PUBLIC
         LIZARDBYTE_COMMON_TESTING_NO_GLOBAL_ALIASES
         LIZARDBYTE_COMMON_TESTING_KEEP_GTEST_TEST)
 target_compile_options(sunshine_xbox_gtest PUBLIC
+        # The stock nxdk wrapper can lead CMake to probe the host's C++ default on Windows.
+        $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++17>
         "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${CMAKE_CURRENT_SOURCE_DIR}/gtest_port.h\">")
 
 include("${CMAKE_SOURCE_DIR}/tests/sources.cmake")
@@ -31,7 +33,12 @@ target_link_libraries(sunshine_xbox_coverage PRIVATE sunshine_xbox_gtest ${SUNSH
 # so the writer itself stays uninstrumented.
 target_compile_options(sunshine_xbox_coverage PRIVATE -O0 -fprofile-arcs -ftest-coverage)
 
-add_executable(sunshine_xbox_tests main.cpp gcov_serial.c ${SUNSHINE_UNIT_TEST_SOURCES}
+# Retain nxdk's regular file flushing while redirecting the guest's standard streams.
+set(_nxdk_flush "${NXDK_DIR}/lib/pdclib/platform/xbox/functions/_PDCLIB/_PDCLIB_flushbuffer.c")
+set_source_files_properties("${_nxdk_flush}" PROPERTIES
+        COMPILE_DEFINITIONS "_PDCLIB_flushbuffer=sunshine_pdclib_flush_file")
+add_executable(sunshine_xbox_tests main.cpp console_serial.c gcov_serial.c ${SUNSHINE_UNIT_TEST_SOURCES}
+        "${_nxdk_flush}"
         $<TARGET_OBJECTS:sunshine_nxdk_net_init>
         $<TARGET_OBJECTS:sunshine_video_scanout>)
 target_include_directories(sunshine_xbox_tests SYSTEM PRIVATE ${SUNSHINE_XBOX_INCLUDE_DIRS})
