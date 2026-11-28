@@ -467,4 +467,9 @@ fi
 xemu_args+=("${serial_args[@]}")
 xemu_args+=("${test_args[@]}")
 
+if [[ -n "$test_output" ]] && is_windows; then
+    # The serial file argument already embeds a native path for QEMU.
+    export MSYS2_ARG_CONV_EXCL='*'
+fi
+
 exec "$xemu_exe" "${xemu_args[@]}"

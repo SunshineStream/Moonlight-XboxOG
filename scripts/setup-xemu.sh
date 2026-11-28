@@ -97,10 +97,14 @@ copy_tree_preserving_existing() {
 }
 
 latest_xemu_tag() {
-    curl -fsSL --proto '=https' --proto-redir '=https' -A 'Sunshine-client setup-xemu' \
-        'https://api.github.com/repos/xemu-project/xemu/releases/latest' |
-        sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
-        head -n 1
+    local releases='https://github.com/xemu-project/xemu/releases'
+    local release_page
+    # The public release page redirects to the latest tag without consuming the REST API quota.
+    release_page="$(curl -fsSLI --retry 3 --proto '=https' --proto-redir '=https' \
+        -A 'Sunshine-client setup-xemu' -o /dev/null -w '%{url_effective}' "$releases/latest")" || return 1
+    if [[ "$release_page" == "$releases/tag/"* ]]; then
+        printf '%s\n' "${release_page##*/}"
+    fi
 
     return 0
 }
@@ -265,7 +269,7 @@ if [[ -n "$xemu_exe" && "$force_download" -eq 0 ]]; then
     reused_existing_xemu=1
 else
     read -r os_name arch_name < <(detect_platform)
-    tag="$(latest_xemu_tag)"
+    tag="$(latest_xemu_tag || true)"
     if [[ -z "$tag" ]]; then
         echo 'Could not determine the latest xemu release tag.' >&2
         exit 1

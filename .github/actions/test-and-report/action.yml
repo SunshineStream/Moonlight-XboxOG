@@ -169,7 +169,9 @@ runs:
         fi
 
     - name: Upload test and coverage artifacts
-      if: ${{ !cancelled() && steps.reports.outcome == 'success' }}
+      if: >-
+        ${{ !cancelled() && steps.reports.outcome == 'success' &&
+        (inputs.xemu-tests != 'true' || hashFiles(steps.reports.outputs.coverage, steps.reports.outputs.logs) != '') }}
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: Tests-${{ inputs.platform }}

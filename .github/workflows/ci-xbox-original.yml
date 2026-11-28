@@ -132,6 +132,9 @@ jobs:
         run: |
           cp "${MINGW_PREFIX}/bin/"{opengl32,libgallium_wgl}.dll .local/xemu/app/
           cygpath -w "${MINGW_PREFIX}/bin" >> "${GITHUB_PATH}"
+          # The hosted runner's Microsoft Basic Render Driver can exit during xemu startup.
+          echo 'LIBGL_ALWAYS_SOFTWARE=1' >> "${GITHUB_ENV}"
+          echo 'GALLIUM_DRIVER=llvmpipe' >> "${GITHUB_ENV}"
 
       - name: Test and report Xbox guest coverage
         uses: ./.github/actions/test-and-report
