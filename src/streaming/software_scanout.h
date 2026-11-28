@@ -4,18 +4,19 @@
  */
 #pragma once
 
-// standard includes
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <memory>
+#ifdef NXDK
+  // standard includes
+  #include <array>
+  #include <cstddef>
+  #include <cstdint>
+  #include <memory>
 
-// local includes
-#include "src/streaming/video_acceleration.h"
+  // local includes
+  #include "src/streaming/video_acceleration.h"
 
 namespace streaming {
   /**
-   * @brief Display CPU-composited frames using page flips in SD and a fixed scanout in HD.
+   * @brief Display Xbox CPU-composited frames using page flips in SD and a fixed scanout in HD.
    *
    * The active video mode must remain fixed until reset. All operations belong
    * to the stream render thread.
@@ -71,3 +72,4 @@ namespace streaming {
     bool synchronized_ = true;  ///< A completed vblank has retired the previous page.
   };
 }  // namespace streaming
+#endif
