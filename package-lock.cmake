@@ -50,7 +50,7 @@ set(DAV1D_CLIENT_VERSION 1.5.5)
 
 # Lucide SVG icons
 # renovate: datasource=github-tags depName=lucide-icons/lucide
-set(LUCIDE_VERSION 1.82.0)
+set(LUCIDE_VERSION 1.83.0)
 sunshine_declare_source_package(lucide
         NAME lucide
         VERSION ${LUCIDE_VERSION}
