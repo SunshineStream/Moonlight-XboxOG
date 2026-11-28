@@ -1,0 +1,62 @@
+---
+name: CI-Coverage
+permissions: {}
+
+on:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+jobs:
+  upload:
+    name: ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - Linux-aarch64
+          - Linux-x86_64
+          - macOS-arm64
+          - macOS-x86_64
+          - Windows-AMD64
+          - Windows-ARM64
+          - Xbox-guest-xemu-Linux
+          - Xbox-guest-xemu-macOS
+          - Xbox-guest-xemu-Windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download test and coverage artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: Tests-${{ matrix.platform }}
+          path: _coverage
+
+      - name: Upload test coverage
+        if: hashFiles('_coverage/coverage.info') != ''
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+        with:
+          disable_search: true
+          fail_ci_if_error: true
+          files: _coverage/coverage.info
+          report_type: coverage
+          flags: ${{ matrix.platform }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results
+        if: ${{ !cancelled() && hashFiles('_coverage/test_results.xml') != '' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+        with:
+          disable_search: true
+          fail_ci_if_error: true
+          files: _coverage/test_results.xml
+          report_type: test_results
+          flags: ${{ matrix.platform }}
+          token: ${{ secrets.CODECOV_TOKEN }}

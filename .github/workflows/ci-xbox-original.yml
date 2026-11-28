@@ -4,9 +4,6 @@ permissions: {}
 
 on:
   workflow_call:
-    secrets:
-      CODECOV_TOKEN:
-        required: false
 
 jobs:
   build:
@@ -54,6 +51,9 @@ jobs:
           )
           sunshine_dependencies=(
             "patch"
+            "libglx-mesa0"  # OpenGL over X11 with Mesa's software renderer.
+            "libusb-1.0-0"  # Shared library used by the xemu binary.
+            "xvfb"  # Virtual display for xemu. Also installs xauth.
           )
           dependencies=("${nxdk_dependencies[@]}" "${sunshine_dependencies[@]}")
           sudo apt-get update
@@ -73,6 +73,7 @@ jobs:
           )
           dependencies=("${nxdk_dependencies[@]}" "${sunshine_dependencies[@]}")
           brew install "${dependencies[@]}"
+          echo "$(brew --prefix llvm)/bin" >> "${GITHUB_PATH}"
 
       - name: Setup Dependencies Windows
         if: runner.os == 'Windows'
@@ -96,12 +97,26 @@ jobs:
             mingw-w64-ucrt-x86_64-llvm
             mingw-w64-ucrt-x86_64-llvm-tools
             mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-mesa
             mingw-w64-ucrt-x86_64-nasm
+
+      - name: Setup xemu
+        shell: bash
+        run: bash scripts/setup-xemu.sh
+
+      - name: Setup software OpenGL (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cp "${MINGW_PREFIX}/bin/"{opengl32,libgallium_wgl}.dll .local/xemu/app/
+          cygpath -w "${MINGW_PREFIX}/bin" >> "${GITHUB_PATH}"
+          # The hosted runner's Microsoft Basic Render Driver can exit during xemu startup.
+          echo 'LIBGL_ALWAYS_SOFTWARE=1' >> "${GITHUB_ENV}"
+          echo 'GALLIUM_DRIVER=llvmpipe' >> "${GITHUB_ENV}"
 
       - name: Build
         run: |
           chmod +x build.sh
-          ./build.sh --build-dir "${CMAKE_BUILD}" --coverage
+          ./build.sh --build-dir "${CMAKE_BUILD}" --xbox-coverage
 
           # recursively list all files in build directory
           ls -R "${CMAKE_BUILD}"
@@ -117,10 +132,49 @@ jobs:
           name: Sunshine-client-XboxOG-${{ runner.os }}
           path: artifacts/
 
-      - name: Test and report coverage
-        uses: ./.github/actions/test-and-report
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
-          build-dir: ${{ env.CMAKE_BUILD }}
-          platform: Xbox-host-${{ runner.os }}
-          test-shell: '${{ matrix.shell }}'
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          python-version: '3.14'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: third-party/lizardbyte-common/uv.lock
+
+      - name: Install coverage tools
+        shell: bash
+        run: |
+          uv sync --project third-party/lizardbyte-common --locked --only-group test-c \
+            --no-build --no-python-downloads --no-install-project
+
+      - name: Run Xbox tests and recover guest coverage
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          SDL_AUDIO_DRIVER: dummy
+        run: |
+          tests=(uv run --project third-party/lizardbyte-common --locked --no-sync
+            python scripts/run-xbox-coverage.py "${CMAKE_BUILD}/xbox")
+          if [[ "${RUNNER_OS}" == Linux ]]; then
+            LIBGL_ALWAYS_SOFTWARE=1 SDL_VIDEO_DRIVER=x11 \
+              xvfb-run -a -s '-screen 0 1024x768x24' "${tests[@]}"
+          else
+            "${tests[@]}"
+          fi
+
+      - name: Upload test and coverage artifacts
+        if: >-
+          ${{ !cancelled() && hashFiles(
+          format('{0}/xbox/xemu-coverage/coverage.info', env.CMAKE_BUILD),
+          format('{0}/xbox/xemu-coverage/test_results.xml', env.CMAKE_BUILD),
+          format('{0}/xbox/xemu-coverage/*.log', env.CMAKE_BUILD)) != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Tests-Xbox-guest-xemu-${{ runner.os }}
+          path: |
+            ${{ env.CMAKE_BUILD }}/xbox/xemu-coverage/coverage.info
+            ${{ env.CMAKE_BUILD }}/xbox/xemu-coverage/test_results.xml
+            ${{ env.CMAKE_BUILD }}/xbox/xemu-coverage/*.log
+          if-no-files-found: error

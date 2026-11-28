@@ -40,8 +40,6 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci-xbox.yml
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   build-windows:
     name: Windows
@@ -58,7 +56,6 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   build-apple:
     name: Apple
@@ -69,7 +66,6 @@ jobs:
     with:
       publish_release: ${{ needs.setup_release.outputs.publish_release == 'true' }}
     secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_NOTARYTOOL_PASSWORD: ${{ secrets.APPLE_NOTARYTOOL_PASSWORD }}
@@ -84,6 +80,18 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci-linux.yml
+
+  publish-coverage:
+    name: Coverage
+    if: ${{ !cancelled() && startsWith(github.repository, 'SunshineStream/') }}
+    needs:
+      - build-xbox
+      - build-windows
+      - build-apple
+      - build-linux
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-coverage.yml
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
