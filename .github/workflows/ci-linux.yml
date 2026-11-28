@@ -4,9 +4,6 @@ permissions: {}
 
 on:
   workflow_call:
-    secrets:
-      CODECOV_TOKEN:
-        required: false
 
 jobs:
   flatpak:
@@ -14,5 +11,3 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci-flatpak.yml
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

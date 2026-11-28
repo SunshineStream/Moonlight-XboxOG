@@ -52,6 +52,7 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/sources.cmake")
 
 add_executable(${PROJECT_NAME}
+        main.cpp
         ${SUNSHINE_UNIT_TEST_SOURCES}
         "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/ffmpeg_memory.c"
         ${SUNSHINE_TESTABLE_SOURCES})
@@ -67,7 +68,7 @@ target_include_directories(${PROJECT_NAME}
         ${GTEST_SOURCE_DIR}/googlemock/include)
 target_link_libraries(${PROJECT_NAME}
         PRIVATE
-        gtest_main
+        gtest
         SunshineClient::OpenSSL
         lizardbyte::test_support
         moonlight-common-c)

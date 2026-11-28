@@ -1,10 +1,23 @@
 # Use the vendored GoogleTest sources with only the features nxdk supplies.
 set(_gtest_source "${CMAKE_SOURCE_DIR}/third-party/lizardbyte-common/third-party/googletest/googletest")
+# GoogleTest disables color when filesystem support is off. On the guest its
+# ANSI printer can honor the color flag without querying a terminal descriptor.
+set(_gtest_color_source "${_gtest_source}/src/gtest.cc")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_gtest_color_source}")
+file(READ "${_gtest_color_source}" _gtest_original)
+string(REPLACE "      false;\n#endif  // GTEST_HAS_FILE_SYSTEM\n\n  const bool use_color"
+       "      ShouldUseColor(false);\n#endif  // GTEST_HAS_FILE_SYSTEM\n\n  const bool use_color"
+       _gtest_colored "${_gtest_original}")
+if(_gtest_colored STREQUAL _gtest_original)
+    message(FATAL_ERROR "Could not adapt GoogleTest's color check for the Xbox serial console")
+endif()
+set(_guest_gtest "${CMAKE_CURRENT_BINARY_DIR}/googletest")
+file(GENERATE OUTPUT "${_guest_gtest}/src/gtest.cc" CONTENT "${_gtest_colored}")
 add_library(sunshine_xbox_gtest STATIC "${_gtest_source}/src/gtest-all.cc")
 target_include_directories(sunshine_xbox_gtest SYSTEM PUBLIC
         "${_gtest_source}/include"
         "${CMAKE_SOURCE_DIR}/third-party/lizardbyte-common/tests/support/include")
-target_include_directories(sunshine_xbox_gtest SYSTEM PRIVATE "${_gtest_source}")
+target_include_directories(sunshine_xbox_gtest SYSTEM PRIVATE "${_guest_gtest}" "${_gtest_source}")
 target_include_directories(sunshine_xbox_gtest PUBLIC "${CMAKE_SOURCE_DIR}/src/_nxdk_compat/include")
 target_compile_definitions(sunshine_xbox_gtest PUBLIC
         GOOGLETEST_INCLUDE_GTEST_INTERNAL_GTEST_PORT_ARCH_H_
@@ -37,7 +50,8 @@ target_compile_options(sunshine_xbox_coverage PRIVATE -O0 -fprofile-arcs -ftest-
 set(_nxdk_flush "${NXDK_DIR}/lib/pdclib/platform/xbox/functions/_PDCLIB/_PDCLIB_flushbuffer.c")
 set_source_files_properties("${_nxdk_flush}" PROPERTIES
         COMPILE_DEFINITIONS "_PDCLIB_flushbuffer=sunshine_pdclib_flush_file")
-add_executable(sunshine_xbox_tests main.cpp console_serial.c gcov_serial.c ${SUNSHINE_UNIT_TEST_SOURCES}
+add_executable(sunshine_xbox_tests "${CMAKE_SOURCE_DIR}/tests/main.cpp"
+        console_serial.c gcov_serial.c ${SUNSHINE_UNIT_TEST_SOURCES}
         "${_nxdk_flush}"
         $<TARGET_OBJECTS:sunshine_nxdk_net_init>
         $<TARGET_OBJECTS:sunshine_video_scanout>)

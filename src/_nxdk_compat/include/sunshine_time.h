@@ -18,6 +18,7 @@
  *
  * PDCLib declares gmtime_s without supplying its implementation. Its gmtime uses
  * shared static storage, so use the kernel conversion without changing libc feature macros.
+ * Check the input at the same width as the signed kernel tick calculation.
  *
  * @param timestamp Unix timestamp in seconds.
  * @param result Receives the complete UTC calendar fields.
@@ -26,11 +27,12 @@
 inline bool sunshine_gmtime(std::time_t timestamp, std::tm &result) {
   constexpr std::int64_t epochOffset = 11644473600LL;
   constexpr std::int64_t ticksPerSecond = 10000000;
-  if (timestamp < 0 || timestamp > std::numeric_limits<std::int64_t>::max() / ticksPerSecond - epochOffset) {
+  const auto seconds = static_cast<std::int64_t>(timestamp);
+  if (seconds < 0 || seconds > std::numeric_limits<std::int64_t>::max() / ticksPerSecond - epochOffset) {
     return false;
   }
   LARGE_INTEGER time {};
-  time.QuadPart = (static_cast<std::int64_t>(timestamp) + epochOffset) * ticksPerSecond;
+  time.QuadPart = (seconds + epochOffset) * ticksPerSecond;
   TIME_FIELDS fields {};
   RtlTimeToTimeFields(&time, &fields);
   result = {};

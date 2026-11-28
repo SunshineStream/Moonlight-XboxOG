@@ -8,6 +8,7 @@
 
   // standard includes
   #include <cerrno>
+  #include <limits>
 
   // lib includes
   #include <lizardbyte/common/testing.h>
@@ -43,6 +44,18 @@ TEST(XboxGuestTime, RejectsNegativeTimestamps) {
   result.tm_year = 123;
   EXPECT_FALSE(sunshine_gmtime(-1, result));
   EXPECT_EQ(result.tm_year, 123);
+}
+
+/** @brief The last representable Xbox Unix second converts through the kernel without overflowing. */
+TEST(XboxGuestTime, ConvertsTheLastRepresentableUnixSecond) {
+  std::tm result {};
+  ASSERT_TRUE(sunshine_gmtime(std::numeric_limits<std::time_t>::max(), result));
+  EXPECT_EQ(result.tm_year, 138);
+  EXPECT_EQ(result.tm_mon, 0);
+  EXPECT_EQ(result.tm_mday, 19);
+  EXPECT_EQ(result.tm_hour, 3);
+  EXPECT_EQ(result.tm_min, 14);
+  EXPECT_EQ(result.tm_sec, 7);
 }
 
 /** @brief Read a normalized Unix timestamp from the running Xbox kernel. */

@@ -4,9 +4,6 @@ permissions: {}
 
 on:
   workflow_call:
-    secrets:
-      CODECOV_TOKEN:
-        required: false
 
 jobs:
   build:
@@ -17,7 +14,7 @@ jobs:
     env:
       FLATPAK_APP_ID: dev.lizardbyte.app.SunshineClient
       FLATPAK_ARCH: ${{ matrix.arch }}
-      FLATPAK_MODULE_DIR: cmake-build-flatpak/.flatpak-builder/build/sunshine-client
+      FLATPAK_BUILD_DIR: cmake-build-flatpak/.flatpak-builder/build/sunshine-client/_flatpak_build
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +52,6 @@ jobs:
             "org.freedesktop.Sdk/${FLATPAK_ARCH}/${runtime_version}"
 
       - name: Build Flatpak
-        id: flatpak
         working-directory: cmake-build-flatpak
         run: |
           sudo su "$(whoami)" -c "flatpak run org.flatpak.Builder \
@@ -70,14 +66,57 @@ jobs:
           name: Sunshine-client-Flatpak-${{ matrix.arch }}
           path: Sunshine-client-*.flatpak
 
-      - name: Publish Flatpak test reports
-        if: >-
-          ${{ !cancelled() &&
-          (steps.flatpak.outcome == 'success' ||
-          hashFiles(format('{0}/_flatpak_build/tests/test_results.xml', env.FLATPAK_MODULE_DIR)) != '') }}
-        uses: ./.github/actions/test-and-report
+      - name: Collect Flatpak test results
+        id: tests
+        if: ${{ !cancelled() && hashFiles(format('{0}/tests/test_results.xml', env.FLATPAK_BUILD_DIR)) != '' }}
+        run: cp "${FLATPAK_BUILD_DIR}/tests/test_results.xml" "${FLATPAK_BUILD_DIR}/test_results.xml"
+
+      - name: Set up Python
+        if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
-          build-dir: ${{ env.FLATPAK_MODULE_DIR }}/_flatpak_build
-          gcov-source-root: ${{ env.FLATPAK_MODULE_DIR }}
-          platform: Linux-${{ matrix.arch }}
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          python-version: '3.14'
+
+      - name: Set up uv
+        if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: third-party/lizardbyte-common/uv.lock
+
+      - name: Generate Flatpak coverage report
+        if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          uv sync --project third-party/lizardbyte-common --locked --only-group test-c \
+            --no-python-downloads --no-install-project
+          report="${PWD}/${FLATPAK_BUILD_DIR}/coverage.info"
+          module_dir="$(realpath "${FLATPAK_BUILD_DIR}/..")"
+          # The sandbox already generated gcov files using its own toolchain.
+          uv run --directory "${module_dir}" --project "${PWD}/third-party/lizardbyte-common" \
+            --locked --no-sync gcovr "${PWD}/${FLATPAK_BUILD_DIR}" -r . --gcov-use-existing-files --filter src \
+            --exclude-noncode-lines --exclude-throw-branches --exclude-unreachable-branches --lcov "${report}.raw"
+          awk -v root="${module_dir}/" '
+            /^SF:/ {
+              source = substr($0, 4)
+              if (index(source, root) != 1) {
+                print "Coverage source is outside the source tree: " source > "/dev/stderr"
+                exit 1
+              }
+              $0 = "SF:" substr(source, length(root) + 1)
+            }
+            { print }
+          ' "${report}.raw" > "${report}.tmp"
+          grep -q '^SF:src/' "${report}.tmp"
+          mv "${report}.tmp" "${report}"
+
+      - name: Upload test and coverage artifacts
+        if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Tests-Linux-${{ matrix.arch }}
+          path: |
+            ${{ env.FLATPAK_BUILD_DIR }}/coverage.info
+            ${{ env.FLATPAK_BUILD_DIR }}/test_results.xml
+          include-hidden-files: true
+          if-no-files-found: error
