@@ -91,12 +91,14 @@ runs:
             gcov='xcrun llvm-cov gcov'
           fi
           gcov_args=(--gcov-executable "${gcov}")
+          coverage_search_root="${PWD}/${CMAKE_BUILD}/tests"
           if [[ -n "${GCOV_SOURCE_ROOT}" ]]; then
             coverage_root="$(realpath "${GCOV_SOURCE_ROOT}")/"
+            coverage_search_root="${PWD}/${CMAKE_BUILD}"
             gcov_args=(--gcov-use-existing-files)
           fi
           uv run --directory "${GCOV_SOURCE_ROOT:-.}" --project "${PWD}/third-party/lizardbyte-common" \
-            --locked --no-sync gcovr "${PWD}/${CMAKE_BUILD}" -r . "${gcov_args[@]}" --filter src \
+            --locked --no-sync gcovr "${coverage_search_root}" -r . "${gcov_args[@]}" --filter src \
             --exclude-noncode-lines --exclude-throw-branches --exclude-unreachable-branches --lcov "${raw_report}"
         fi
         if [[ -n "${coverage_root}" ]]; then

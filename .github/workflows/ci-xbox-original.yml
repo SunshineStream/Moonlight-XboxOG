@@ -99,6 +99,7 @@ jobs:
             mingw-w64-ucrt-x86_64-nasm
 
       - name: Build
+        id: build
         run: |
           chmod +x build.sh
           coverage=(--coverage)
@@ -130,7 +131,8 @@ jobs:
           codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Set up xemu
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && runner.os == 'Linux' && steps.build.outcome == 'success' }}
+        id: xemu-setup
         env:
           SUNSHINE_XEMU_TAG: v0.8.139
         run: |
@@ -138,7 +140,7 @@ jobs:
           bash scripts/setup-xemu.sh
 
       - name: Run Xbox tests and recover guest coverage
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && steps.xemu-setup.outcome == 'success' }}
         id: guest-coverage
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'

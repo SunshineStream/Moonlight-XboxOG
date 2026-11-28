@@ -108,7 +108,7 @@ void llvm_gcda_emit_function(uint32_t ident, uint32_t function_checksum, uint32_
  * @param count Number of counters for the current function.
  * @param counters Execution counters assigned to the function.
  */
-void llvm_gcda_emit_arcs(uint32_t count, uint64_t *counters) {
+void llvm_gcda_emit_arcs(uint32_t count, const uint64_t *counters) {
   write_word(0x01a10000);  // Arc counter tag.
   write_word(count * 2);
   for (uint32_t index = 0; index < count; ++index) {

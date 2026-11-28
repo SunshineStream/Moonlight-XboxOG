@@ -80,48 +80,59 @@ def write_test_results(transcript, output):
     return status or any(result == b"FAIL" for result, _, _ in cases)
 
 
-def extract_coverage(transcript, object_dir):
-    """Pair complete gcda files from the guest with their build's gcno files."""
-    note_files = list(object_dir.rglob("*.gcno"))
-    notes = {path.with_suffix(".gcda").name: path for path in note_files}
-    if not notes or len(notes) != len(note_files):
-        raise ValueError("Expected uniquely named coverage notes from the instrumented build")
+def read_coverage_streams(transcript):
+    """Decode each complete gcda stream framed by the guest's serial records."""
     data_files = {}
     current = None
     for line in transcript.splitlines():
         tag, _, payload = line.partition(b" ")
         if tag == b"SUNSHINE_GCOV_BEGIN":
             current_name = payload.decode("ascii")
-            if current is not None or current_name not in notes or current_name in data_files:
+            if current is not None or current_name in data_files:
                 raise ValueError(f"Unexpected gcda stream for {current_name}")
             current = bytearray()
         elif tag == b"SUNSHINE_GCOV_DATA" and current is not None:
             current.extend(bytes.fromhex(payload.decode("ascii")))
         elif tag == b"SUNSHINE_GCOV_END" and current is not None:
-            note = notes[current_name]
-            if len(current) < 20 or current[:12] != b"adcg" + note.read_bytes()[4:12] or any(current[-8:]):
-                raise ValueError(f"Invalid or mismatched gcda stream for {note.name}")
             data_files[current_name] = current
             current = None
         elif tag.startswith(b"SUNSHINE_GCOV_"):
             raise ValueError(f"Unexpected coverage record: {line!r}")
-    if current is not None or data_files.keys() != notes.keys():
-        raise ValueError(f"Incomplete guest coverage, missing: {sorted(notes.keys() - data_files.keys())}")
+    if current is not None:
+        raise ValueError(f"Unfinished gcda stream for {current_name}")
+    return data_files
+
+
+def extract_coverage(transcript, object_dir):
+    """Pair complete gcda files from the guest with their build's gcno files."""
+    note_files = list(object_dir.rglob("*.gcno"))
+    notes = {path.with_suffix(".gcda").name: path for path in note_files}
+    if not notes or len(notes) != len(note_files):
+        raise ValueError("Expected uniquely named coverage notes from the instrumented build")
+    data_files = read_coverage_streams(transcript)
+    if data_files.keys() != notes.keys():
+        missing = sorted(notes.keys() - data_files.keys())
+        unexpected = sorted(data_files.keys() - notes.keys())
+        raise ValueError(f"Guest coverage does not match this build. Missing {missing}, unexpected {unexpected}")
+    for name, data in data_files.items():
+        note_header = notes[name].read_bytes()[:12]
+        if len(data) < 20 or data[:12] != b"adcg" + note_header[4:] or any(data[-8:]):
+            raise ValueError(f"Invalid or mismatched gcda stream for {name}")
     for name, data in data_files.items():
         notes[name].with_suffix(".gcda").write_bytes(data)
 
 
-def generate_report(object_dir, output, llvm_cov):
+def generate_report(object_dir, output):
     """Export LCOV and require executed lines in both Xbox timing adapters."""
     report = output / "coverage.info"
     temporary = report.with_suffix(".tmp")
     source_root = Path(__file__).resolve().parents[1]
     subprocess.run(
         [
-            sys.executable, "-m", "gcovr", str(object_dir), "--root", str(source_root),
-            "--gcov-executable", f"{llvm_cov} gcov", "--filter", "src/",
+            sys.executable, "-m", "gcovr", "--root", str(source_root),
+            "--gcov-executable", "llvm-cov gcov", "--filter", "src/",
             "--exclude-noncode-lines", "--exclude-throw-branches", "--exclude-unreachable-branches",
-            "--lcov", str(temporary),
+            "--lcov", str(temporary), "--", str(object_dir),
         ],
         cwd=source_root,
         check=True,
@@ -147,7 +158,6 @@ def main():
     """Collect one guest run from the Xbox child build."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build", type=Path, help="Xbox child build directory containing SunshineTests.iso")
-    parser.add_argument("--llvm-cov", default="llvm-cov", help="llvm-cov matching the nxdk Clang compiler")
     args = parser.parse_args()
     build = args.build.resolve()
     output = build / "xemu-coverage"
@@ -161,7 +171,7 @@ def main():
         transcript = run_xemu(build, output)
         failure = write_test_results(transcript, output)
         extract_coverage(transcript, object_dir)
-        generate_report(object_dir, output, args.llvm_cov)
+        generate_report(object_dir, output)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"{error}. See {output / 'xemu.log'} and {output / 'serial.log'}.\n")
     return failure

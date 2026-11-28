@@ -2,6 +2,9 @@
  * @file tests/xbox/guest/main.cpp
  * @brief Report GoogleTest results and coverage to the host from the Xbox test XBE.
  */
+// standard includes
+#include <memory>
+
 // lib includes
 #include <lizardbyte/common/testing.h>
 #include <synchapi.h>
@@ -30,7 +33,10 @@ namespace {
      */
     void OnTestEnd(const testing::TestInfo &info) override {
       const auto *result = info.result();
-      const char *status = result->Skipped() ? "SKIP" : (result->Passed() ? "PASS" : "FAIL");
+      const char *status = result->Passed() ? "PASS" : "FAIL";
+      if (result->Skipped()) {
+        status = "SKIP";
+      }
       DbgPrint("SUNSHINE_TEST_CASE %s %s %s\r\n", status, info.test_suite_name(), info.name());
     }
   };
@@ -44,7 +50,10 @@ int main() {
   testing::InitGoogleTest();
   auto *tests = testing::UnitTest::GetInstance();
   auto &listeners = tests->listeners();
-  delete listeners.Release(listeners.default_result_printer());
+  std::unique_ptr<testing::TestEventListener> defaultPrinter {
+    listeners.Release(listeners.default_result_printer())
+  };
+  defaultPrinter.reset();
   listeners.Append(new SerialResults);
 
   const int result = RUN_ALL_TESTS();
