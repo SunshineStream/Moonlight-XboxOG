@@ -75,7 +75,7 @@ jobs:
       - name: Install coverage tools
         run: |
           uv sync --project third-party/lizardbyte-common --locked --only-group test-c \
-            --no-python-downloads --no-install-project
+            --no-build --no-python-downloads --no-install-project
 
       - name: Run unit tests
         id: tests

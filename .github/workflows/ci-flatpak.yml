@@ -89,7 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           uv sync --project third-party/lizardbyte-common --locked --only-group test-c \
-            --no-python-downloads --no-install-project
+            --no-build --no-python-downloads --no-install-project
           report="${PWD}/${FLATPAK_BUILD_DIR}/coverage.info"
           module_dir="$(realpath "${FLATPAK_BUILD_DIR}/..")"
           # The sandbox already generated gcov files using its own toolchain.

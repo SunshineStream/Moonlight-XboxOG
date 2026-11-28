@@ -147,7 +147,7 @@ jobs:
         shell: bash
         run: |
           uv sync --project third-party/lizardbyte-common --locked --only-group test-c \
-            --no-python-downloads --no-install-project
+            --no-build --no-python-downloads --no-install-project
 
       - name: Run Xbox tests and recover guest coverage
         shell: bash
