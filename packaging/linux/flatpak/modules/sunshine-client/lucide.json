@@ -7,8 +7,8 @@
       "versioning": "semver"
     },
     "url": "https://github.com/lucide-icons/lucide.git",
-    "tag": "1.82.0",
-    "commit": "9cb3934c3628dfe3fbb34bc4c12209b2cee3a49f",
+    "tag": "1.83.0",
+    "commit": "4bf621064bed45d114ba31435b85760513830d1c",
     "dest": "deps/lucide",
     "x-checker-data": {
       "type": "git",
