@@ -12,11 +12,11 @@
 #include <utility>
 
 // lib includes
+#ifdef NXDK
 extern "C" {
-#include <libswscale/swscale.h>
+  #include <libswscale/swscale.h>
 }
 
-#ifdef NXDK
   #include <hal/video.h>
 #endif
 
@@ -127,7 +127,9 @@ namespace streaming {
   }
 
   void FfmpegVideoPresenter::reset() {
+#ifdef NXDK
     stop_video_presentation();
+#endif
     if (statisticsTexture_ != nullptr) {
       SDL_DestroyTexture(statisticsTexture_);
       statisticsTexture_ = nullptr;
@@ -142,22 +144,30 @@ namespace streaming {
     }
     textureWidth_ = 0;
     textureHeight_ = 0;
+#ifdef NXDK
     sws_freeContext(presentScaleContext_);
     presentScaleContext_ = nullptr;
-    renderFrame_.clear();
     overlayFailed_ = false;
     softwareScanoutFailed_ = false;
+#endif
+    renderFrame_.clear();
   }
 
   void FfmpegVideoPresenter::configure_gpu_presentation(bool enabled, GpuBufferCount bufferCount) {
     gpuPresentationEnabled_ = enabled;
+#ifdef NXDK
     presenter_.set_buffer_count(bufferCount);
+#else
+    (void) bufferCount;
+#endif
   }
 
   std::string FfmpegVideoPresenter::presentation_path() const {
+#ifdef NXDK
     if (presenter_.active()) {
       return "GPU";
     }
+#endif
     return acceleration_.softwareFrames > 0 ? "Software" : "Waiting";
   }
 
@@ -232,6 +242,7 @@ namespace streaming {
     }
   }
 
+#ifdef NXDK
   void FfmpegVideoPresenter::stop_video_presentation() {
     if (!presenter_.reset()) {
       acceleration_.record_fallback("GPU overlay teardown timed out; acceleration disabled");
@@ -241,6 +252,7 @@ namespace streaming {
       logging::warn("stream", "Software scanout retirement timed out; extra framebuffer retained");
     }
   }
+#endif
 
   bool FfmpegVideoPresenter::render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool newFrame) {
     const auto &frame = renderFrame_.view();
@@ -403,8 +415,8 @@ namespace streaming {
     }
   }
 
-  bool FfmpegVideoPresenter::render_latest_video_frame_to_framebuffer(int screenWidth, int screenHeight) {
 #ifdef NXDK
+  bool FfmpegVideoPresenter::render_latest_video_frame_to_framebuffer(int screenWidth, int screenHeight) {
     const VIDEO_MODE videoMode = XVideoGetMode();
     const int bytesPerPixel = xbox_framebuffer_bytes_per_pixel(videoMode.bpp);
     const AVPixelFormat destinationFormat = xbox_framebuffer_pixel_format(videoMode.bpp);
@@ -479,11 +491,7 @@ namespace streaming {
     statisticsOverlay_.draw_rgb(framebuffer, framebufferSize, framebufferPitch, videoMode.width, videoMode.height, videoMode.bpp, videoArea);
     saveIndicatorOverlay_.draw_rgb(framebuffer, framebufferSize, framebufferPitch, videoMode.width, videoMode.height, videoMode.bpp, videoArea);
     return softwareScanout_.present();
-#else
-    (void) screenWidth;
-    (void) screenHeight;
-    return false;
-#endif
   }
+#endif
 
 }  // namespace streaming

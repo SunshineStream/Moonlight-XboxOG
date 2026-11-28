@@ -15,11 +15,15 @@
 
 // local includes
 #include "src/streaming/ffmpeg_video_frame.h"
-#include "src/streaming/pvideo_presenter.h"
-#include "src/streaming/software_scanout.h"
+#include "src/streaming/video_overlay.h"
 #include "src/ui/save_indicator.h"
 
+#ifdef NXDK
+  #include "src/streaming/pvideo_presenter.h"
+  #include "src/streaming/software_scanout.h"
+
 struct SwsContext;
+#endif
 
 namespace streaming {
   /**
@@ -43,7 +47,7 @@ namespace streaming {
     FfmpegVideoPresenter &operator=(const FfmpegVideoPresenter &) = delete;
 
     /**
-     * @brief Select the preferred presentation path and GPU buffer count for the new session.
+     * @brief Record the session's GPU preference and configure the NV2A buffer count on Xbox.
      * @param enabled True to try NV2A with automatic software fallback.
      * @param bufferCount Requested number of YUY2 buffers if NV2A is used.
      */
@@ -145,15 +149,10 @@ namespace streaming {
      */
     bool present(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool newFrame);
 
-    /** @brief Restore CPU framebuffer output and clear session-owned presentation resources. */
+    /** @brief Retire Xbox scanout when present and clear session-owned presentation resources. */
     void reset();
 
   private:
-    /**
-     * @brief Restore CPU framebuffer output before drawing shutdown or summary UI on the render thread.
-     */
-    void stop_video_presentation();
-
     /**
      * @brief Present a frame on the first available output path.
      * @param renderer SDL video renderer.
@@ -163,6 +162,12 @@ namespace streaming {
      * @return True after successful presentation.
      */
     bool render_video_frame(SDL_Renderer *renderer, int screenWidth, int screenHeight, bool newFrame);
+
+#ifdef NXDK
+    /**
+     * @brief Restore Xbox CPU framebuffer output before drawing shutdown or summary UI on the render thread.
+     */
+    void stop_video_presentation();
 
     /**
      * @brief Present the current video and UI through the GPU overlay when available.
@@ -174,6 +179,16 @@ namespace streaming {
      * @return True when GPU presentation is active and the output is up to date.
      */
     bool render_gpu_video_frame(const SDL_Rect &destination, bool newFrame);
+
+    /**
+     * @brief Present the latest decoded frame through Xbox direct framebuffer scanout.
+     *
+     * @param screenWidth Current framebuffer width.
+     * @param screenHeight Current framebuffer height.
+     * @return True when the frame was presented without SDL renderer involvement.
+     */
+    bool render_latest_video_frame_to_framebuffer(int screenWidth, int screenHeight);
+#endif
 
     /**
      * @brief Upload and present the current video and UI through SDL.
@@ -196,23 +211,18 @@ namespace streaming {
      */
     void invalidate_overlay_texture();
 
-    /**
-     * @brief Present the latest decoded frame through a platform-specific direct framebuffer path.
-     *
-     * @param screenWidth Current framebuffer width.
-     * @param screenHeight Current framebuffer height.
-     * @return True when the frame was presented without SDL renderer involvement.
-     */
-    bool render_latest_video_frame_to_framebuffer(int screenWidth, int screenHeight);
-
     VideoAccelerationReport &acceleration_;  ///< Session diagnostics, owned by the backend.
     FfmpegVideoFrame renderFrame_;  ///< Frame retained for redraws and captures.
-    SwsContext *presentScaleContext_ = nullptr;  ///< Software framebuffer conversion context.
     SDL_Texture *texture_ = nullptr;  ///< SDL fallback video texture.
     int textureWidth_ = 0;  ///< Width of the uploaded SDL video texture.
     int textureHeight_ = 0;  ///< Height of the uploaded SDL video texture.
-    PvideoPresenter presenter_;  ///< Native GPU scanout.
-    SoftwareScanout softwareScanout_;  ///< Native direct framebuffer scanout.
+#ifdef NXDK
+    SwsContext *presentScaleContext_ = nullptr;  ///< Xbox software framebuffer conversion context.
+    PvideoPresenter presenter_;  ///< Xbox GPU scanout.
+    SoftwareScanout softwareScanout_;  ///< Xbox direct framebuffer scanout.
+    bool overlayFailed_ = false;  ///< Avoid retrying a failed GPU path in the same session.
+    bool softwareScanoutFailed_ = false;  ///< Retain the SDL fallback after native software scanout fails.
+#endif
     VideoOverlay statisticsOverlay_;  ///< Shared cached panel for all presentation paths.
     VideoOverlay saveIndicatorOverlay_;  ///< Independent corner overlay drawn above stream controls.
     ui::SaveIndicator saveIndicator_;  ///< Cached logo artwork for the save overlay.
@@ -222,7 +232,5 @@ namespace streaming {
     bool statisticsTextureChanged_ = false;  ///< SDL texture requires the current bitmap.
     VideoRectangle statisticsTextureDamage_ {};  ///< Pending SDL texture upload.
     bool gpuPresentationEnabled_ = false;  ///< GPU preference for the session.
-    bool overlayFailed_ = false;  ///< Avoid retrying a failed GPU path in the same session.
-    bool softwareScanoutFailed_ = false;  ///< Retain the SDL fallback after native software scanout fails.
   };
 }  // namespace streaming

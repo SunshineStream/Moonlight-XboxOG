@@ -4,9 +4,10 @@
  */
 #pragma once
 
-// local includes
-#include "src/streaming/video_acceleration.h"
-#include "src/streaming/video_overlay.h"
+#ifdef NXDK
+  // local includes
+  #include "src/streaming/video_acceleration.h"
+  #include "src/streaming/video_overlay.h"
 
 namespace streaming {
   /**
@@ -20,7 +21,7 @@ namespace streaming {
   };
 
   /**
-   * @brief Main-thread-only NV2A YUV overlay presenter with a configurable spare buffer.
+   * @brief Main-thread-only Xbox NV2A YUV overlay presenter with a configurable spare buffer.
    *
    * Supports progressive limited-range BT.601/BT.709 YUV420 with a compatible
    * 16-bit or 32-bit output mode. Callers select software presentation when present()
@@ -52,8 +53,8 @@ namespace streaming {
      * @param destination Letterboxed output rectangle.
      * @param error Receives the reason acceleration could not be used.
      * @param sampling Optional crop used by the standalone prediction experiment.
-     * @param overlay Optional cached UI or statistics, composited using the frame's color matrix before GPU scanout.
-     * @param saveIndicator Optional save icon composited on top of the cached UI.
+     * @param overlay Optional UI or statistics whose YUY2 cache is refreshed as needed before compositing.
+     * @param saveIndicator Optional save icon whose YUY2 cache is refreshed as needed before compositing over the UI.
      *
      * @return True after the first overlay frame has latched or a subsequent frame has been submitted.
      */
@@ -93,7 +94,6 @@ namespace streaming {
      */
     bool initialize_scanout_surface(std::string *error);
 
-#ifdef NXDK
     /**
      * @brief Replace the scanout surface and allocate the required buffers plus a spare when requested.
      *
@@ -129,7 +129,6 @@ namespace streaming {
      * @return True if the submission succeeded or false if the first latch timed out.
      */
     bool submit_overlay();
-#endif
 
     std::array<std::uint8_t *, 3> buffers_ {};  ///< Two contiguous write-combined YUY2 buffers and an optional spare.
     GpuBufferCount requestedBufferCount_ = GpuBufferCount::automatic;  ///< Preference used when configuring the DMA buffers.
@@ -145,3 +144,4 @@ namespace streaming {
     bool surfaceActive_ = false;  ///< pbkit owns the GPU context and vblank counter for the scanout surface.
   };
 }  // namespace streaming
+#endif

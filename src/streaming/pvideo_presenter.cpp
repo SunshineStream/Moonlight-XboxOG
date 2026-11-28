@@ -131,7 +131,6 @@ namespace {
     return static_cast<std::uint32_t>((static_cast<std::uint64_t>(source - 1) << 20U) / static_cast<unsigned int>(destination - 1));
   }
 }  // namespace
-#endif
 
 namespace streaming {
   PvideoPresenter::~PvideoPresenter() {
@@ -154,7 +153,6 @@ namespace streaming {
   }
 
   bool PvideoPresenter::initialize_scanout_surface(std::string *error) {
-#ifdef NXDK
     const VIDEO_MODE mode = XVideoGetMode();
     const auto *framebuffer = XVideoGetFB();
     const int pitch = mode.width * (mode.bpp / 8);
@@ -191,15 +189,10 @@ namespace streaming {
       return false;
     }
     return true;
-#else
-    *error = "GPU scanout is unavailable on this platform";
-    return false;
-#endif
   }
 
   bool PvideoPresenter::reset() {
     bool synchronized = true;
-#ifdef NXDK
     if (active_) {
       VIDEOREG(VIDEO_STOP) = 1;
       VIDEOREG(VIDEO_BUFFER) = 0;
@@ -242,7 +235,6 @@ namespace streaming {
       XVideoSetVideoEnable(true);
       scanoutStateSaved_ = false;
     }
-#endif
     active_ = false;
     bufferSize_ = 0;
     bufferReuseVblank_ = 0;
@@ -250,7 +242,6 @@ namespace streaming {
     return synchronized;
   }
 
-#ifdef NXDK
   void PvideoPresenter::configure_overlay_buffers(std::size_t required, int pitch, std::string &failure) {
     if (!reset()) {
       failure = "GPU overlay teardown timed out";
@@ -366,7 +357,6 @@ namespace streaming {
     }
     return true;
   }
-#endif
 
   bool PvideoPresenter::present(const Yuv420FrameView &frame, const VideoRectangle &destination, std::string *error, const OverlaySamplingRegion &sampling, VideoOverlay *overlay, VideoOverlay *saveIndicator) {
     std::string failure = overlay_frame_error(frame);
@@ -379,7 +369,6 @@ namespace streaming {
     if (failure.empty() && (source.width < 2 || source.height < 2 || sampling.xHalfPel < 0 || sampling.yHalfPel < 0 || static_cast<std::int64_t>(sampling.xHalfPel) + 2LL * (source.width - 1) + (sampling.xHalfPel & 1) > 2LL * (frame.width - 1) || static_cast<std::int64_t>(sampling.yHalfPel) + 2LL * (source.height - 1) + (sampling.yHalfPel & 1) > 2LL * (frame.height - 1))) {
       failure = "Source sampling region exceeds the GPU input buffer";
     }
-#ifdef NXDK
     if (failure.empty() && overlay_quarantine().disabled) {
       failure = "GPU overlay disabled after a scanout timeout";
     }
@@ -401,13 +390,6 @@ namespace streaming {
       }
       failure = "Timed out waiting for the first GPU frame; using software presentation";
     }
-#else
-    (void) overlay;
-    (void) saveIndicator;
-    if (failure.empty()) {
-      failure = "GPU overlay is unavailable on this platform";
-    }
-#endif
     reset();
     if (error != nullptr) {
       *error = failure;
@@ -415,3 +397,4 @@ namespace streaming {
     return false;
   }
 }  // namespace streaming
+#endif

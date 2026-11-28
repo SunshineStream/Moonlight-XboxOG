@@ -5,9 +5,6 @@
 // class header include
 #include "src/streaming/software_scanout.h"
 
-// local includes
-#include "src/_nxdk_compat/ffmpeg_memory.h"
-
 #ifdef NXDK
   // standard includes
   #include <cstring>
@@ -17,6 +14,9 @@
   #include <synchapi.h>
   #include <sysinfoapi.h>
   #include <xboxkrnl/xboxkrnl.h>
+
+  // local includes
+  #include "src/_nxdk_compat/ffmpeg_memory.h"
 
 namespace {
   constexpr std::uint32_t CRTC_START = 0x600800;  ///< Physical address of the primary scanout page.
@@ -47,7 +47,6 @@ namespace {
     VIDEOREG(CRTC_START) = static_cast<std::uint32_t>(MmGetPhysicalAddress(page));
   }
 }  // namespace
-#endif
 
 namespace streaming {
   void SoftwareScanout::StagingBufferDeleter::operator()(std::byte *buffer) const noexcept {
@@ -59,7 +58,6 @@ namespace streaming {
   }
 
   std::uint8_t *SoftwareScanout::back_buffer(std::size_t size, const VideoRectangle &destination) {
-#ifdef NXDK
     if (!synchronized_) {
       return nullptr;
     }
@@ -91,15 +89,9 @@ namespace streaming {
       previous = destination;
     }
     return pages_[back];
-#else
-    (void) size;
-    (void) destination;
-    return nullptr;
-#endif
   }
 
   bool SoftwareScanout::present() {
-#ifdef NXDK
     if (pages_[1] == nullptr || !synchronized_) {
       return false;
     }
@@ -118,13 +110,9 @@ namespace streaming {
     // keep reading the previous page until the first vblank after this write.
     synchronized_ = wait_for_vblank();
     return synchronized_;
-#else
-    return false;
-#endif
   }
 
   bool SoftwareScanout::reset() {
-#ifdef NXDK
     if (pages_[1] == nullptr) {
       return true;
     }
@@ -147,8 +135,6 @@ namespace streaming {
     front_ = 0;
     synchronized_ = true;
     return retired;
-#else
-    return true;
-#endif
   }
 }  // namespace streaming
+#endif
