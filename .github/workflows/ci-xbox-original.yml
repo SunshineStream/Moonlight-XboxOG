@@ -136,7 +136,7 @@ jobs:
         env:
           SUNSHINE_XEMU_TAG: v0.8.139
         run: |
-          sudo apt-get install --no-install-recommends -y libgl1-mesa-dri libglx-mesa0 xauth xvfb
+          sudo apt-get install --no-install-recommends -y libgl1-mesa-dri libglx-mesa0 libusb-1.0-0 xauth xvfb
           bash scripts/setup-xemu.sh
 
       - name: Run Xbox tests and recover guest coverage
@@ -146,6 +146,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
           SDL_AUDIO_DRIVER: dummy
+          SDL_VIDEO_DRIVER: x11
         run: |
           xvfb-run -a -s '-screen 0 1024x768x24' \
             uv run --project third-party/lizardbyte-common --locked --no-sync \
